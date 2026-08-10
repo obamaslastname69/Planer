@@ -193,6 +193,8 @@ function gcClearToken() {
     }
     catch (e) { }
 }
+/* Gibt es gerade ein gültiges Token? Prüft ohne Anmeldefenster zu öffnen. */
+const gcHasToken = () => !!gcToken && Date.now() < gcExpiry - 120000;
 /* silent = true versucht die Verlängerung ohne sichtbares Fenster */
 function gcAuth(silent) {
     return new Promise((resolve, reject) => {
@@ -624,11 +626,32 @@ function PlannerApp() {
         }
     }, [weekStart]);
     useEffect(() => {
-        setExternal([]);
-        setSync({ status: "idle", msg: "" });
         const keys = Array.from({ length: 7 }, (_, i) => dayKey(addDays(weekStart, i)));
         setSelectedDay((cur) => (keys.includes(cur) ? cur : keys.includes(todayKey) ? todayKey : keys[0]));
     }, [weekStart, todayKey]);
+    /* Kalender selbsttätig laden, solange die Anmeldung gilt.
+       Ohne gültiges Token passiert nichts - sonst ginge beim Start ein Fenster auf. */
+    useEffect(() => {
+        if (!loaded || !gcConfigured())
+            return;
+        if (!gcHasToken()) {
+            setExternal([]);
+            return;
+        }
+        let abgebrochen = false;
+        setSync({ status: "loading", msg: "Kalender wird gelesen…" });
+        loadCalendar(weekStart)
+            .then((evs) => {
+            if (abgebrochen)
+                return;
+            setExternal(evs);
+            setSync({ status: "ok", msg: evs.length ? `${evs.length} Termine` : "keine Termine" });
+            cloudRef.current.armed = true;
+        })
+            .catch(() => { if (!abgebrochen)
+            setSync({ status: "idle", msg: "" }); });
+        return () => { abgebrochen = true; };
+    }, [loaded, weekStart]);
     /* Vorlage: automatische Einträge einmal pro Woche anlegen */
     useEffect(() => {
         var _a;
@@ -1072,6 +1095,13 @@ function PlannerApp() {
             setCloud({ state: "error", msg: e.message });
         }
     }, [state, persistLocal]);
+    /* Beim Start einmal die Geräte abgleichen, wenn die Anmeldung noch gilt */
+    useEffect(() => {
+        if (!loaded || !gcConfigured() || !gcHasToken())
+            return;
+        syncCloud(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [loaded]);
     /* Einplanen: direkt ins Wochenraster, Sheet bleibt als Alternative */
     const startPlacing = (item) => {
         if (!item) {
