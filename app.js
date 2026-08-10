@@ -150,7 +150,7 @@ function weekHits(routine, checks, weekStartDate) {
    Client-ID unten eintragen — Anleitung in SETUP.md.
    Ohne ID läuft alles außer der Kalenderanbindung.
 ──────────────────────────────────────────────────────────── */
-const GOOGLE_CLIENT_ID = "";
+const GOOGLE_CLIENT_ID = "746363255529-a67p9oi92lhi73q5e4u4abkucbcj8lcu.apps.googleusercontent.com";
 const GC_SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.appdata";
 const GC_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 let gcToken = null, gcExpiry = 0;
