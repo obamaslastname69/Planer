@@ -6,7 +6,7 @@
 const CACHE = 'planer-v2';
 
 const CORE = [
-  './', './index.html', './style.css', './app.js', './manifest.json', './icon.svg',
+  './', './index.html', './style.css', './app.js', './config.js', './manifest.json', './icon.svg',
   'https://unpkg.com/react@18.3.1/umd/react.production.min.js',
   'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js',
 ];
