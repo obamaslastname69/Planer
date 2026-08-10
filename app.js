@@ -160,24 +160,56 @@ function weekHits(routine, checks, weekStartDate) {
 const GOOGLE_CLIENT_ID = (typeof window !== "undefined" && window.PLANER_CLIENT_ID) || "";
 const GC_SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.appdata";
 const GC_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+const GC_TOKEN_KEY = "planer:gctoken";
 let gcToken = null, gcExpiry = 0;
 const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
-function gcAuth() {
+/* Anmeldung überdauert das Neuladen: Token bis zum Ablauf merken */
+(function restoreToken() {
+    try {
+        const raw = localStorage.getItem(GC_TOKEN_KEY);
+        if (!raw)
+            return;
+        const t = JSON.parse(raw);
+        if (t && t.token && t.expiry > Date.now() + 120000) {
+            gcToken = t.token;
+            gcExpiry = t.expiry;
+        }
+    }
+    catch (e) { /* kaputter Eintrag wird einfach ignoriert */ }
+})();
+function gcStoreToken(token, expiresIn) {
+    gcToken = token;
+    gcExpiry = Date.now() + (expiresIn || 3600) * 1000;
+    try {
+        localStorage.setItem(GC_TOKEN_KEY, JSON.stringify({ token: gcToken, expiry: gcExpiry }));
+    }
+    catch (e) { /* Speicher voll oder gesperrt */ }
+}
+function gcClearToken() {
+    gcToken = null;
+    gcExpiry = 0;
+    try {
+        localStorage.removeItem(GC_TOKEN_KEY);
+    }
+    catch (e) { }
+}
+/* silent = true versucht die Verlängerung ohne sichtbares Fenster */
+function gcAuth(silent) {
     return new Promise((resolve, reject) => {
         if (!gcConfigured())
             return reject(new Error("keine Client-ID hinterlegt"));
-        if (gcToken && Date.now() < gcExpiry - 60000)
+        if (gcToken && Date.now() < gcExpiry - 120000)
             return resolve(gcToken);
         if (!(window.google && window.google.accounts && window.google.accounts.oauth2))
             return reject(new Error("Google-Bibliothek nicht geladen"));
         const client = window.google.accounts.oauth2.initTokenClient({
             client_id: GOOGLE_CLIENT_ID,
             scope: GC_SCOPE,
+            prompt: "",
             callback: (res) => {
                 if (res.error)
                     return reject(new Error(res.error));
-                gcToken = res.access_token;
-                gcExpiry = Date.now() + (res.expires_in || 3600) * 1000;
+                gcStoreToken(res.access_token, res.expires_in);
                 resolve(gcToken);
             },
             error_callback: (e) => reject(new Error((e && e.type) || "Anmeldung abgebrochen")),
@@ -185,18 +217,22 @@ function gcAuth() {
         client.requestAccessToken();
     });
 }
-async function gcFetch(url, opts) {
+async function gcFetch(url, opts, retried) {
     const o = opts || {};
     const token = await gcAuth();
     const res = await fetch(url, Object.assign({}, o, {
         headers: Object.assign({ Authorization: "Bearer " + token, "Content-Type": "application/json" }, o.headers || {}),
     }));
     if (res.status === 401) {
-        gcToken = null;
+        gcClearToken();
+        if (!retried)
+            return gcFetch(url, o, true);
         throw new Error("Anmeldung abgelaufen");
     }
+    if (res.status === 403)
+        throw new Error("Zugriff verweigert (403) — Drive-API aktiviert?");
     if (!res.ok)
-        throw new Error("Kalender " + res.status);
+        throw new Error("Google " + res.status);
     return res.json();
 }
 async function loadCalendar(weekStart) {
@@ -208,26 +244,52 @@ async function loadCalendar(weekStart) {
         singleEvents: "true", orderBy: "startTime", maxResults: "250",
     });
     const data = await gcFetch(GC_API + "?" + q);
-    return (data.items || []).map((ev) => {
-        const allDay = !!(ev.start && ev.start.date);
-        const s = new Date((ev.start && (ev.start.dateTime || ev.start.date + "T00:00:00")) || "");
-        const e = new Date((ev.end && (ev.end.dateTime || ev.end.date + "T00:00:00")) || "");
-        if (isNaN(s))
-            return null;
-        let dur = Math.round((e - s) / 60000);
-        if (!dur || dur < 15)
-            dur = 60;
-        return {
-            id: "gc-" + (ev.id || uid()),
-            title: ev.summary || "Termin",
-            cat: "extern",
-            color: GC_COLORS[ev.colorId] || null,
-            day: dayKey(s),
-            start: allDay ? DAY_START * 60 : s.getHours() * 60 + s.getMinutes(),
-            dur: allDay ? 60 : Math.min(dur, (DAY_END - DAY_START) * 60),
-            allDay: allDay, external: true,
-        };
-    }).filter(Boolean);
+    const out = [];
+    for (const ev of data.items || []) {
+        const color = GC_COLORS[ev.colorId] || null;
+        const title = ev.summary || "Termin";
+        const base = { title: title, cat: "extern", color: color, external: true };
+        /* Ganztägig: end.date ist der Tag NACH dem letzten Tag */
+        if (ev.start && ev.start.date) {
+            let d = new Date(ev.start.date + "T00:00:00");
+            const last = new Date(((ev.end && ev.end.date) || ev.start.date) + "T00:00:00");
+            let guard = 0;
+            while (d < last && guard++ < 60) {
+                out.push({ ...base, id: "gc-" + (ev.id || uid()) + "-" + dayKey(d), day: dayKey(d), allDay: true, start: 0, dur: 0 });
+                d = addDays(d, 1);
+            }
+            if (guard === 0)
+                out.push({ ...base, id: "gc-" + (ev.id || uid()), day: dayKey(d), allDay: true, start: 0, dur: 0 });
+            continue;
+        }
+        /* Mit Uhrzeit: über Mitternacht hinweg in Tagesstücke schneiden */
+        const s0 = new Date(ev.start && ev.start.dateTime);
+        const e0 = new Date(ev.end && ev.end.dateTime);
+        if (isNaN(s0))
+            continue;
+        const end = isNaN(e0) || e0 <= s0 ? new Date(s0.getTime() + 3600000) : e0;
+        let cur = new Date(s0);
+        let guard = 0;
+        while (cur < end && guard++ < 30) {
+            const midnight = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+            const segEnd = end < midnight ? end : midnight;
+            const dayBase = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate());
+            const startMin = Math.max(DAY_START * 60, Math.round((cur - dayBase) / 60000));
+            const endMin = Math.min(DAY_END * 60, Math.round((segEnd - dayBase) / 60000));
+            if (endMin > startMin) {
+                out.push({
+                    ...base,
+                    id: "gc-" + (ev.id || uid()) + "-" + dayKey(cur),
+                    day: dayKey(cur), start: startMin, dur: endMin - startMin,
+                    allDay: false,
+                    cont: cur > s0, // läuft von gestern herein
+                    goesOn: segEnd < end, // läuft morgen weiter
+                });
+            }
+            cur = midnight;
+        }
+    }
+    return out;
 }
 async function pushToCalendar(block) {
     const date = new Date(block.day + "T00:00:00");
@@ -1251,7 +1313,7 @@ function PlannerApp() {
                 React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest mb-1" }, "geschafft"),
                 React.createElement("div", { className: "text-4xl font-semibold", style: { color: celebration.color } }, celebration.title),
                 React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
-        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onDelete: () => { removeBlock(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
+        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onDelete: () => { removeBlock(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
         editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor({ ...editor, ...patch }); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
 }
 /* ════════════════ Raster ════════════════ */
@@ -1271,6 +1333,8 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
         const snapped = Math.round(raw / SLOT) * SLOT;
         onSlot(day, Math.max(DAY_START * 60, Math.min(DAY_END * 60 - 30, snapped)));
     };
+    /* Ganztägige Termine gehören nicht ins Zeitraster */
+    const allDayRows = Math.max(0, ...visibleDays.map((d) => blocksFor(dayKey(d)).filter((b) => b.allDay).length));
     return (React.createElement("div", null,
         n > 1 && (React.createElement("div", { className: "grid border-b pl-hair", style: { gridTemplateColumns: tpl } },
             React.createElement("div", null),
@@ -1281,12 +1345,25 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                     React.createElement("div", { className: "mono text-xs pl-muted" }, DAY_NAMES[(d.getDay() + 6) % 7]),
                     React.createElement("div", { className: "mono text-sm font-medium", style: { color: isToday ? "#2B4B8F" : "var(--ink)" } }, d.getDate())));
             }))),
+        allDayRows > 0 && (React.createElement("div", { className: "grid border-b pl-hair", style: { gridTemplateColumns: tpl } },
+            React.createElement("div", { className: "mono text-xs pl-muted flex items-center justify-end pr-1", style: { fontSize: compact ? 8 : 10 } }, "ganztags"),
+            visibleDays.map((d) => {
+                const k = dayKey(d);
+                const items = blocksFor(k).filter((b) => b.allDay);
+                return (React.createElement("div", { key: k, className: "border-l pl-hair p-0.5 flex flex-col gap-0.5", style: { minHeight: allDayRows * 17 + 4 } }, items.map((b) => {
+                    const c = blockColor(b);
+                    return (React.createElement("button", { key: b.id, onClick: () => onBlock(b), className: "pl-block pl-ext rounded-sm text-left truncate", style: {
+                            background: hexA(c, 0.16), borderLeft: `2px solid ${c}`,
+                            padding: "1px 3px", fontSize: compact ? 9 : 10, lineHeight: "13px", color: c,
+                        } }, b.title));
+                })));
+            }))),
         React.createElement("div", { ref: gridRef, className: "pl-scroll overflow-y-auto", style: { maxHeight: maxH } },
             React.createElement("div", { className: "grid", style: { gridTemplateColumns: tpl } },
                 React.createElement(HourRail, { hours: hours, ppm: ppm, every: labelEvery, compact: compact }),
                 visibleDays.map((d) => {
                     const k = dayKey(d);
-                    const blocks = blocksFor(k);
+                    const blocks = blocksFor(k).filter((b) => !b.allDay);
                     return (React.createElement("div", { key: k, className: "relative border-l pl-hair", style: { height } },
                         React.createElement("div", { className: "pl-slot absolute inset-0 cursor-copy", onClick: (e) => handleClick(e, k) }),
                         hours.map((h) => (React.createElement("div", { key: h, className: "absolute left-0 right-0 border-t pl-hair pointer-events-none", style: { top: (h - DAY_START) * 60 * ppm } }))),
@@ -1309,7 +1386,10 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                                         lineHeight: compact ? "11px" : h >= 24 ? "14px" : "12px",
                                         color: c,
                                         textDecoration: b.status === "skipped" ? "line-through" : "none",
-                                    } }, b.title || "—")))));
+                                    } },
+                                    b.cont ? "▸ " : "",
+                                    b.title || "—",
+                                    b.goesOn ? " ▸" : "")))));
                         }),
                         k === todayKey && showNow && (React.createElement("div", { className: "absolute left-0 right-0 pointer-events-none z-10", style: { top: (nowMin - DAY_START * 60) * ppm } },
                             React.createElement("div", { style: { height: 1.5, background: "#C2410C" } })))));
@@ -2098,7 +2178,7 @@ function relTime(block, now) {
         return { label: `vor ${durLabel(m)} vorbei`, past: true };
     return { label: `vor ${Math.round(m / 60 / 24)} Tagen`, past: true };
 }
-function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete, onSync, syncing }) {
+function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete, onSync, onSave, syncing }) {
     var _a, _b, _c;
     const [confirmDel, setConfirmDel] = useState(false);
     const c = blockColor(block);
@@ -2120,18 +2200,27 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                         React.createElement("h2", { className: "text-2xl font-semibold leading-tight mt-0.5 break-words" }, block.title || "Ohne Titel")),
                     React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schlie\u00DFen" },
                         React.createElement(X, { size: 20 }))),
-                React.createElement("div", { className: "mono text-3xl font-medium mt-3", style: { color: c } },
-                    minsToLabel(block.start),
-                    React.createElement("span", { className: "pl-muted" }, " \u2013 "),
-                    minsToLabel(block.start + block.dur)),
-                React.createElement("div", { className: "mono text-xs pl-muted mt-1" },
+                block.external ? (React.createElement("div", { className: "mono text-3xl font-medium mt-3", style: { color: c } }, block.allDay ? "ganztägig"
+                    : React.createElement(React.Fragment, null,
+                        minsToLabel(block.start),
+                        React.createElement("span", { className: "pl-muted" }, " \u2013 "),
+                        minsToLabel(block.start + block.dur)))) : (React.createElement("div", { className: "mt-3 flex flex-wrap items-end gap-3" },
+                    React.createElement("div", null,
+                        React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Beginn"),
+                        React.createElement(TimeField, { value: block.start, onChange: (v) => onSave({ start: v }), color: c })),
+                    React.createElement("div", null,
+                        React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Dauer"),
+                        React.createElement("div", { className: "flex items-center" },
+                            React.createElement("button", { onClick: () => onSave({ dur: Math.max(15, block.dur - SLOT) }), className: "pl-btn px-2.5 py-2 rounded-l", "aria-label": "k\u00FCrzer" }, "\u2212"),
+                            React.createElement("span", { className: "mono text-lg border-t border-b flex items-center justify-center", style: { width: 76, padding: "6px 0", background: "var(--card)", borderColor: "var(--line)" } }, durLabel(block.dur)),
+                            React.createElement("button", { onClick: () => onSave({ dur: Math.min(8 * 60, block.dur + SLOT) }), className: "pl-btn px-2.5 py-2 rounded-r", "aria-label": "l\u00E4nger" }, "+"))))),
+                React.createElement("div", { className: "mono text-xs pl-muted mt-2" },
                     DAY_NAMES[(d.getDay() + 6) % 7],
                     ", ",
                     d.getDate(),
                     ". ",
                     MONTHS[d.getMonth()],
-                    " \u00B7 ",
-                    durLabel(block.dur)),
+                    block.external || block.allDay ? "" : " · endet " + minsToLabel(block.start + block.dur)),
                 React.createElement("div", { className: "mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mono text-xs", style: {
                         background: rel.live ? c : "var(--card)",
                         color: rel.live ? "#FFF" : "var(--muted)",
@@ -2155,7 +2244,7 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                     React.createElement("div", { className: "flex items-center gap-2 pt-1" },
                         React.createElement("button", { onClick: onEdit, className: "flex-1 px-3 py-2.5 rounded mono text-xs", style: block.title
                                 ? { background: "var(--ink)", color: "var(--paper)" }
-                                : { background: c, color: "#FFF" } }, block.title ? "Bearbeiten" : "Titel eintragen"),
+                                : { background: c, color: "#FFF" } }, block.title ? "Titel & Kategorie" : "Titel eintragen"),
                         React.createElement("button", { onClick: onSync, disabled: syncing || block.synced, className: "pl-btn px-3 py-2.5 rounded flex items-center gap-1.5 mono text-xs", style: block.synced ? { color: "#1E6E5A", borderColor: "#1E6E5A" } : {} },
                             React.createElement(UploadCloud, { size: 13 }),
                             block.synced ? "gesichert" : "Kalender"),
