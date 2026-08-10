@@ -95,6 +95,12 @@ function localISO(dateObj, minutes) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
+/* Farbe eines Blocks: eigene Kategorie oder die Farbe aus Google */
+function blockColor(b) {
+    if (b.external)
+        return b.color || "#6F7A72";
+    return (CATS[b.cat] && CATS[b.cat].color) || "#6F7A72";
+}
 /* ── Haptik & Serien ───────────────────────────────────────── */
 const buzz = (ms = 12) => {
     var _a;
@@ -150,7 +156,8 @@ function weekHits(routine, checks, weekStartDate) {
    Client-ID unten eintragen — Anleitung in SETUP.md.
    Ohne ID läuft alles außer der Kalenderanbindung.
 ──────────────────────────────────────────────────────────── */
-const GOOGLE_CLIENT_ID = "";
+/* Wird aus config.js gelesen, damit Updates sie nicht überschreiben */
+const GOOGLE_CLIENT_ID = (typeof window !== "undefined" && window.PLANER_CLIENT_ID) || "";
 const GC_SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.appdata";
 const GC_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 let gcToken = null, gcExpiry = 0;
@@ -214,6 +221,7 @@ async function loadCalendar(weekStart) {
             id: "gc-" + (ev.id || uid()),
             title: ev.summary || "Termin",
             cat: "extern",
+            color: GC_COLORS[ev.colorId] || null,
             day: dayKey(s),
             start: allDay ? DAY_START * 60 : s.getHours() * 60 + s.getMinutes(),
             dur: allDay ? 60 : Math.min(dur, (DAY_END - DAY_START) * 60),
@@ -242,6 +250,12 @@ async function pushToCalendar(block) {
 /* ── Abgleich über Google Drive ────────────────────────────
    Speichert im versteckten appDataFolder: nur diese App sieht ihn.
 ──────────────────────────────────────────────────────────── */
+/* Farbpalette der Google-Termine (colorId 1-11) */
+const GC_COLORS = {
+    "1": "#7986CB", "2": "#33B679", "3": "#8E24AA", "4": "#E67C73",
+    "5": "#F6BF26", "6": "#F4511E", "7": "#039BE5", "8": "#616161",
+    "9": "#3F51B5", "10": "#0B8043", "11": "#D50000",
+};
 const DRIVE_FILE = "planer-daten.json";
 const DRIVE_API = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
@@ -1277,8 +1291,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                         React.createElement("div", { className: "pl-slot absolute inset-0 cursor-copy", onClick: (e) => handleClick(e, k) }),
                         hours.map((h) => (React.createElement("div", { key: h, className: "absolute left-0 right-0 border-t pl-hair pointer-events-none", style: { top: (h - DAY_START) * 60 * ppm } }))),
                         blocks.map((b) => {
-                            var _a;
-                            const c = b.external ? "#6F7A72" : ((_a = CATS[b.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+                            const c = blockColor(b);
                             const fill = b.status === "done" ? 0.3 : b.status === "skipped" ? 0.06 : b.status === "moved" ? 0.1 : 0.16;
                             const h = Math.max(b.dur * ppm - 2, 11);
                             const roomy = !compact && h >= 34;
@@ -1286,7 +1299,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                             return (React.createElement("button", { key: b.id, onClick: (e) => { e.stopPropagation(); onBlock(b); }, className: `pl-block absolute ${b.external ? "pl-ext cursor-default" : ""}`, style: {
                                     top: (b.start - DAY_START * 60) * ppm,
                                     height: h, left: 2, right: 2,
-                                    background: b.external ? "#DFE2DC" : hexA(c, fill),
+                                    background: hexA(c, b.external ? 0.1 : fill),
                                     borderLeft: `${compact ? 2 : 3}px ${b.status === "skipped" ? "dashed" : "solid"} ${c}`,
                                     opacity: b.status === "skipped" ? 0.55 : 1,
                                 } }, showText && (React.createElement("div", { className: "leading-tight text-left", style: { paddingLeft: 3, paddingRight: 2, paddingTop: roomy ? 2 : 0 } },
@@ -1294,7 +1307,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                                 React.createElement("div", { className: "font-medium truncate", style: {
                                         fontSize: compact ? 9.5 : h >= 24 ? 12 : 10,
                                         lineHeight: compact ? "11px" : h >= 24 ? "14px" : "12px",
-                                        color: b.external ? "#3D453F" : c,
+                                        color: c,
                                         textDecoration: b.status === "skipped" ? "line-through" : "none",
                                     } }, b.title || "—")))));
                         }),
@@ -1377,8 +1390,7 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
         React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Als Liste"),
             blocks.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-3" }, "Nichts eingetragen. \u00DCber \u201ETermin\" oder die Wochenansicht f\u00FCllst du den Tag.")) : (React.createElement("div", { className: "flex flex-col" }, blocks.map((b) => {
-                var _a;
-                const c = b.external ? "#6F7A72" : ((_a = CATS[b.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+                const c = blockColor(b);
                 const past = isToday && b.start + b.dur <= nowMin;
                 const isRunning = running && running.id === b.id;
                 return (React.createElement("button", { key: b.id, onClick: () => !b.external && onBlock(b), className: "flex items-center gap-3 py-2 border-b pl-hair text-left", style: { opacity: b.status === "skipped" ? 0.5 : past && !isRunning ? 0.75 : 1 } },
@@ -2087,9 +2099,9 @@ function relTime(block, now) {
     return { label: `vor ${Math.round(m / 60 / 24)} Tagen`, past: true };
 }
 function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete, onSync, syncing }) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c;
     const [confirmDel, setConfirmDel] = useState(false);
-    const c = block.external ? "#6F7A72" : ((_a = CATS[block.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+    const c = blockColor(block);
     const d = new Date(block.day + "T00:00:00");
     const rel = relTime(block, now);
     const project = projects.find((p) => p.id === block.projectId);
@@ -2104,7 +2116,7 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
             React.createElement("div", { style: { background: hexA(c, 0.14), borderBottom: `2px solid ${c}` }, className: "px-5 pt-4 pb-4" },
                 React.createElement("div", { className: "flex items-start justify-between gap-3" },
                     React.createElement("div", { className: "min-w-0" },
-                        React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, block.external ? "aus Google Kalender" : (_b = CATS[block.cat]) === null || _b === void 0 ? void 0 : _b.label),
+                        React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, block.external ? "aus Google Kalender" : (_a = CATS[block.cat]) === null || _a === void 0 ? void 0 : _a.label),
                         React.createElement("h2", { className: "text-2xl font-semibold leading-tight mt-0.5 break-words" }, block.title || "Ohne Titel")),
                     React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schlie\u00DFen" },
                         React.createElement(X, { size: 20 }))),
@@ -2129,7 +2141,7 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                     rel.label)),
             React.createElement("div", { className: "p-5 flex flex-col gap-4" },
                 (project || block.tplId || block.synced || block.external) && (React.createElement("div", { className: "flex flex-wrap gap-1.5" },
-                    project && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs", style: { border: `1px solid ${(_c = CATS[project.cat]) === null || _c === void 0 ? void 0 : _c.color}`, color: (_d = CATS[project.cat]) === null || _d === void 0 ? void 0 : _d.color } }, project.title)),
+                    project && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs", style: { border: `1px solid ${(_b = CATS[project.cat]) === null || _b === void 0 ? void 0 : _b.color}`, color: (_c = CATS[project.cat]) === null || _c === void 0 ? void 0 : _c.color } }, project.title)),
                     block.tplId && (React.createElement("span", { className: "pl-btn px-2 py-1 rounded mono text-xs flex items-center gap-1" },
                         React.createElement(Repeat, { size: 11 }),
                         " jede Woche")),
