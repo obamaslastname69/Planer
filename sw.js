@@ -1,5 +1,5 @@
 /* Service Worker: App offline verfügbar halten */
-const CACHE = 'planer-v1';
+const CACHE = 'planer-v2';
 const CORE = [
   './', './index.html', './style.css', './app.js', './manifest.json', './icon.svg',
   'https://unpkg.com/react@18.3.1/umd/react.production.min.js',
