@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#E4E6E1">
+<meta name="description" content="Wochenplaner mit Lernplan und Google-Kalender">
+<title>Wochenplaner</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Planer">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  body{background:#E4E6E1;font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;}
+  #boot{display:flex;align-items:center;justify-content:center;min-height:100vh;
+    font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;color:#6F7A72;}
+</style>
+</head>
+<body>
+<div id="root"><div id="boot">Planer wird geladen…</div></div>
+
+<script>
+/* Fehler sichtbar machen, statt ewig "wird geladen" anzuzeigen */
+(function () {
+  function show(title, detail) {
+    var b = document.getElementById('boot');
+    if (!b) return;
+    b.style.display = 'block';
+    b.style.padding = '24px';
+    b.style.textAlign = 'left';
+    b.style.color = '#191D1A';
+    b.innerHTML = '<div style="max-width:560px;margin:0 auto;background:#FAFAF8;' +
+      'border:1px solid #191D1A;border-radius:6px;padding:20px">' +
+      '<div style="font-weight:600;font-size:16px;margin-bottom:8px">' + title + '</div>' +
+      '<pre style="white-space:pre-wrap;font-size:12px;background:#EDEEEA;padding:12px;' +
+      'border-radius:4px;overflow-x:auto;margin:0">' + detail + '</pre></div>';
+  }
+  window.__plannerError = show;
+  /* Ladefehler einzelner Dateien abfangen - die bubbeln nicht, daher capture */
+  window.addEventListener('error', function (e) {
+    var t = e.target;
+    if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+      var file = t.src || t.href || '';
+      var name = file.split('/').pop();
+      var lokal = file.indexOf('unpkg') === -1 && file.indexOf('google') === -1;
+      show('Datei fehlt: ' + (name || 'unbekannt'),
+        lokal
+          ? 'Die Datei "' + name + '" wurde nicht gefunden.\n\n' +
+            'Alle neun Dateien müssen im selben Ordner liegen und exakt so heißen:\n\n' +
+            'index.html\napp.js\nstyle.css\nmanifest.json\nsw.js\nicon.svg\n' +
+            'icon-192.png\nicon-512.png\nicon-512-maskable.png\n\n' +
+            'Häufigster Grund: beim zweiten Download hat der Browser die Datei ' +
+            '"app (1).js" genannt. Dann die alte löschen und die neue in "app.js" umbenennen.'
+          : 'Konnte nicht aus dem Netz geladen werden:\n' + file);
+      return;
+    }
+    show('Der Planer konnte nicht starten', (e.message || 'Unbekannter Fehler') +
+      (e.filename ? '\n' + e.filename + ':' + e.lineno : ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    show('Fehler beim Laden', String((e.reason && e.reason.message) || e.reason));
+  });
+  setTimeout(function () {
+    var b = document.getElementById('boot');
+    if (!b || b.parentNode === null) return;
+    if (b.innerHTML.indexOf('wird geladen') === -1) return;
+    if (!window.React || !window.ReactDOM) {
+      show('React wurde nicht geladen',
+        'Die Bibliotheken kommen von unpkg.com und brauchen beim ersten Start eine ' +
+        'Internetverbindung.\n\nWenn du die Datei per Doppelklick geöffnet hast ' +
+        '(Adresse beginnt mit file://), blockiert der Browser das oft. ' +
+        'Lade die Dateien zu GitHub Pages hoch und öffne sie über https://.');
+    } else {
+      show('app.js wurde nicht ausgeführt',
+        'React ist geladen, aber der Programmcode der App fehlt.\n\n' +
+        'Prüfe, ob "app.js" im selben Ordner wie "index.html" liegt und genau so heißt — ' +
+        'nicht "app (1).js" oder "app.js.txt".\n\n' +
+        'Die Datei ist rund 146 KB groß.');
+    }
+  }, 6000);
+})();
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="app.js" onerror="window.__appMissing=true"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function (e) {
+        console.warn('Service Worker nicht registriert:', e);
+      });
+    });
+  }
+</script>
+</body>
+</html>

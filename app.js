@@ -1,0 +1,2187 @@
+"use strict";
+/* ── Icons: lucide-Pfade, lokal eingebettet ── */
+const ICONS = { "ChevronLeft": "<path d=\"m15 18-6-6 6-6\"/>", "ChevronRight": "<path d=\"m9 18 6-6-6-6\"/>", "Plus": "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>", "Check": "<path d=\"M20 6 9 17l-5-5\"/>", "X": "<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>", "ArrowRight": "<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>", "Trash2": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><path d=\"M10 11v6\"/><path d=\"M14 11v6\"/>", "RefreshCw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>", "Calendar": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/><path d=\"M16 2v4\"/><path d=\"M8 2v4\"/><path d=\"M3 10h18\"/>", "List": "<path d=\"M8 6h13\"/><path d=\"M8 12h13\"/><path d=\"M8 18h13\"/><path d=\"M3 6h.01\"/><path d=\"M3 12h.01\"/><path d=\"M3 18h.01\"/>", "Repeat": "<path d=\"m17 2 4 4-4 4\"/><path d=\"M3 11v-1a4 4 0 0 1 4-4h14\"/><path d=\"m7 22-4-4 4-4\"/><path d=\"M21 13v1a4 4 0 0 1-4 4H3\"/>", "UploadCloud": "<path d=\"M12 13v8\"/><path d=\"M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24\"/><path d=\"m8 17 4-4 4 4\"/>", "AlertCircle": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4\"/><path d=\"M12 16h.01\"/>", "LayoutGrid": "<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>", "Target": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>", "Flame": "<path d=\"M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z\"/>" };
+function mkIcon(name) {
+    return function Icon(props) {
+        const p = props || {};
+        return React.createElement("svg", {
+            width: p.size || 16, height: p.size || 16, viewBox: "0 0 24 24", fill: "none",
+            stroke: p.color || "currentColor", strokeWidth: 2,
+            strokeLinecap: "round", strokeLinejoin: "round",
+            className: p.className || "", style: p.style || {},
+            dangerouslySetInnerHTML: { __html: ICONS[name] },
+        });
+    };
+}
+const ChevronLeft = mkIcon("ChevronLeft");
+const ChevronRight = mkIcon("ChevronRight");
+const Plus = mkIcon("Plus");
+const Check = mkIcon("Check");
+const X = mkIcon("X");
+const ArrowRight = mkIcon("ArrowRight");
+const Trash2 = mkIcon("Trash2");
+const RefreshCw = mkIcon("RefreshCw");
+const Calendar = mkIcon("Calendar");
+const List = mkIcon("List");
+const Repeat = mkIcon("Repeat");
+const UploadCloud = mkIcon("UploadCloud");
+const AlertCircle = mkIcon("AlertCircle");
+const LayoutGrid = mkIcon("LayoutGrid");
+const Target = mkIcon("Target");
+const Flame = mkIcon("Flame");
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+/* ────────────────────────────────────────────────────────────
+   Design-Tokens
+   Kalk & Tinte: kühles Kalkgrau-Papier, Tannentinte, Kategorie-
+   farben tragen die Information. Zeiten immer in Mono (Messwert-
+   Logik), Titel in Space Grotesk.
+──────────────────────────────────────────────────────────── */
+const CATS = {
+    uni: { label: "Uni", color: "#2B4B8F" },
+    fokus: { label: "Lernen", color: "#5B3FA0" },
+    arbeit: { label: "Arbeit", color: "#8A4E1C" },
+    training: { label: "Training", color: "#1E6E5A" },
+    privat: { label: "Privat", color: "#A03A5E" },
+    glaube: { label: "Glauben", color: "#12657F" },
+};
+const CAT_KEYS = Object.keys(CATS);
+const DAY_START = 6; // 06:00
+const DAY_END = 23; // 23:00
+const SLOT = 15; // Minuten-Raster
+const STORE_KEY = "planner:v1";
+/* localStorage hinter derselben Schnittstelle wie im Artifact */
+window.storage = {
+    async get(key) {
+        const v = localStorage.getItem(key);
+        if (v === null)
+            throw new Error("not found");
+        return { key: key, value: v };
+    },
+    async set(key, value) { localStorage.setItem(key, value); return { key: key, value: value }; },
+    async delete(key) { localStorage.removeItem(key); return { key: key, deleted: true }; },
+    async list(prefix) {
+        const p = prefix || "";
+        return { keys: Object.keys(localStorage).filter((k) => k.indexOf(p) === 0), prefix: p };
+    },
+};
+const MCP_CALENDAR = "https://calendarmcp.googleapis.com/mcp/v1";
+const DAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+/* ── Zeit-Helfer ───────────────────────────────────────────── */
+const pad = (n) => String(n).padStart(2, "0");
+const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const minsToLabel = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+const durLabel = (m) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? pad(m % 60) : ""}` : `${m} min`);
+function mondayOf(date) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const shift = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - shift);
+    return d;
+}
+function addDays(date, n) {
+    const d = new Date(date);
+    d.setDate(d.getDate() + n);
+    return d;
+}
+function isoWeek(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const yStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d - yStart) / 86400000 + 1) / 7);
+}
+function localISO(dateObj, minutes) {
+    const d = new Date(dateObj);
+    d.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+}
+const uid = () => Math.random().toString(36).slice(2, 10);
+/* ── Haptik & Serien ───────────────────────────────────────── */
+const buzz = (ms = 12) => {
+    var _a;
+    try {
+        (_a = navigator.vibrate) === null || _a === void 0 ? void 0 : _a.call(navigator, ms);
+    }
+    catch { /* nicht überall verfügbar */ }
+};
+const MILESTONES = [10, 25, 50, 100, 200];
+/* Tage am Stück, rückwärts ab heute. Ein noch offener heutiger Tag bricht nichts. */
+function dayStreak(routineId, checks, today) {
+    let d = new Date(today);
+    if (!(checks[dayKey(d)] || []).includes(routineId))
+        d = addDays(d, -1);
+    let n = 0;
+    for (let i = 0; i < 400; i++) {
+        if (!(checks[dayKey(d)] || []).includes(routineId))
+            break;
+        n++;
+        d = addDays(d, -1);
+    }
+    return n;
+}
+/* Wochen am Stück mit erreichtem Soll. Ein Joker pro Serie, laufende Woche zählt nie als Bruch. */
+function weekStreak(routine, checks, refWeekStart) {
+    var _a;
+    const target = (_a = routine.weekTarget) !== null && _a !== void 0 ? _a : 2;
+    let n = 0, joker = 1, jokerUsed = false;
+    for (let i = 0; i < 104; i++) {
+        const ws = addDays(refWeekStart, -7 * i);
+        const hits = Array.from({ length: 7 }, (_, d) => dayKey(addDays(ws, d)))
+            .filter((k) => (checks[k] || []).includes(routine.id)).length;
+        if (hits >= target) {
+            n++;
+            continue;
+        }
+        if (i === 0)
+            continue;
+        if (joker > 0) {
+            joker--;
+            jokerUsed = true;
+            continue;
+        }
+        break;
+    }
+    return { weeks: n, jokerUsed };
+}
+function weekHits(routine, checks, weekStartDate) {
+    return Array.from({ length: 7 }, (_, d) => dayKey(addDays(weekStartDate, d)))
+        .filter((k) => (checks[k] || []).includes(routine.id)).length;
+}
+/* ── Google Calendar über OAuth ────────────────────────────
+   Client-ID unten eintragen — Anleitung in SETUP.md.
+   Ohne ID läuft alles außer der Kalenderanbindung.
+──────────────────────────────────────────────────────────── */
+const GOOGLE_CLIENT_ID = "";
+const GC_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const GC_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+let gcToken = null, gcExpiry = 0;
+const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
+function gcAuth() {
+    return new Promise((resolve, reject) => {
+        if (!gcConfigured())
+            return reject(new Error("keine Client-ID hinterlegt"));
+        if (gcToken && Date.now() < gcExpiry - 60000)
+            return resolve(gcToken);
+        if (!(window.google && window.google.accounts && window.google.accounts.oauth2))
+            return reject(new Error("Google-Bibliothek nicht geladen"));
+        const client = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: GC_SCOPE,
+            callback: (res) => {
+                if (res.error)
+                    return reject(new Error(res.error));
+                gcToken = res.access_token;
+                gcExpiry = Date.now() + (res.expires_in || 3600) * 1000;
+                resolve(gcToken);
+            },
+            error_callback: (e) => reject(new Error((e && e.type) || "Anmeldung abgebrochen")),
+        });
+        client.requestAccessToken();
+    });
+}
+async function gcFetch(url, opts) {
+    const o = opts || {};
+    const token = await gcAuth();
+    const res = await fetch(url, Object.assign({}, o, {
+        headers: Object.assign({ Authorization: "Bearer " + token, "Content-Type": "application/json" }, o.headers || {}),
+    }));
+    if (res.status === 401) {
+        gcToken = null;
+        throw new Error("Anmeldung abgelaufen");
+    }
+    if (!res.ok)
+        throw new Error("Kalender " + res.status);
+    return res.json();
+}
+async function loadCalendar(weekStart) {
+    const from = new Date(weekStart);
+    from.setHours(0, 0, 0, 0);
+    const to = addDays(from, 7);
+    const q = new URLSearchParams({
+        timeMin: from.toISOString(), timeMax: to.toISOString(),
+        singleEvents: "true", orderBy: "startTime", maxResults: "250",
+    });
+    const data = await gcFetch(GC_API + "?" + q);
+    return (data.items || []).map((ev) => {
+        const allDay = !!(ev.start && ev.start.date);
+        const s = new Date((ev.start && (ev.start.dateTime || ev.start.date + "T00:00:00")) || "");
+        const e = new Date((ev.end && (ev.end.dateTime || ev.end.date + "T00:00:00")) || "");
+        if (isNaN(s))
+            return null;
+        let dur = Math.round((e - s) / 60000);
+        if (!dur || dur < 15)
+            dur = 60;
+        return {
+            id: "gc-" + (ev.id || uid()),
+            title: ev.summary || "Termin",
+            cat: "extern",
+            day: dayKey(s),
+            start: allDay ? DAY_START * 60 : s.getHours() * 60 + s.getMinutes(),
+            dur: allDay ? 60 : Math.min(dur, (DAY_END - DAY_START) * 60),
+            allDay: allDay, external: true,
+        };
+    }).filter(Boolean);
+}
+async function pushToCalendar(block) {
+    const date = new Date(block.day + "T00:00:00");
+    const s = new Date(date);
+    s.setMinutes(block.start);
+    const e = new Date(date);
+    e.setMinutes(block.start + block.dur);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Vienna";
+    await gcFetch(GC_API, {
+        method: "POST",
+        body: JSON.stringify({
+            summary: block.title,
+            start: { dateTime: s.toISOString(), timeZone: tz },
+            end: { dateTime: e.toISOString(), timeZone: tz },
+            reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 15 }] },
+        }),
+    });
+    return true;
+}
+/* ── Lernplan Restprüfungen 4. Semester ────────────────────── */
+const STUDY_EXAM = { title: "Molekularbiologie 2", date: "2026-09-27" };
+const SUBJECTS = {
+    orga: { short: "Orga", title: "Organisation & LEVIS" },
+    molbio: { short: "MolBio", title: "Molekularbiologie 2",
+        note: "Priorität 1 · 27.09. · Mechanismen verstehen + Faktenmenge. Themenlandkarte zuerst, Mechanismuskarten aus dem Kopf, Karteikarten nur für echte Faktenlast. Letzte 10 Tage kein neuer Stoff." },
+    thermo: { short: "Thermo", title: "Technische Thermodynamik",
+        note: "Strategisch wichtigstes Fach. Fertigkeit, kein Wissen — wächst nur durch Wiederholung. Aufgabentypen katalogisieren (meist 6–10), eigene Formelsammlung schreiben, immer mit Einheiten rechnen. Grundlage für Verfahrenstechnik thermisch im 5. Semester." },
+    prozess: { short: "Prozess", title: "Lebensmittelprozesstechnik & Analytik",
+        note: "Direkt nach Thermo lernen, solange Bilanzen und Wärmeübertragung frisch sitzen. Pro Grundoperation eine Seite im selben Raster: Zweck, Prinzip, Apparat, Kenngrößen, Anwendung, Grenze." },
+    allergien: { short: "Allergien", title: "Allergien & Unverträglichkeiten",
+        note: "Effizientestes Fach, gut in 20–30-Minuten-Fenstern lernbar. Erst Systematik (Allergie/Intoleranz/Autoimmun, Reaktionstypen I–IV), dann Einzelbilder. Raster je Krankheitsbild: Mechanismus, Auslöser, Symptomatik, Diagnostik, Ernährungstherapie, Kennzeichnung." },
+};
+const STUDY_RULES = [
+    "Rückwärts von der Altklausur lernen, nicht vorwärts von Folie 1.",
+    "Abrufen statt lesen — nach jedem Block leeres Blatt, dann erst vergleichen.",
+    "Verteilen statt bündeln: 4 × 90 min schlagen 1 × 6 Stunden am Sonntag.",
+    "Fehlerlogbuch für Thermo, immer mit Grund für den Fehler.",
+    "Ein Hauptfach, ein Nebenfach, der Rest wartet.",
+    "ECTS sind nicht gleich Aufwand — Thermo ist klein und trotzdem der größte Hebel.",
+];
+const STUDY_NOTES = [
+    "Drei Antritte, der dritte ist kommissionell vor einem Senat.",
+    "Nicht antreten verbraucht einen Antritt. Bei Krankheit sofort Attest.",
+    "Abmelden nur beim ersten Termin, bis 23:59 am dritten Werktag davor.",
+    "80 % Anwesenheit bei Übungen und Laborübungen — lässt sich nicht nachlernen.",
+];
+const STUDY_WEEKS = [
+    { n: 0, from: "2026-08-05", to: "2026-08-09", title: "Klarheit schaffen",
+        must: [
+            { t: "LEVIS: offene LVs und Antrittszahlen je Fach prüfen", m: 30, s: "orga" },
+            { t: "Vergessenes fünftes Fach identifizieren", m: 15, s: "orga" },
+            { t: "Alle Prüfungstermine aus dem Terminplan sammeln", m: 30, s: "orga" },
+            { t: "Prüfungsformat je Fach klären", m: 30, s: "orga" },
+            { t: "Hilfsmittel klären: Formelsammlung, Taschenrechner", m: 15, s: "orga" },
+            { t: "Semesterstart in der Studienjahreseinteilung prüfen", m: 15, s: "orga" },
+            { t: "Material sortieren: Ordner je Fach", m: 45, s: "orga" },
+        ],
+        extra: [
+            { t: "Altklausur MolBio ansehen, Themen markieren", m: 45, s: "molbio" },
+            { t: "Altklausur Thermo ansehen, Themen markieren", m: 45, s: "thermo" },
+            { t: "Lernslots für 7 Wochen in den Kalender legen", m: 30, s: "orga" },
+        ] },
+    { n: 1, from: "2026-08-10", to: "2026-08-16", title: "Fundament legen",
+        must: [
+            { t: "MolBio: Themenlandkarte bauen", m: 90, s: "molbio" },
+            { t: "MolBio: Kapitel 1–2 mit Mechanismuskarten", m: 120, s: "molbio" },
+            { t: "Thermo: Aufgabentypen aus Altklausuren katalogisieren", m: 60, s: "thermo" },
+            { t: "Thermo: Typ 1 rechnen", m: 30, s: "thermo" },
+        ],
+        extra: [
+            { t: "MolBio: Kapitel 3", m: 90, s: "molbio" },
+            { t: "Thermo: Typ 2", m: 45, s: "thermo" },
+            { t: "Karteikarten für die reinen Faktenteile", m: 45, s: "molbio" },
+        ] },
+    { n: 2, from: "2026-08-17", to: "2026-08-23", title: "Stoff aufbauen",
+        must: [
+            { t: "MolBio: Kapitel 3–4", m: 210, s: "molbio" },
+            { t: "Abruf Woche 1 aus dem Kopf", m: 30, s: "molbio" },
+            { t: "Thermo: Typ 2–3 rechnen", m: 60, s: "thermo" },
+            { t: "Thermo: Formelsammlung Teil 1 schreiben", m: 30, s: "thermo" },
+        ],
+        extra: [
+            { t: "MolBio: Kapitel 5", m: 90, s: "molbio" },
+            { t: "Thermo: Typ 4", m: 45, s: "thermo" },
+            { t: "Fehlerlogbuch anlegen", m: 20, s: "thermo" },
+        ] },
+    { n: 3, from: "2026-08-24", to: "2026-08-30", title: "Mitte des Stoffs",
+        must: [
+            { t: "MolBio: Kapitel 5–6", m: 210, s: "molbio" },
+            { t: "Abruf Kapitel 1–4", m: 30, s: "molbio" },
+            { t: "Thermo: Typ 4–5 rechnen", m: 90, s: "thermo" },
+        ],
+        extra: [
+            { t: "Halbzeit-Kontrolle: Altklausur MolBio überfliegen", m: 45, s: "molbio" },
+        ] },
+    { n: 4, from: "2026-08-31", to: "2026-09-06", title: "Stoff schließen",
+        must: [
+            { t: "MolBio: restliche Kapitel abschließen", m: 240, s: "molbio" },
+            { t: "Thermo: gemischte Aufgaben über alle Typen", m: 90, s: "thermo" },
+        ],
+        extra: [
+            { t: "Erste vollständige MolBio-Altklausur unter Zeitdruck", m: 120, s: "molbio" },
+        ] },
+    { n: 5, from: "2026-09-07", to: "2026-09-13", title: "Lücken schließen",
+        must: [
+            { t: "MolBio: gezielt die Lücken aus der Altklausur", m: 240, s: "molbio" },
+            { t: "Thermo: Fehlerlogbuch durchgehen und Typen wiederholen", m: 90, s: "thermo" },
+        ],
+        extra: [
+            { t: "Zweite MolBio-Altklausur", m: 120, s: "molbio" },
+            { t: "Alle Mechanismuskarten aus dem Kopf nachzeichnen", m: 60, s: "molbio" },
+        ] },
+    { n: 6, from: "2026-09-14", to: "2026-09-20", title: "Nur noch abrufen",
+        must: [
+            { t: "MolBio: Themenlandkarte komplett aus dem Kopf", m: 90, s: "molbio" },
+            { t: "MolBio: Mechanismen zeichnen und laut erklären", m: 120, s: "molbio" },
+            { t: "MolBio: weitere Abrufrunde", m: 90, s: "molbio" },
+        ],
+        extra: [
+            { t: "Dritte Altklausur unter echten Prüfungsbedingungen", m: 150, s: "molbio" },
+        ] },
+    { n: 7, from: "2026-09-21", to: "2026-09-27", title: "Endspurt & Prüfung",
+        must: [
+            { t: "Mo: Durchgang Themenlandkarte, schwächste 20 %", m: 90, s: "molbio" },
+            { t: "Di: Durchgang Themenlandkarte, schwächste 20 %", m: 90, s: "molbio" },
+            { t: "Mi: Durchgang Themenlandkarte, schwächste 20 %", m: 90, s: "molbio" },
+            { t: "Do: Durchgang Themenlandkarte, schwächste 20 %", m: 90, s: "molbio" },
+            { t: "Fr: letzte Altklausur unter Prüfungsbedingungen", m: 150, s: "molbio" },
+            { t: "Sa: leichte Wiederholung, Weg und Sachen klären", m: 60, s: "molbio" },
+        ],
+        extra: [] },
+];
+const DEFAULT_STATE = {
+    blocks: [],
+    todos: [],
+    routines: [
+        { id: "r1", title: "Bouldern", cat: "training" },
+        { id: "r2", title: "Krafttraining", cat: "training" },
+        { id: "r3", title: "Lernblock", cat: "fokus" },
+        { id: "r4", title: "Lesen", cat: "privat" },
+    ],
+    checks: {},
+    template: [],
+    materialized: {},
+    projects: [],
+    studyDone: {},
+};
+/* ════════════════════════════════════════════════════════════
+   Hauptkomponente
+════════════════════════════════════════════════════════════ */
+function PlannerApp() {
+    var _a, _b;
+    const today = useMemo(() => new Date(), []);
+    const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+    const [selectedDay, setSelectedDay] = useState(() => dayKey(new Date()));
+    const [state, setState] = useState(DEFAULT_STATE);
+    const [loaded, setLoaded] = useState(false);
+    const [external, setExternal] = useState([]);
+    const [sync, setSync] = useState({ status: "idle", msg: "" });
+    const [view, setView] = useState("heute");
+    const [weekIdx, setWeekIdx] = useState(() => {
+        const t = dayKey(new Date());
+        const i = STUDY_WEEKS.findIndex((w) => t >= w.from && t <= w.to);
+        return i === -1 ? (t < STUDY_WEEKS[0].from ? 0 : STUDY_WEEKS.length - 1) : i;
+    });
+    const [slide, setSlide] = useState(null);
+    const touchRef = useRef(null);
+    const suppressClick = useRef(false);
+    const [panel, setPanel] = useState("todos");
+    const [editor, setEditor] = useState(null);
+    const [pendingTodo, setPendingTodo] = useState(null);
+    const [celebration, setCelebration] = useState(null);
+    const [manualPick, setManualPick] = useState(null);
+    const [detailId, setDetailId] = useState(null);
+    const [zoom, setZoom] = useState("fit");
+    const [cols, setCols] = useState(() => (typeof window !== "undefined" && window.innerWidth >= 900 ? 7 : 5));
+    const [viewH, setViewH] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
+    const [now, setNow] = useState(new Date());
+    const gridRef = useRef(null);
+    const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+    const todayKey = dayKey(today);
+    /* Uhr */
+    useEffect(() => {
+        const t = setInterval(() => setNow(new Date()), 60000);
+        return () => clearInterval(t);
+    }, []);
+    /* Bildschirmhöhe für die Maßstabsberechnung */
+    useEffect(() => {
+        const on = () => setViewH(window.innerHeight);
+        window.addEventListener("resize", on);
+        return () => window.removeEventListener("resize", on);
+    }, []);
+    const visibleDays = useMemo(() => {
+        if (cols === 7)
+            return days;
+        const from = new Date(selectedDay + "T00:00:00");
+        return Array.from({ length: cols }, (_, i) => addDays(from, i));
+    }, [cols, days, selectedDay]);
+    const totalDayMin = (DAY_END - DAY_START) * 60;
+    const fitPpm = Math.max(0.24, (viewH * 0.5) / totalDayMin);
+    const ppm = zoom === "fit" ? fitPpm : zoom === "mid" ? 0.8 : 1.4;
+    const gridMaxH = zoom === "fit" ? totalDayMin * ppm + 4 : Math.round(viewH * 0.62);
+    /* Laden */
+    useEffect(() => {
+        (async () => {
+            try {
+                const r = await window.storage.get(STORE_KEY);
+                if (r === null || r === void 0 ? void 0 : r.value)
+                    setState({ ...DEFAULT_STATE, ...JSON.parse(r.value) });
+            }
+            catch {
+                /* noch nichts gespeichert */
+            }
+            setLoaded(true);
+        })();
+    }, []);
+    /* Speichern */
+    const persist = useCallback((nextOrFn) => {
+        setState((prev) => {
+            const next = typeof nextOrFn === "function" ? nextOrFn(prev) : nextOrFn;
+            window.storage.set(STORE_KEY, JSON.stringify(next)).catch(() => { });
+            return next;
+        });
+    }, []);
+    /* Kalender holen */
+    const fetchCal = useCallback(async () => {
+        setSync({ status: "loading", msg: "Kalender wird gelesen…" });
+        try {
+            const evs = await loadCalendar(weekStart);
+            setExternal(evs);
+            setSync({
+                status: "ok",
+                msg: evs.length ? `${evs.length} Termine geladen` : "Keine Termine in dieser Woche",
+            });
+        }
+        catch (err) {
+            setSync({ status: "error", msg: gcConfigured() ? ("Kalender: " + err.message) : "Keine Google-Client-ID hinterlegt — siehe SETUP.md" });
+        }
+    }, [weekStart]);
+    useEffect(() => {
+        setExternal([]);
+        setSync({ status: "idle", msg: "" });
+        const keys = Array.from({ length: 7 }, (_, i) => dayKey(addDays(weekStart, i)));
+        setSelectedDay((cur) => (keys.includes(cur) ? cur : keys.includes(todayKey) ? todayKey : keys[0]));
+    }, [weekStart, todayKey]);
+    /* Vorlage: automatische Einträge einmal pro Woche anlegen */
+    useEffect(() => {
+        var _a;
+        if (!loaded)
+            return;
+        const wk = dayKey(weekStart);
+        if ((_a = state.materialized) === null || _a === void 0 ? void 0 : _a[wk])
+            return;
+        const auto = (state.template || []).filter((t) => t.auto);
+        if (auto.length === 0)
+            return;
+        const fresh = auto
+            .map((t) => ({
+            id: uid(),
+            day: dayKey(addDays(weekStart, t.weekday)),
+            start: t.start, dur: t.dur, title: t.title, cat: t.cat,
+            tplId: t.id, synced: false,
+        }))
+            .filter((b) => !state.blocks.some((x) => x.day === b.day && x.tplId === b.tplId));
+        persist({
+            ...state,
+            blocks: [...state.blocks, ...fresh],
+            materialized: { ...state.materialized, [wk]: true },
+        });
+    }, [loaded, weekStart, state, persist]);
+    const weekKeys = useMemo(() => Array.from({ length: 7 }, (_, i) => dayKey(addDays(weekStart, i))), [weekStart]);
+    const applyTemplate = () => {
+        const fresh = (state.template || [])
+            .map((t) => ({
+            id: uid(), day: weekKeys[t.weekday],
+            start: t.start, dur: t.dur, title: t.title, cat: t.cat,
+            tplId: t.id, synced: false,
+        }))
+            .filter((b) => !state.blocks.some((x) => x.day === b.day && x.tplId === b.tplId));
+        if (fresh.length === 0) {
+            setSync({ status: "ok", msg: "Vorlage steht schon in dieser Woche" });
+            return;
+        }
+        persist({
+            ...state,
+            blocks: [...state.blocks, ...fresh],
+            materialized: { ...state.materialized, [dayKey(weekStart)]: true },
+        });
+        setSync({ status: "ok", msg: `${fresh.length} Blöcke aus der Vorlage übernommen` });
+    };
+    const saveWeekAsTemplate = () => {
+        const mine = state.blocks.filter((b) => weekKeys.includes(b.day) && b.title);
+        if (mine.length === 0) {
+            setSync({ status: "error", msg: "Diese Woche enthält keine eigenen Blöcke" });
+            return;
+        }
+        const tpl = mine.map((b) => ({
+            id: uid(),
+            weekday: weekKeys.indexOf(b.day),
+            start: b.start, dur: b.dur, title: b.title, cat: b.cat,
+            auto: true,
+        }));
+        const linked = state.blocks.map((b) => {
+            const i = mine.findIndex((m) => m.id === b.id);
+            return i === -1 ? b : { ...b, tplId: tpl[i].id };
+        });
+        persist({
+            ...state, template: tpl, blocks: linked,
+            materialized: { ...state.materialized, [dayKey(weekStart)]: true },
+        });
+        setSync({ status: "ok", msg: `Vorlage aus ${tpl.length} Blöcken gesichert` });
+    };
+    const removeTemplateEntry = (id) => persist({ ...state, template: state.template.filter((t) => t.id !== id) });
+    const toggleTemplateAuto = (id) => persist({
+        ...state,
+        template: state.template.map((t) => (t.id === id ? { ...t, auto: !t.auto } : t)),
+    });
+    /* Block als wöchentlich markieren / lösen */
+    const toggleRepeat = (block) => {
+        const existing = block.tplId && state.template.find((t) => t.id === block.tplId);
+        if (existing) {
+            persist({
+                ...state,
+                template: state.template.filter((t) => t.id !== block.tplId),
+                blocks: state.blocks.map((b) => (b.id === block.id ? { ...b, tplId: null } : b)),
+            });
+            setEditor((e) => (e ? { ...e, tplId: null } : e));
+            return;
+        }
+        const tid = uid();
+        const entry = {
+            id: tid, weekday: Math.max(0, weekKeys.indexOf(block.day)),
+            start: block.start, dur: block.dur,
+            title: block.title || "Ohne Titel", cat: block.cat, auto: true,
+        };
+        persist({
+            ...state,
+            template: [...state.template, entry],
+            blocks: state.blocks.map((b) => (b.id === block.id ? { ...b, tplId: tid } : b)),
+        });
+        setEditor((e) => (e ? { ...e, tplId: tid } : e));
+    };
+    /* Ganze Woche in den Kalender schreiben */
+    const syncWeek = async () => {
+        const open = state.blocks.filter((b) => weekKeys.includes(b.day) && b.title && !b.synced);
+        if (open.length === 0) {
+            setSync({ status: "ok", msg: "Alles schon im Kalender" });
+            return;
+        }
+        let ok = 0;
+        const done = [];
+        for (let i = 0; i < open.length; i++) {
+            setSync({ status: "loading", msg: `Schreibe ${i + 1} von ${open.length}…` });
+            try {
+                await pushToCalendar(open[i]);
+                done.push(open[i].id);
+                ok++;
+            }
+            catch {
+                /* einzelner Fehler stoppt den Rest nicht */
+            }
+        }
+        persist((prev) => ({
+            ...prev,
+            blocks: prev.blocks.map((b) => (done.includes(b.id) ? { ...b, synced: true } : b)),
+        }));
+        setSync(ok === open.length
+            ? { status: "ok", msg: `${ok} Blöcke im Kalender` }
+            : { status: "error", msg: `${ok} von ${open.length} geschrieben. Rest nochmal versuchen.` });
+    };
+    /* Projekte */
+    const addProject = (title, cat, target) => persist((prev) => ({
+        ...prev,
+        projects: [...(prev.projects || []), { id: uid(), title, cat, target }],
+    }));
+    const removeProject = (id) => persist((prev) => ({
+        ...prev,
+        projects: (prev.projects || []).filter((p) => p.id !== id),
+        blocks: prev.blocks.map((b) => (b.projectId === id ? { ...b, projectId: null } : b)),
+    }));
+    const setProjectTarget = (id, target) => persist((prev) => ({
+        ...prev,
+        projects: (prev.projects || []).map((p) => (p.id === id ? { ...p, target } : p)),
+    }));
+    const projectStats = useMemo(() => {
+        const map = {};
+        for (const p of state.projects || [])
+            map[p.id] = { planned: 0, done: 0 };
+        for (const b of state.blocks) {
+            if (!weekKeys.includes(b.day) || !b.projectId || !map[b.projectId])
+                continue;
+            map[b.projectId].planned += b.dur;
+            if (b.status === "done")
+                map[b.projectId].done += b.dur;
+        }
+        return map;
+    }, [state.projects, state.blocks, weekKeys]);
+    const detailBlock = useMemo(() => {
+        if (!detailId)
+            return null;
+        return state.blocks.find((b) => b.id === detailId)
+            || external.find((b) => b.id === detailId) || null;
+    }, [detailId, state.blocks, external]);
+    /* Kumulierte Projektstunden über alle Wochen */
+    const projectTotals = useMemo(() => {
+        const map = {};
+        for (const b of state.blocks) {
+            if (!b.projectId || b.status !== "done")
+                continue;
+            map[b.projectId] = (map[b.projectId] || 0) + b.dur;
+        }
+        return map;
+    }, [state.blocks]);
+    /* Meilensteine feiern, jeden nur einmal */
+    useEffect(() => {
+        var _a;
+        if (!loaded)
+            return;
+        const reached = state.reached || {};
+        let hit = null;
+        for (const p of state.projects || []) {
+            const h = Math.floor((projectTotals[p.id] || 0) / 60);
+            const already = reached[p.id] || [];
+            const fresh = MILESTONES.filter((m) => h >= m && !already.includes(m));
+            if (fresh.length) {
+                hit = { project: p, m: Math.max(...fresh), fresh };
+                break;
+            }
+        }
+        if (!hit)
+            return;
+        persist((prev) => ({
+            ...prev,
+            reached: { ...(prev.reached || {}), [hit.project.id]: [...((prev.reached || {})[hit.project.id] || []), ...hit.fresh] },
+        }));
+        setCelebration({ id: uid(), title: `${hit.m} Stunden`, sub: hit.project.title, color: (_a = CATS[hit.project.cat]) === null || _a === void 0 ? void 0 : _a.color });
+        buzz([18, 60, 25]);
+    }, [loaded, projectTotals, state.projects, state.reached, persist]);
+    /* Jahresraster: 52 Wochen rückwärts, Quote je Woche */
+    const yearGrid = useMemo(() => {
+        const buckets = {};
+        for (const b of state.blocks) {
+            if (!b.title)
+                continue;
+            const ws = dayKey(mondayOf(new Date(b.day + "T00:00:00")));
+            if (!buckets[ws])
+                buckets[ws] = { planned: 0, done: 0 };
+            buckets[ws].planned += b.dur;
+            if (b.status === "done")
+                buckets[ws].done += b.dur;
+        }
+        return Array.from({ length: 52 }, (_, i) => {
+            const ws = addDays(weekStart, -7 * (51 - i));
+            const k = dayKey(ws);
+            const d = buckets[k];
+            return {
+                key: k, date: ws,
+                quote: d && d.planned ? d.done / d.planned : null,
+                hours: d ? d.done / 60 : 0,
+                isCurrent: k === dayKey(weekStart),
+            };
+        });
+    }, [state.blocks, weekStart]);
+    /* Ausprobieren */
+    const loadDemo = () => {
+        persist(makeDemoState());
+        setSync({ status: "ok", msg: "Beispieldaten geladen" });
+    };
+    const resetAll = () => {
+        persist({ ...DEFAULT_STATE });
+        setExternal([]);
+        setSync({ status: "ok", msg: "Alles zurückgesetzt" });
+    };
+    const testConfetti = () => {
+        buzz([18, 60, 25]);
+        setCelebration({ id: uid(), title: "25 Stunden", sub: "Testlauf", color: CATS.training.color });
+    };
+    /* Wochenbilanz */
+    const weekStats = useMemo(() => {
+        const mine = state.blocks.filter((b) => weekKeys.includes(b.day) && b.title);
+        const endOf = (b) => new Date(b.day + "T00:00:00").getTime() + (b.start + b.dur) * 60000;
+        const byCat = {};
+        let planned = 0, done = 0, skipped = 0, moved = 0;
+        for (const b of mine) {
+            planned += b.dur;
+            if (b.status === "done")
+                done += b.dur;
+            if (b.status === "skipped")
+                skipped += b.dur;
+            if (b.status === "moved")
+                moved += b.dur;
+            if (!byCat[b.cat])
+                byCat[b.cat] = { planned: 0, done: 0 };
+            byCat[b.cat].planned += b.dur;
+            if (b.status === "done")
+                byCat[b.cat].done += b.dur;
+        }
+        const pending = mine
+            .filter((b) => !b.status && endOf(b) < now.getTime())
+            .sort((a, b) => endOf(a) - endOf(b));
+        const routineCount = {};
+        for (const r of state.routines) {
+            routineCount[r.id] = weekKeys.filter((k) => (state.checks[k] || []).includes(r.id)).length;
+        }
+        return { planned, done, skipped, moved, byCat, pending, routineCount };
+    }, [state.blocks, state.routines, state.checks, weekKeys, now]);
+    /* Blöcke pro Tag */
+    const blocksFor = useCallback((key) => [
+        ...state.blocks.filter((b) => b.day === key),
+        ...external.filter((b) => b.day === key),
+    ].sort((a, b) => a.start - b.start), [state.blocks, external]);
+    const plannedMinutes = useCallback((key) => blocksFor(key).reduce((s, b) => s + b.dur, 0), [blocksFor]);
+    /* Freie Lücken eines Tages */
+    const gapsFor = useCallback((key) => {
+        const bs = blocksFor(key);
+        const out = [];
+        let cursor = DAY_START * 60;
+        for (const b of bs) {
+            if (b.start > cursor)
+                out.push({ start: cursor, dur: b.start - cursor });
+            cursor = Math.max(cursor, b.start + b.dur);
+        }
+        if (cursor < DAY_END * 60)
+            out.push({ start: cursor, dur: DAY_END * 60 - cursor });
+        return out.filter((g) => g.dur >= 30);
+    }, [blocksFor]);
+    /* ── Aktionen ── */
+    const addBlock = (day, start, patch = {}) => {
+        const b = {
+            id: uid(), day, start,
+            dur: patch.dur || 60,
+            title: patch.title || "",
+            cat: patch.cat || "fokus",
+            todoId: patch.todoId || null,
+            projectId: patch.projectId || null,
+            studyKey: patch.studyKey || null,
+            status: null,
+            synced: false,
+        };
+        persist((prev) => ({ ...prev, blocks: [...prev.blocks, b] }));
+        setDetailId(b.id);
+    };
+    const updateBlock = (id, patch) => persist((prev) => ({
+        ...prev,
+        blocks: prev.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+    }));
+    const setBlockStatus = (id, status) => persist((prev) => {
+        const b = prev.blocks.find((x) => x.id === id);
+        const next = {
+            ...prev,
+            blocks: prev.blocks.map((x) => (x.id === id ? { ...x, status } : x)),
+        };
+        if (b === null || b === void 0 ? void 0 : b.studyKey) {
+            next.studyDone = { ...(prev.studyDone || {}), [b.studyKey]: status === "done" };
+        }
+        return next;
+    });
+    const removeBlock = (id) => persist({ ...state, blocks: state.blocks.filter((b) => b.id !== id) });
+    const handleSlotClick = (day, minutes) => {
+        if (manualPick) {
+            const t = manualPick;
+            addBlock(day, minutes, {
+                title: t.title, cat: t.cat, dur: t.est,
+                todoId: t.todoId || null, projectId: t.projectId || null, studyKey: t.studyKey || null,
+            });
+            setManualPick(null);
+            buzz(10);
+            return;
+        }
+        addBlock(day, minutes);
+    };
+    /* Wischen zwischen den Ansichten */
+    const VIEWS = ["heute", "woche", "lernen", "auswerten"];
+    const goView = (k, dir) => {
+        if (k === view)
+            return;
+        setView(k);
+        if (k === "heute")
+            setSelectedDay(todayKey);
+        if (dir) {
+            setSlide(dir);
+            setTimeout(() => setSlide(null), 300);
+        }
+    };
+    const onTouchStart = (e) => {
+        if (e.touches.length !== 1)
+            return;
+        touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, moved: false };
+    };
+    const onTouchMove = (e) => {
+        const t0 = touchRef.current;
+        if (!t0 || e.touches.length !== 1)
+            return;
+        const dx = e.touches[0].clientX - t0.x;
+        const dy = e.touches[0].clientY - t0.y;
+        if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.4)
+            t0.moved = true;
+    };
+    const onTouchEnd = (e) => {
+        const t0 = touchRef.current;
+        touchRef.current = null;
+        if (!t0)
+            return;
+        if (t0.moved) {
+            suppressClick.current = true;
+            setTimeout(() => { suppressClick.current = false; }, 400);
+        }
+        const t = e.changedTouches[0];
+        const dx = t.clientX - t0.x;
+        const dy = t.clientY - t0.y;
+        if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.4)
+            return;
+        const i = VIEWS.indexOf(view);
+        const ni = dx < 0 ? Math.min(VIEWS.length - 1, i + 1) : Math.max(0, i - 1);
+        if (ni === i)
+            return;
+        buzz(8);
+        goView(VIEWS[ni], dx < 0 ? "l" : "r");
+    };
+    const onClickCapture = (e) => {
+        if (!suppressClick.current)
+            return;
+        suppressClick.current = false;
+        e.stopPropagation();
+        e.preventDefault();
+    };
+    const toggleStudyTask = (k) => persist((prev) => ({
+        ...prev,
+        studyDone: { ...(prev.studyDone || {}), [k]: !(prev.studyDone || {})[k] },
+    }));
+    const planStudyTask = (task, k) => {
+        var _a;
+        return setPendingTodo({
+            title: `${(_a = SUBJECTS[task.s]) === null || _a === void 0 ? void 0 : _a.short}: ${task.t}`,
+            cat: "uni", est: task.m, studyKey: k,
+        });
+    };
+    const addTerminHere = () => {
+        const isToday = selectedDay === todayKey;
+        const earliest = isToday
+            ? Math.min(DAY_END * 60 - 60, Math.max(DAY_START * 60, Math.ceil((now.getHours() * 60 + now.getMinutes()) / SLOT) * SLOT))
+            : 9 * 60;
+        const g = gapsFor(selectedDay).find((x) => x.start + x.dur - Math.max(x.start, earliest) >= 60);
+        const start = g ? Math.max(g.start, earliest) : earliest;
+        addBlock(selectedDay, Math.min(start, DAY_END * 60 - 60));
+    };
+    const confirmSchedule = (day, minutes, dur) => {
+        const t = pendingTodo;
+        addBlock(day, minutes, {
+            title: t.title, cat: t.cat, dur,
+            todoId: t.todoId || null, projectId: t.projectId || null, studyKey: t.studyKey || null,
+        });
+        setPendingTodo(null);
+        setWeekStart(mondayOf(new Date(day + "T00:00:00")));
+        setSelectedDay(day);
+        buzz(12);
+    };
+    const syncBlock = async (block) => {
+        setSync({ status: "loading", msg: `„${block.title}" wird gespeichert…` });
+        try {
+            await pushToCalendar(block);
+            updateBlock(block.id, { synced: true });
+            setSync({ status: "ok", msg: "In Google Calendar gespeichert" });
+            setEditor((e) => (e && e.id === block.id ? { ...e, synced: true } : e));
+        }
+        catch {
+            setSync({ status: "error", msg: "Speichern fehlgeschlagen. Nochmal versuchen." });
+        }
+    };
+    /* To-dos */
+    const addTodo = (title, cat, est) => persist({ ...state, todos: [...state.todos, { id: uid(), title, cat, est, done: false }] });
+    const toggleTodo = (id) => persist({ ...state, todos: state.todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) });
+    const removeTodo = (id) => persist({ ...state, todos: state.todos.filter((t) => t.id !== id) });
+    /* Routinen */
+    const addRoutine = (title, cat) => persist({ ...state, routines: [...state.routines, { id: uid(), title, cat }] });
+    const setRoutineTarget = (id, weekTarget) => persist((prev) => ({
+        ...prev,
+        routines: prev.routines.map((r) => (r.id === id ? { ...r, weekTarget } : r)),
+    }));
+    const removeRoutine = (id) => persist({ ...state, routines: state.routines.filter((r) => r.id !== id) });
+    const toggleCheck = (routineId, key) => {
+        const cur = state.checks[key] || [];
+        const next = cur.includes(routineId) ? cur.filter((x) => x !== routineId) : [...cur, routineId];
+        persist({ ...state, checks: { ...state.checks, [key]: next } });
+    };
+    /* ── Render ── */
+    const weekLabel = `${weekStart.getDate()}.${pad(weekStart.getMonth() + 1)}. – ${addDays(weekStart, 6).getDate()}.${pad(addDays(weekStart, 6).getMonth() + 1)}.`;
+    if (!loaded) {
+        return (React.createElement("div", { className: "pl-root flex items-center justify-center", style: { minHeight: "100vh" } },
+            React.createElement("span", { className: "mono text-sm pl-muted" }, "Plan wird geladen\u2026")));
+    }
+    return (React.createElement("div", { className: "pl-root" },
+        React.createElement("style", null, `
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+        .pl-root{
+          --paper:#E4E6E1; --card:#FAFAF8; --ink:#191D1A; --muted:#6F7A72;
+          --line:#CBD0C9; --line-soft:#DDE0DA;
+          background:var(--paper); color:var(--ink); min-height:100vh;
+          font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
+          -webkit-font-smoothing:antialiased;
+        }
+        .pl-root *{box-sizing:border-box;}
+        .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+        .pl-muted{color:var(--muted);}
+        .pl-card{background:var(--card);border:1px solid var(--line);}
+        .pl-hair{border-color:var(--line-soft);}
+        .pl-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);
+          transition:background .12s ease,border-color .12s ease;}
+        .pl-btn:hover{background:#F0F1EE;border-color:var(--muted);}
+        .pl-btn:focus-visible,.pl-tap:focus-visible{outline:2px solid #2B4B8F;outline-offset:2px;}
+        .pl-slot{transition:background .1s ease;}
+        .pl-slot:hover{background:rgba(43,75,143,.07);}
+        .pl-arm .pl-slot:hover{background:rgba(30,110,90,.14);}
+        .pl-block{border-radius:3px;overflow:hidden;text-align:left;width:100%;
+          transition:filter .12s ease;}
+        .pl-block:hover{filter:brightness(.96);}
+        .pl-ext{background-image:repeating-linear-gradient(135deg,transparent 0 5px,rgba(255,255,255,.5) 5px 6px);}
+        .pl-scroll{scrollbar-width:thin;}
+        .pl-input{background:var(--card);border:1px solid var(--line);color:var(--ink);width:100%;}
+        .pl-input:focus{outline:2px solid #2B4B8F;outline-offset:-1px;}
+        .pl-sheet{background:var(--card);border:1px solid var(--ink);
+          box-shadow:0 18px 40px -12px rgba(25,29,26,.35);}
+        @media (prefers-reduced-motion:reduce){.pl-root *{transition:none!important;animation:none!important;}}
+
+        /* Bewegung */
+        .pl-bar{transition:width .5s cubic-bezier(.2,.8,.2,1);}
+        @keyframes pl-pop{0%{transform:scale(1)}40%{transform:scale(1.32)}100%{transform:scale(1)}}
+        .pl-pop{animation:pl-pop .32s cubic-bezier(.34,1.56,.64,1);}
+        @keyframes pl-sweep{from{transform:translateX(-100%)}to{transform:translateX(120%)}}
+        .pl-sweep::after{content:"";position:absolute;inset:0;pointer-events:none;
+          background:linear-gradient(90deg,transparent,rgba(255,255,255,.8),transparent);
+          animation:pl-sweep .55s ease-out;}
+        @keyframes pl-rise{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:translateY(0)}}
+        .pl-rise{animation:pl-rise .3s ease-out;}
+        @keyframes pl-fall{
+          0%{opacity:1;transform:translate3d(0,0,0) rotate(0deg)}
+          100%{opacity:0;transform:translate3d(var(--dx),102vh,0) rotate(var(--rot))}}
+        .pl-confetti{position:fixed;top:-14px;z-index:100;pointer-events:none;
+          animation:pl-fall linear forwards;}
+        @keyframes pl-glow{0%,100%{box-shadow:0 0 0 0 rgba(30,110,90,0)}
+          45%{box-shadow:0 0 0 6px rgba(30,110,90,.20)}}
+        .pl-glow{animation:pl-glow 1.2s ease-out;}
+        @keyframes pl-in-l{from{opacity:.35;transform:translateX(26px)}to{opacity:1;transform:none}}
+        @keyframes pl-in-r{from{opacity:.35;transform:translateX(-26px)}to{opacity:1;transform:none}}
+        .pl-in-l{animation:pl-in-l .26s cubic-bezier(.2,.8,.2,1);}
+        .pl-in-r{animation:pl-in-r .26s cubic-bezier(.2,.8,.2,1);}
+        @keyframes pl-zoom{from{opacity:0;transform:scale(.9) translateY(10px)}
+          to{opacity:1;transform:scale(1) translateY(0)}}
+        .pl-zoom{animation:pl-zoom .24s cubic-bezier(.2,.9,.3,1);}
+        @keyframes pl-pulse{0%,100%{opacity:1}50%{opacity:.25}}
+        .pl-pulse{animation:pl-pulse 1.6s ease-in-out infinite;}
+        .pl-digits{display:inline-block;overflow:hidden;height:1.35em;line-height:1.35em;}
+        .pl-digits > span{display:inline-block;}
+        @keyframes pl-roll-up{from{transform:translateY(105%);opacity:0}to{transform:translateY(0);opacity:1}}
+        @keyframes pl-roll-down{from{transform:translateY(-105%);opacity:0}to{transform:translateY(0);opacity:1}}
+        .pl-roll-up{animation:pl-roll-up .2s cubic-bezier(.2,.9,.3,1);}
+        .pl-roll-down{animation:pl-roll-down .2s cubic-bezier(.2,.9,.3,1);}
+      `),
+        React.createElement("div", { className: "px-4 pt-4 pb-2 md:px-6" },
+            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["lernen", "Lernen"], ["auswerten", "Bilanz"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
+                    ? { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" }
+                    : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
+                lbl,
+                k === "auswerten" && weekStats.pending.length > 0 && (React.createElement("span", { className: "ml-1.5", style: { color: view === k ? "#F0B429" : "#A03A5E" } }, weekStats.pending.length)))))),
+            sync.msg && (React.createElement("div", { className: "mt-2 mono text-xs flex items-center gap-2", style: { color: sync.status === "error" ? "#A03A5E" : "var(--muted)" } },
+                sync.status === "error" && React.createElement(AlertCircle, { size: 13 }),
+                sync.msg))),
+        React.createElement("div", { onTouchStart: onTouchStart, onTouchMove: onTouchMove, onTouchEnd: onTouchEnd, onClickCapture: onClickCapture, className: slide === "l" ? "pl-in-l" : slide === "r" ? "pl-in-r" : "" },
+            view === "heute" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
+                React.createElement(TodayView, { dayK: selectedDay, blocks: blocksFor(selectedDay), now: now, isToday: selectedDay === todayKey, routines: state.routines, checks: state.checks, onToggleCheck: toggleCheck, onBlock: (b) => setDetailId(b.id), onStatus: setBlockStatus, onAdd: addTerminHere, onShiftDay: (dir) => {
+                        const nd = addDays(new Date(selectedDay + "T00:00:00"), dir);
+                        setSelectedDay(dayKey(nd));
+                        setWeekStart(mondayOf(nd));
+                    }, onBackToToday: () => { setSelectedDay(todayKey); setWeekStart(mondayOf(new Date())); } }))),
+            view === "woche" && (React.createElement(React.Fragment, null,
+                React.createElement("header", { className: "px-4 pb-3 md:px-6" },
+                    React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
+                                React.createElement(ChevronLeft, { size: 16 })),
+                            React.createElement("div", null,
+                                React.createElement("div", { className: "mono text-xs pl-muted" },
+                                    "KW ",
+                                    isoWeek(weekStart)),
+                                React.createElement("div", { className: "mono text-sm font-medium" }, weekLabel)),
+                            React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, 7)), className: "pl-btn p-2 rounded", "aria-label": "Woche vor" },
+                                React.createElement(ChevronRight, { size: 16 }))),
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("button", { onClick: fetchCal, disabled: sync.status === "loading", className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs" },
+                                React.createElement(RefreshCw, { size: 14, className: sync.status === "loading" ? "animate-spin" : "" }),
+                                "Kalender"),
+                            React.createElement("button", { onClick: syncWeek, disabled: sync.status === "loading", className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs" },
+                                React.createElement(UploadCloud, { size: 14 }),
+                                "sichern"))),
+                    manualPick && (React.createElement("div", { className: "pl-rise mt-2 px-3 py-2 rounded flex items-center gap-2", style: { background: hexA(((_a = CATS[manualPick.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72", 0.14) } },
+                        React.createElement("span", { className: "mono text-xs flex-1", style: { color: (_b = CATS[manualPick.cat]) === null || _b === void 0 ? void 0 : _b.color } },
+                            "Tippe die Startzeit f\u00FCr \u201E",
+                            manualPick.title,
+                            "\" (",
+                            durLabel(manualPick.est),
+                            ") ins Raster"),
+                        React.createElement("button", { onClick: () => setManualPick(null), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Abbrechen")))),
+                React.createElement("div", { className: "px-4 md:px-6" },
+                    React.createElement("div", { className: "grid grid-cols-7 gap-1" }, days.map((d, i) => {
+                        const k = dayKey(d);
+                        const fill = Math.min(100, (plannedMinutes(k) / ((DAY_END - DAY_START) * 60)) * 100);
+                        const isSel = k === selectedDay;
+                        const isToday = k === todayKey;
+                        return (React.createElement("button", { key: k, onClick: () => setSelectedDay(k), className: "pl-tap px-1 py-2 rounded text-center", style: {
+                                background: isSel ? "var(--card)" : "transparent",
+                                border: `1px solid ${isSel ? "var(--ink)" : "transparent"}`,
+                            } },
+                            React.createElement("div", { className: "mono text-xs pl-muted" }, DAY_NAMES[i]),
+                            React.createElement("div", { className: "mono text-base font-medium", style: { color: isToday ? "#2B4B8F" : "var(--ink)" } }, d.getDate()),
+                            React.createElement("div", { className: "mt-1 h-1 rounded-full", style: { background: "var(--line)" } },
+                                React.createElement("div", { className: "h-1 rounded-full pl-bar", style: { width: `${fill}%`, background: isToday ? "#2B4B8F" : "var(--muted)" } }))));
+                    }))),
+                React.createElement("div", { className: "px-4 md:px-6 py-3 flex flex-col lg:flex-row gap-4" },
+                    React.createElement("div", { className: "flex-1 min-w-0" },
+                        React.createElement("div", { className: "flex items-center gap-1 mb-1" },
+                            [[1, "1 Tag"], [5, "5 Tage"], [7, "Woche"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => setCols(k), className: "pl-btn px-2 py-1 rounded mono text-xs", style: cols === k ? { background: "var(--ink)", color: "var(--paper)", borderColor: "var(--ink)" } : {} }, lbl))),
+                            React.createElement("button", { onClick: () => setZoom(zoom === "fit" ? "mid" : zoom === "mid" ? "big" : "fit"), className: "pl-btn px-2 py-1 rounded mono text-xs", title: "H\u00F6he des Rasters umschalten" }, zoom === "fit" ? "ganzer Tag" : zoom === "mid" ? "mittel" : "groß"),
+                            React.createElement("button", { onClick: addTerminHere, className: "ml-auto px-3 py-1 rounded flex items-center gap-1.5 mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } },
+                                React.createElement(Plus, { size: 13 }),
+                                " Termin")),
+                        React.createElement("div", { className: `pl-card rounded ${manualPick ? "pl-arm" : ""}` },
+                            React.createElement(Grid, { visibleDays: visibleDays, todayKey: todayKey, now: now, blocksFor: blocksFor, onSlot: handleSlotClick, onBlock: (b) => setDetailId(b.id), gridRef: gridRef, ppm: ppm, maxH: gridMaxH }))),
+                    React.createElement("aside", { className: "lg:w-80 shrink-0 flex flex-col gap-3" },
+                        React.createElement("div", { className: "flex gap-1" },
+                            React.createElement(TabBtn, { active: panel === "todos", onClick: () => setPanel("todos"), icon: List, label: "To-dos" }),
+                            React.createElement(TabBtn, { active: panel === "projekte", onClick: () => setPanel("projekte"), icon: Target, label: "Projekte" }),
+                            React.createElement(TabBtn, { active: panel === "vorlage", onClick: () => setPanel("vorlage"), icon: LayoutGrid, label: "Vorlage" })),
+                        panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: setPendingTodo, pending: pendingTodo })),
+                        panel === "projekte" && (React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: setPendingTodo })),
+                        panel === "vorlage" && (React.createElement(TemplatePanel, { template: state.template || [], onApply: applyTemplate, onSaveWeek: saveWeekAsTemplate, onRemove: removeTemplateEntry, onToggleAuto: toggleTemplateAuto })))))),
+            view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
+                React.createElement(LearnView, { done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: weekIdx, setWeekIdx: setWeekIdx, today: today }))),
+            view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
+                React.createElement("div", { className: "flex items-center justify-center gap-2" },
+                    React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
+                        React.createElement(ChevronLeft, { size: 16 })),
+                    React.createElement("span", { className: "mono text-sm" },
+                        "KW ",
+                        isoWeek(weekStart),
+                        " \u00B7 ",
+                        weekLabel),
+                    React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, 7)), className: "pl-btn p-2 rounded", "aria-label": "Woche vor" },
+                        React.createElement(ChevronRight, { size: 16 }))),
+                React.createElement(ReviewPanel, { stats: weekStats, routines: state.routines, yearGrid: yearGrid, onPickWeek: (d) => setWeekStart(mondayOf(d)), onDemo: loadDemo, onReset: resetAll, onConfetti: testConfetti, onStatus: setBlockStatus }),
+                React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: setPendingTodo }),
+                React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onPlan: (r) => setPendingTodo({ title: r.title, cat: r.cat, est: 60 }) })))),
+        pendingTodo && (React.createElement(ScheduleSheet, { item: pendingTodo, weekStart: weekStart, todayKey: todayKey, gapsFor: gapsFor, blocksFor: blocksFor, onConfirm: confirmSchedule, onManual: (dur) => { setManualPick({ ...pendingTodo, est: dur }); setPendingTodo(null); }, onClose: () => setPendingTodo(null) })),
+        React.createElement(Confetti, { trigger: celebration === null || celebration === void 0 ? void 0 : celebration.id }),
+        celebration && (React.createElement("button", { onClick: () => setCelebration(null), className: "fixed inset-0 z-50 flex items-center justify-center p-6", style: { background: "rgba(25,29,26,.28)" } },
+            React.createElement("div", { className: "pl-sheet pl-rise rounded-lg px-8 py-6 text-center" },
+                React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest mb-1" }, "geschafft"),
+                React.createElement("div", { className: "text-4xl font-semibold", style: { color: celebration.color } }, celebration.title),
+                React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
+        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onDelete: () => { removeBlock(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
+        editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor({ ...editor, ...patch }); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
+}
+/* ════════════════ Raster ════════════════ */
+function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef, ppm, maxH }) {
+    const totalMin = (DAY_END - DAY_START) * 60;
+    const height = totalMin * ppm;
+    const hours = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i);
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const showNow = nowMin >= DAY_START * 60 && nowMin <= DAY_END * 60;
+    const labelEvery = ppm < 0.42 ? 2 : 1;
+    const n = visibleDays.length;
+    const compact = n >= 5;
+    const tpl = `${compact ? 26 : 38}px repeat(${n},1fr)`;
+    const handleClick = (e, day) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const raw = DAY_START * 60 + (e.clientY - rect.top) / ppm;
+        const snapped = Math.round(raw / SLOT) * SLOT;
+        onSlot(day, Math.max(DAY_START * 60, Math.min(DAY_END * 60 - 30, snapped)));
+    };
+    return (React.createElement("div", null,
+        n > 1 && (React.createElement("div", { className: "grid border-b pl-hair", style: { gridTemplateColumns: tpl } },
+            React.createElement("div", null),
+            visibleDays.map((d) => {
+                const k = dayKey(d);
+                const isToday = k === todayKey;
+                return (React.createElement("div", { key: k, className: "px-1 py-1.5 border-l pl-hair text-center" },
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, DAY_NAMES[(d.getDay() + 6) % 7]),
+                    React.createElement("div", { className: "mono text-sm font-medium", style: { color: isToday ? "#2B4B8F" : "var(--ink)" } }, d.getDate())));
+            }))),
+        React.createElement("div", { ref: gridRef, className: "pl-scroll overflow-y-auto", style: { maxHeight: maxH } },
+            React.createElement("div", { className: "grid", style: { gridTemplateColumns: tpl } },
+                React.createElement(HourRail, { hours: hours, ppm: ppm, every: labelEvery, compact: compact }),
+                visibleDays.map((d) => {
+                    const k = dayKey(d);
+                    const blocks = blocksFor(k);
+                    return (React.createElement("div", { key: k, className: "relative border-l pl-hair", style: { height } },
+                        React.createElement("div", { className: "pl-slot absolute inset-0 cursor-copy", onClick: (e) => handleClick(e, k) }),
+                        hours.map((h) => (React.createElement("div", { key: h, className: "absolute left-0 right-0 border-t pl-hair pointer-events-none", style: { top: (h - DAY_START) * 60 * ppm } }))),
+                        blocks.map((b) => {
+                            var _a;
+                            const c = b.external ? "#6F7A72" : ((_a = CATS[b.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+                            const fill = b.status === "done" ? 0.3 : b.status === "skipped" ? 0.06 : b.status === "moved" ? 0.1 : 0.16;
+                            const h = Math.max(b.dur * ppm - 2, 11);
+                            const roomy = !compact && h >= 34;
+                            const showText = h >= (compact ? 20 : 16);
+                            return (React.createElement("button", { key: b.id, onClick: (e) => { e.stopPropagation(); onBlock(b); }, className: `pl-block absolute ${b.external ? "pl-ext cursor-default" : ""}`, style: {
+                                    top: (b.start - DAY_START * 60) * ppm,
+                                    height: h, left: 2, right: 2,
+                                    background: b.external ? "#DFE2DC" : hexA(c, fill),
+                                    borderLeft: `${compact ? 2 : 3}px ${b.status === "skipped" ? "dashed" : "solid"} ${c}`,
+                                    opacity: b.status === "skipped" ? 0.55 : 1,
+                                } }, showText && (React.createElement("div", { className: "leading-tight text-left", style: { paddingLeft: 3, paddingRight: 2, paddingTop: roomy ? 2 : 0 } },
+                                roomy && React.createElement("div", { className: "mono text-xs pl-muted" }, minsToLabel(b.start)),
+                                React.createElement("div", { className: "font-medium truncate", style: {
+                                        fontSize: compact ? 9.5 : h >= 24 ? 12 : 10,
+                                        lineHeight: compact ? "11px" : h >= 24 ? "14px" : "12px",
+                                        color: b.external ? "#3D453F" : c,
+                                        textDecoration: b.status === "skipped" ? "line-through" : "none",
+                                    } }, b.title || "—")))));
+                        }),
+                        k === todayKey && showNow && (React.createElement("div", { className: "absolute left-0 right-0 pointer-events-none z-10", style: { top: (nowMin - DAY_START * 60) * ppm } },
+                            React.createElement("div", { style: { height: 1.5, background: "#C2410C" } })))));
+                })))));
+}
+function HourRail({ hours, ppm, every = 1, compact = false }) {
+    return (React.createElement("div", { className: "relative", style: { height: (DAY_END - DAY_START) * 60 * ppm } }, hours.map((h, i) => (i % every === 0 ? (React.createElement("div", { key: h, className: "absolute mono pl-muted", style: { right: compact ? 3 : 6, top: (h - DAY_START) * 60 * ppm - 6, fontSize: compact ? 9 : 11 } }, compact ? h : pad(h))) : null))));
+}
+function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday }) {
+    var _a, _b;
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const d = new Date(dayK + "T00:00:00");
+    const running = isToday
+        ? blocks.find((b) => !b.external && nowMin >= b.start && nowMin < b.start + b.dur)
+        : null;
+    const next = blocks.find((b) => b.start > (isToday ? nowMin : -1));
+    const pending = blocks.filter((b) => !b.external && !b.status && b.start + b.dur <= (isToday ? nowMin : 24 * 60));
+    return (React.createElement("div", { className: "flex flex-col gap-4" },
+        React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement("button", { onClick: () => onShiftDay(-1), className: "pl-btn p-2 rounded", "aria-label": "Tag zur\u00FCck" },
+                React.createElement(ChevronLeft, { size: 16 })),
+            React.createElement("div", { className: "flex-1 text-center" },
+                React.createElement("div", { className: "mono text-xs pl-muted" }, isToday ? "heute" : DAY_NAMES[(d.getDay() + 6) % 7]),
+                React.createElement("div", { className: "text-xl font-semibold leading-tight" },
+                    d.getDate(),
+                    ". ",
+                    ["Jänner", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"][d.getMonth()])),
+            React.createElement("button", { onClick: () => onShiftDay(1), className: "pl-btn p-2 rounded", "aria-label": "Tag vor" },
+                React.createElement(ChevronRight, { size: 16 }))),
+        !isToday && (React.createElement("button", { onClick: onBackToToday, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-center" }, "zur\u00FCck zu heute")),
+        isToday && (React.createElement("div", { className: "pl-card rounded p-4" },
+            running ? (React.createElement(React.Fragment, null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "l\u00E4uft gerade"),
+                React.createElement("div", { className: "text-2xl font-semibold leading-tight", style: { color: (_a = CATS[running.cat]) === null || _a === void 0 ? void 0 : _a.color } }, running.title),
+                React.createElement("div", { className: "mono text-sm pl-muted mt-1" },
+                    minsToLabel(running.start),
+                    "\u2013",
+                    minsToLabel(running.start + running.dur),
+                    " \u00B7 noch",
+                    " ",
+                    durLabel(running.start + running.dur - nowMin)),
+                React.createElement("div", { className: "h-1.5 rounded-full mt-3", style: { background: "var(--line)" } },
+                    React.createElement("div", { className: "h-1.5 rounded-full pl-bar", style: {
+                            width: `${((nowMin - running.start) / running.dur) * 100}%`,
+                            background: (_b = CATS[running.cat]) === null || _b === void 0 ? void 0 : _b.color,
+                        } })))) : (React.createElement(React.Fragment, null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "gerade nichts geplant"),
+                React.createElement("div", { className: "text-lg" }, next
+                    ? `Als Nächstes um ${minsToLabel(next.start)}: ${next.title}`
+                    : "Für heute steht nichts mehr an."))),
+            running && next && (React.createElement("div", { className: "mono text-xs pl-muted mt-3 pt-3 border-t pl-hair" },
+                "danach ",
+                minsToLabel(next.start),
+                " \u00B7 ",
+                next.title)))),
+        pending.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" },
+                "Wie ist es gelaufen? (",
+                pending.length,
+                ")"),
+            React.createElement("div", { className: "flex flex-col gap-2" }, pending.map((b) => (React.createElement("div", { key: b.id, className: "flex items-center gap-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted shrink-0" }, minsToLabel(b.start)),
+                React.createElement("span", { className: "text-sm truncate flex-1" }, b.title),
+                React.createElement(StatusButtons, { current: b.status, onPick: (s) => onStatus(b.id, s) }))))))),
+        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "flex items-center justify-between mb-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted" }, "Tagesplan"),
+                React.createElement("button", { onClick: onAdd, className: "px-2.5 py-1 rounded flex items-center gap-1 mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } },
+                    React.createElement(Plus, { size: 12 }),
+                    " Termin")),
+            blocks.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-3" }, "Nichts eingetragen. \u00DCber \u201ETermin\" oder die Wochenansicht f\u00FCllst du den Tag.")) : (React.createElement("div", { className: "flex flex-col" }, blocks.map((b) => {
+                var _a;
+                const c = b.external ? "#6F7A72" : ((_a = CATS[b.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+                const past = isToday && b.start + b.dur <= nowMin;
+                const isRunning = running && running.id === b.id;
+                return (React.createElement("button", { key: b.id, onClick: () => !b.external && onBlock(b), className: "flex items-center gap-3 py-2 border-b pl-hair text-left", style: { opacity: b.status === "skipped" ? 0.5 : past && !isRunning ? 0.75 : 1 } },
+                    React.createElement("span", { className: "mono text-xs pl-muted w-10 shrink-0" }, minsToLabel(b.start)),
+                    React.createElement("span", { className: "w-1 self-stretch rounded-full shrink-0", style: { background: c } }),
+                    React.createElement("span", { className: "flex-1 min-w-0" },
+                        React.createElement("span", { className: "text-sm block truncate", style: { textDecoration: b.status === "skipped" ? "line-through" : "none" } }, b.title || "Ohne Titel"),
+                        React.createElement("span", { className: "mono text-xs pl-muted" },
+                            durLabel(b.dur),
+                            b.external ? " · Kalender" : "",
+                            isRunning ? " · läuft" : "")),
+                    b.status === "done" && React.createElement(Check, { size: 14, style: { color: "#1E6E5A" } }),
+                    b.status === "moved" && React.createElement(ArrowRight, { size: 14, style: { color: "#8A4E1C" } }),
+                    b.status === "skipped" && React.createElement(X, { size: 14, style: { color: "#A03A5E" } })));
+            })))),
+        routines.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Routinen"),
+            React.createElement("div", { className: "flex flex-wrap gap-1.5" }, routines.map((r) => {
+                var _a;
+                const on = (checks[dayK] || []).includes(r.id);
+                const c = ((_a = CATS[r.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+                return (React.createElement("button", { key: r.id, onClick: () => { if (!on)
+                        buzz(12); onToggleCheck(r.id, dayK); }, className: `px-3 py-2 rounded flex items-center gap-1.5 text-sm ${on ? "pl-pop" : ""}`, style: {
+                        background: on ? c : "transparent",
+                        color: on ? "#FFF" : "var(--ink)",
+                        border: `1px solid ${on ? c : "var(--line)"}`,
+                    } },
+                    on && React.createElement(Check, { size: 13 }),
+                    r.title));
+            }))))));
+}
+function LearnView({ done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today }) {
+    const [openSubject, setOpenSubject] = useState(null);
+    const [showInfo, setShowInfo] = useState(false);
+    const wk = STUDY_WEEKS[weekIdx];
+    const examDate = new Date(STUDY_EXAM.date + "T00:00:00");
+    const daysLeft = Math.ceil((examDate - new Date(dayKey(today) + "T00:00:00")) / 86400000);
+    const key = (kind, i) => `w${wk.n}-${kind}-${i}`;
+    const mustDone = wk.must.filter((_, i) => done[key("must", i)]).length;
+    const mustMin = wk.must.reduce((s, t) => s + t.m, 0);
+    const doneMin = wk.must.reduce((s, t, i) => s + (done[key("must", i)] ? t.m : 0), 0);
+    const pct = mustMin ? (doneMin / mustMin) * 100 : 0;
+    const Row = ({ task, kind, i }) => {
+        var _a;
+        const k = key(kind, i);
+        const on = !!done[k];
+        const c = kind === "must" ? "#2B4B8F" : "#6F7A72";
+        return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
+            React.createElement("button", { onClick: () => { if (!on)
+                    buzz(12); onToggleTask(k); }, className: `w-5 h-5 rounded-sm shrink-0 flex items-center justify-center mt-0.5 ${on ? "pl-pop" : ""}`, style: { background: on ? c : "transparent", border: `1.5px solid ${on ? c : "var(--line)"}` }, "aria-label": "Erledigt" }, on && React.createElement(Check, { size: 13, color: "#FFF" })),
+            React.createElement("div", { className: "flex-1 min-w-0" },
+                React.createElement("div", { className: "text-sm leading-snug", style: { textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1 } }, task.t),
+                React.createElement("div", { className: "mono text-xs pl-muted" }, (_a = SUBJECTS[task.s]) === null || _a === void 0 ? void 0 :
+                    _a.short,
+                    " \u00B7 ",
+                    durLabel(task.m))),
+            !on && (React.createElement("button", { onClick: () => onPlanTask(task, k), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" }, "einplanen"))));
+    };
+    return (React.createElement("div", { className: "flex flex-col gap-3" },
+        React.createElement("div", { className: "pl-card rounded p-4" },
+            React.createElement("div", { className: "flex items-end justify-between gap-3" },
+                React.createElement("div", { className: "min-w-0" },
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, "n\u00E4chste Pr\u00FCfung"),
+                    React.createElement("div", { className: "text-lg font-semibold leading-tight truncate" }, STUDY_EXAM.title),
+                    React.createElement("div", { className: "mono text-xs pl-muted mt-0.5" }, "27. September 2026")),
+                React.createElement("div", { className: "text-right shrink-0" },
+                    React.createElement("div", { className: "mono text-4xl font-semibold leading-none", style: { color: daysLeft <= 14 ? "#A03A5E" : "#2B4B8F" } }, daysLeft),
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, "Tage"))),
+            React.createElement("p", { className: "mono text-xs pl-muted mt-3 pt-3 border-t pl-hair leading-relaxed" }, "Pr\u00FCf bitte, ob der 27.09. stimmt \u2014 das ist ein Sonntag.")),
+        React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement("button", { onClick: () => setWeekIdx(Math.max(0, weekIdx - 1)), className: "pl-btn p-2 rounded", disabled: weekIdx === 0, "aria-label": "Woche zur\u00FCck" },
+                React.createElement(ChevronLeft, { size: 16 })),
+            React.createElement("div", { className: "flex-1 text-center" },
+                React.createElement("div", { className: "mono text-xs pl-muted" },
+                    "Lernwoche ",
+                    wk.n,
+                    " \u00B7 ",
+                    wk.from.slice(8),
+                    ".",
+                    wk.from.slice(5, 7),
+                    ". \u2013 ",
+                    wk.to.slice(8),
+                    ".",
+                    wk.to.slice(5, 7),
+                    "."),
+                React.createElement("div", { className: "text-base font-medium leading-tight" }, wk.title)),
+            React.createElement("button", { onClick: () => setWeekIdx(Math.min(STUDY_WEEKS.length - 1, weekIdx + 1)), className: "pl-btn p-2 rounded", disabled: weekIdx === STUDY_WEEKS.length - 1, "aria-label": "Woche vor" },
+                React.createElement(ChevronRight, { size: 16 }))),
+        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "flex items-baseline justify-between mb-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted" }, "Pflichtprogramm"),
+                React.createElement("span", { className: "mono text-sm" },
+                    mustDone,
+                    "/",
+                    wk.must.length,
+                    " \u00B7 ",
+                    durLabel(doneMin),
+                    " von ",
+                    durLabel(mustMin))),
+            React.createElement("div", { className: "h-2 rounded-full overflow-hidden", style: { background: hexA("#2B4B8F", 0.15) } },
+                React.createElement("div", { className: "h-2 rounded-full pl-bar", style: { width: `${pct}%`, background: "#2B4B8F" } }))),
+        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs mb-1", style: { color: "#2B4B8F" } }, "Muss \u2014 auch in einer schlechten Woche"),
+            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.must.map((t, i) => React.createElement(Row, { key: i, task: t, kind: "must", i: i })))),
+        wk.extra.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wenn Zeit \u2014 Aufbau auf 8\u201310 h"),
+            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.extra.map((t, i) => React.createElement(Row, { key: i, task: t, kind: "extra", i: i }))))),
+        wk.n === 7 && (React.createElement("div", { className: "pl-card rounded p-4 text-center" },
+            React.createElement("div", { className: "mono text-xs pl-muted" }, "So 27.09."),
+            React.createElement("div", { className: "text-lg font-semibold" }, "Molekularbiologie 2"),
+            React.createElement("p", { className: "mono text-xs pl-muted mt-2" }, "Am Pr\u00FCfungstag nichts Neues mehr lernen."))),
+        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "F\u00E4cher"),
+            React.createElement("div", { className: "flex flex-col" }, ["molbio", "thermo", "prozess", "allergien"].map((id) => {
+                const s = SUBJECTS[id];
+                const open = openSubject === id;
+                return (React.createElement("div", { key: id, className: "border-b pl-hair last:border-0" },
+                    React.createElement("button", { onClick: () => setOpenSubject(open ? null : id), className: "w-full flex items-center gap-2 py-2 text-left" },
+                        React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: CATS.uni.color } }),
+                        React.createElement("span", { className: "text-sm flex-1" }, s.title),
+                        React.createElement(ChevronRight, { size: 14, className: "pl-muted", style: { transform: open ? "rotate(90deg)" : "none", transition: "transform .18s" } })),
+                    open && (React.createElement("p", { className: "pl-rise text-sm pl-muted leading-relaxed pb-3 pl-3.5" }, s.note))));
+            }))),
+        React.createElement("button", { onClick: () => setShowInfo(!showInfo), className: "pl-btn px-3 py-2 rounded mono text-xs" }, showInfo ? "Regeln ausblenden" : "Lernregeln & FH-Fristen"),
+        showInfo && (React.createElement("div", { className: "pl-card pl-rise rounded p-3 flex flex-col gap-3" },
+            React.createElement("div", null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1.5" }, "Sechs Regeln"),
+                React.createElement("ol", { className: "flex flex-col gap-1.5" }, STUDY_RULES.map((r, i) => (React.createElement("li", { key: i, className: "text-sm flex gap-2" },
+                    React.createElement("span", { className: "mono text-xs pl-muted shrink-0" }, i + 1),
+                    r))))),
+            React.createElement("div", { className: "border-t pl-hair pt-3" },
+                React.createElement("div", { className: "mono text-xs mb-1.5", style: { color: "#A03A5E" } }, "FH-Pr\u00FCfungsordnung"),
+                React.createElement("ul", { className: "flex flex-col gap-1.5" }, STUDY_NOTES.map((r, i) => (React.createElement("li", { key: i, className: "text-sm flex gap-2" },
+                    React.createElement("span", { className: "pl-muted shrink-0" }, "\u00B7"),
+                    r)))))))));
+}
+/* ════════════════ Panels ════════════════ */
+function TabBtn({ active, onClick, icon: Icon, label }) {
+    return (React.createElement("button", { onClick: onClick, className: "pl-btn flex-1 px-2 py-2 rounded flex items-center justify-center gap-1.5 mono text-xs", style: { background: active ? "var(--ink)" : "var(--card)", color: active ? "var(--paper)" : "var(--ink)", borderColor: active ? "var(--ink)" : "var(--line)" } },
+        React.createElement(Icon, { size: 13 }),
+        " ",
+        label));
+}
+function CatPicker({ value, onChange }) {
+    return (React.createElement("div", { className: "flex flex-wrap gap-1" }, CAT_KEYS.map((k) => (React.createElement("button", { key: k, onClick: () => onChange(k), className: "px-2 py-1 rounded mono text-xs", style: {
+            background: value === k ? CATS[k].color : "transparent",
+            color: value === k ? "#FFF" : CATS[k].color,
+            border: `1px solid ${CATS[k].color}`,
+        } }, CATS[k].label)))));
+}
+function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending }) {
+    const [title, setTitle] = useState("");
+    const [cat, setCat] = useState("fokus");
+    const [est, setEst] = useState(60);
+    const submit = () => {
+        if (!title.trim())
+            return;
+        onAdd(title.trim(), cat, est);
+        setTitle("");
+    };
+    const open = todos.filter((t) => !t.done);
+    const done = todos.filter((t) => t.done);
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+        React.createElement("div", { className: "flex flex-col gap-2" },
+            React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onKeyDown: (e) => e.key === "Enter" && submit(), placeholder: "Was steht an?", className: "pl-input px-2 py-1.5 rounded text-sm" }),
+            React.createElement(CatPicker, { value: cat, onChange: setCat }),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("div", { className: "flex items-center gap-1" }, [30, 60, 90, 120].map((m) => (React.createElement("button", { key: m, onClick: () => setEst(m), className: "pl-btn px-2 py-1 rounded mono text-xs", style: est === m ? { background: "var(--ink)", color: "var(--paper)", borderColor: "var(--ink)" } : {} }, m)))),
+                React.createElement("button", { onClick: submit, className: "pl-btn ml-auto px-2.5 py-1 rounded flex items-center gap-1 mono text-xs" },
+                    React.createElement(Plus, { size: 13 }),
+                    " Anlegen"))),
+        React.createElement("div", { className: "border-t pl-hair pt-2 flex flex-col gap-1.5" },
+            open.length === 0 && done.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted py-2" }, "Noch keine Aufgaben. Leg eine an \u2014 danach kannst du sie direkt in eine freie Zeit ziehen.")),
+            open.map((t) => {
+                var _a, _b, _c;
+                return (React.createElement("div", { key: t.id, className: "flex items-center gap-2 group" },
+                    React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0", style: { border: `1.5px solid ${((_a = CATS[t.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72"}` }, "aria-label": "Erledigt" }),
+                    React.createElement("span", { className: "text-sm truncate flex-1" }, t.title),
+                    React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(t.est)),
+                    React.createElement("button", { onClick: () => onPlan((pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? null : { title: t.title, cat: t.cat, est: t.est, todoId: t.id }), className: "mono text-xs px-1.5 py-0.5 rounded", style: {
+                            border: `1px solid ${(pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? (_b = CATS[t.cat]) === null || _b === void 0 ? void 0 : _b.color : "var(--line)"}`,
+                            color: (pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? "#FFF" : "var(--muted)",
+                            background: (pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? (_c = CATS[t.cat]) === null || _c === void 0 ? void 0 : _c.color : "transparent",
+                        } }, "einplanen"),
+                    React.createElement("button", { onClick: () => onRemove(t.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "L\u00F6schen" },
+                        React.createElement(Trash2, { size: 13 }))));
+            }),
+            done.length > 0 && (React.createElement("div", { className: "mt-1 pt-2 border-t pl-hair flex flex-col gap-1" }, done.map((t) => (React.createElement("div", { key: t.id, className: "flex items-center gap-2 group" },
+                React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0 flex items-center justify-center", style: { background: "var(--muted)" }, "aria-label": "Wieder \u00F6ffnen" },
+                    React.createElement(Check, { size: 11, color: "#FAFAF8" })),
+                React.createElement("span", { className: "text-sm truncate flex-1 line-through pl-muted" }, t.title),
+                React.createElement("button", { onClick: () => onRemove(t.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "L\u00F6schen" },
+                    React.createElement(Trash2, { size: 13 }))))))))));
+}
+function RoutinePanel({ routines, checks, days, weekStart, today, onAdd, onRemove, onToggle, onTarget, onPlan }) {
+    const [title, setTitle] = useState("");
+    const [cat, setCat] = useState("training");
+    const [popped, setPopped] = useState(null);
+    const hit = (routineId, key) => {
+        const wasOn = (checks[key] || []).includes(routineId);
+        onToggle(routineId, key);
+        if (!wasOn) {
+            buzz(12);
+            setPopped(routineId + key);
+            setTimeout(() => setPopped(null), 340);
+        }
+    };
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+        React.createElement("div", { className: "flex gap-2" },
+            React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && title.trim()) {
+                    onAdd(title.trim(), cat);
+                    setTitle("");
+                } }, placeholder: "Neue Routine", className: "pl-input px-2 py-1.5 rounded text-sm flex-1" }),
+            React.createElement("button", { onClick: () => { if (title.trim()) {
+                    onAdd(title.trim(), cat);
+                    setTitle("");
+                } }, className: "pl-btn px-2 rounded", "aria-label": "Routine anlegen" },
+                React.createElement(Plus, { size: 14 }))),
+        React.createElement(CatPicker, { value: cat, onChange: setCat }),
+        React.createElement("div", { className: "border-t pl-hair pt-2 flex flex-col gap-3" },
+            routines.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Keine Routinen. Leg oben eine an.")),
+            routines.map((r) => {
+                var _a, _b;
+                const target = (_a = r.weekTarget) !== null && _a !== void 0 ? _a : 2;
+                const hits = weekHits(r, checks, weekStart);
+                const ds = dayStreak(r.id, checks, today);
+                const ws = weekStreak(r, checks, weekStart);
+                const c = ((_b = CATS[r.cat]) === null || _b === void 0 ? void 0 : _b.color) || "#6F7A72";
+                const reached = hits >= target;
+                return (React.createElement("div", { key: r.id, className: "group" },
+                    React.createElement("div", { className: "flex items-center gap-1.5 mb-1" },
+                        React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: c } }),
+                        React.createElement("span", { className: "text-sm truncate flex-1" }, r.title),
+                        React.createElement("span", { className: "mono text-xs", style: reached ? { color: c } : { color: "var(--muted)" } },
+                            hits,
+                            "/",
+                            target),
+                        React.createElement("div", { className: "flex items-center opacity-0 group-hover:opacity-100" },
+                            React.createElement("button", { onClick: () => onTarget(r.id, Math.max(1, target - 1)), className: "mono text-xs px-1 pl-muted", "aria-label": "Soll senken" }, "\u2212"),
+                            React.createElement("button", { onClick: () => onTarget(r.id, Math.min(7, target + 1)), className: "mono text-xs px-1 pl-muted", "aria-label": "Soll erh\u00F6hen" }, "+"),
+                            React.createElement("button", { onClick: () => onPlan(r), className: "mono text-xs px-1 pl-muted" }, "einplanen"),
+                            React.createElement("button", { onClick: () => onRemove(r.id), className: "pl-muted px-1", "aria-label": "L\u00F6schen" },
+                                React.createElement(Trash2, { size: 12 })))),
+                    React.createElement("div", { className: "flex items-center gap-1 mb-1" }, days.map((d) => {
+                        const k = dayKey(d);
+                        const on = (checks[k] || []).includes(r.id);
+                        return (React.createElement("button", { key: k, onClick: () => hit(r.id, k), className: `rounded-sm flex-1 flex items-center justify-center ${popped === r.id + k ? "pl-pop" : ""}`, style: {
+                                height: 22,
+                                background: on ? c : "transparent",
+                                border: `1px solid ${on ? c : "var(--line)"}`,
+                            }, "aria-label": `${r.title} abhaken` }, on && React.createElement(Check, { size: 12, color: "#FFF" })));
+                    })),
+                    React.createElement("div", { className: "flex items-center gap-3 mono text-xs pl-muted" },
+                        React.createElement("span", { className: "flex items-center gap-1", style: ws.weeks > 0 ? { color: c } : {} },
+                            React.createElement(Flame, { size: 11 }),
+                            " ",
+                            ws.weeks,
+                            " ",
+                            ws.weeks === 1 ? "Woche" : "Wochen"),
+                        React.createElement("span", null,
+                            ds,
+                            " ",
+                            ds === 1 ? "Tag" : "Tage",
+                            " am St\u00FCck"),
+                        ws.jokerUsed && React.createElement("span", null, "Joker"))));
+            }))));
+}
+function TemplatePanel({ template, onApply, onSaveWeek, onRemove, onToggleAuto }) {
+    const byDay = DAY_NAMES.map((_, i) => template.filter((t) => t.weekday === i).sort((a, b) => a.start - b.start));
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+        React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Dein Wochenger\u00FCst. Eintr\u00E4ge mit Haken erscheinen automatisch in jeder neuen Woche."),
+        React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { onClick: onSaveWeek, className: "pl-btn flex-1 px-2 py-1.5 rounded mono text-xs" }, "Diese Woche sichern"),
+            React.createElement("button", { onClick: onApply, className: "flex-1 px-2 py-1.5 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Jetzt anwenden")),
+        template.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted border-t pl-hair pt-2" }, "Noch keine Vorlage. Plane eine Woche so, wie sie normalerweise aussehen soll, und tippe auf \u201EDiese Woche sichern\".")) : (React.createElement("div", { className: "border-t pl-hair pt-2 flex flex-col gap-2" }, byDay.map((entries, i) => entries.length === 0 ? null : (React.createElement("div", { key: i },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, DAY_NAMES[i]),
+            React.createElement("div", { className: "flex flex-col gap-1" }, entries.map((t) => {
+                var _a, _b;
+                return (React.createElement("div", { key: t.id, className: "flex items-center gap-2 group" },
+                    React.createElement("button", { onClick: () => onToggleAuto(t.id), className: "w-4 h-4 rounded-sm shrink-0 flex items-center justify-center", style: {
+                            background: t.auto ? (_a = CATS[t.cat]) === null || _a === void 0 ? void 0 : _a.color : "transparent",
+                            border: `1px solid ${t.auto ? (_b = CATS[t.cat]) === null || _b === void 0 ? void 0 : _b.color : "var(--line)"}`,
+                        }, "aria-label": "Automatisch \u00FCbernehmen" }, t.auto && React.createElement(Check, { size: 11, color: "#FFF" })),
+                    React.createElement("span", { className: "mono text-xs pl-muted shrink-0" }, minsToLabel(t.start)),
+                    React.createElement("span", { className: "text-sm truncate flex-1" }, t.title),
+                    React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(t.dur)),
+                    React.createElement("button", { onClick: () => onRemove(t.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "Aus Vorlage entfernen" },
+                        React.createElement(Trash2, { size: 12 }))));
+            })))))))));
+}
+function ProjectPanel({ projects, stats, onAdd, onRemove, onTarget, onPlan }) {
+    const [title, setTitle] = useState("");
+    const [cat, setCat] = useState("arbeit");
+    const [target, setTarget] = useState(240);
+    const submit = () => {
+        if (!title.trim())
+            return;
+        onAdd(title.trim(), cat, target);
+        setTitle("");
+    };
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+        React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "F\u00FCr Vorhaben, die nie \u201Efertig\" sind. Setz ein Wochenziel \u2014 dann siehst du, was liegen bleibt."),
+        React.createElement("div", { className: "flex flex-col gap-2" },
+            React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onKeyDown: (e) => e.key === "Enter" && submit(), placeholder: "z. B. Tutoring aufbauen", className: "pl-input px-2 py-1.5 rounded text-sm" }),
+            React.createElement(CatPicker, { value: cat, onChange: setCat }),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted" }, "Ziel/Woche"),
+                React.createElement("div", { className: "flex items-center" },
+                    React.createElement("button", { onClick: () => setTarget(Math.max(60, target - 60)), className: "pl-btn px-2 py-1 rounded-l" }, "\u2212"),
+                    React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", background: "var(--card)" } }, durLabel(target)),
+                    React.createElement("button", { onClick: () => setTarget(Math.min(40 * 60, target + 60)), className: "pl-btn px-2 py-1 rounded-r" }, "+")),
+                React.createElement("button", { onClick: submit, className: "pl-btn ml-auto px-2.5 py-1 rounded flex items-center gap-1 mono text-xs" },
+                    React.createElement(Plus, { size: 13 }),
+                    " Anlegen"))),
+        React.createElement("div", { className: "border-t pl-hair pt-3 flex flex-col gap-3" },
+            projects.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Noch keine Projekte. Gute Kandidaten: Sachen, die du \u00FCber Wochen verfolgst und bei denen eine einzelne Aufgabe nicht reicht.")),
+            projects.map((p) => {
+                var _a;
+                const st = stats[p.id] || { planned: 0, done: 0 };
+                const c = ((_a = CATS[p.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+                const donePct = Math.min(100, (st.done / p.target) * 100);
+                const planPct = Math.min(100, (st.planned / p.target) * 100);
+                const rest = Math.max(0, p.target - st.planned);
+                return (React.createElement("div", { key: p.id, className: "group" },
+                    React.createElement("div", { className: "flex items-baseline gap-2 mb-1" },
+                        React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: c } }),
+                        React.createElement("span", { className: "text-sm truncate flex-1" }, p.title),
+                        React.createElement("span", { className: "mono text-xs pl-muted" },
+                            durLabel(st.done),
+                            " / ",
+                            durLabel(p.target))),
+                    React.createElement("div", { className: "h-2.5 rounded-full relative overflow-hidden mb-1", style: { background: hexA(c, 0.12) } },
+                        React.createElement("div", { className: "absolute inset-y-0 left-0 rounded-full pl-bar", style: { width: `${planPct}%`, background: hexA(c, 0.4) } }),
+                        React.createElement("div", { className: "absolute inset-y-0 left-0 rounded-full pl-bar", style: { width: `${donePct}%`, background: c } })),
+                    React.createElement("div", { className: "flex items-center gap-2" },
+                        React.createElement("span", { className: "mono text-xs pl-muted flex-1" }, rest > 0 ? `${durLabel(rest)} noch nicht verplant` : "Ziel verplant"),
+                        React.createElement("div", { className: "flex items-center opacity-60 group-hover:opacity-100" },
+                            React.createElement("button", { onClick: () => onTarget(p.id, Math.max(60, p.target - 60)), className: "mono text-xs px-1.5 pl-muted", "aria-label": "Ziel senken" }, "\u2212"),
+                            React.createElement("button", { onClick: () => onTarget(p.id, p.target + 60), className: "mono text-xs px-1.5 pl-muted", "aria-label": "Ziel erh\u00F6hen" }, "+")),
+                        React.createElement("button", { onClick: () => onPlan({ title: p.title, cat: p.cat, est: 90, projectId: p.id }), className: "pl-btn mono text-xs px-1.5 py-0.5 rounded" }, "einplanen"),
+                        React.createElement("button", { onClick: () => onRemove(p.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "Projekt l\u00F6schen" },
+                            React.createElement(Trash2, { size: 12 })))));
+            }))));
+}
+function YearGrid({ weeks, onPick }) {
+    const shade = (q) => {
+        if (q === null)
+            return "#DCE0DA";
+        if (q >= 0.85)
+            return "#1E6E5A";
+        if (q >= 0.6)
+            return "#3F8A6E";
+        if (q >= 0.35)
+            return "#7FA894";
+        if (q > 0)
+            return "#B6C7BC";
+        return "#DCE0DA";
+    };
+    const rows = [0, 1, 2, 3].map((r) => weeks.slice(r * 13, r * 13 + 13));
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Letzte 52 Wochen"),
+        React.createElement("div", { className: "flex flex-col gap-1" }, rows.map((row, ri) => (React.createElement("div", { key: ri, className: "flex items-center gap-1" },
+            React.createElement("span", { className: "mono text-xs pl-muted w-10 shrink-0" }, row[0] ? `${pad(row[0].date.getDate())}.${pad(row[0].date.getMonth() + 1)}` : ""),
+            row.map((w) => (React.createElement("button", { key: w.key, onClick: () => onPick(w.date), className: "flex-1 rounded-sm", title: `${pad(w.date.getDate())}.${pad(w.date.getMonth() + 1)} · ${w.quote === null ? "nichts geplant" : Math.round(w.quote * 100) + "%"}`, style: {
+                    height: 15,
+                    background: shade(w.quote),
+                    border: w.isCurrent ? "1.5px solid var(--ink)" : "1px solid transparent",
+                }, "aria-label": `Woche vom ${w.key}` }))))))),
+        React.createElement("div", { className: "flex items-center gap-1.5 mt-2 mono text-xs pl-muted" },
+            React.createElement("span", null, "wenig"),
+            [null, 0.2, 0.5, 0.7, 0.95].map((q, i) => (React.createElement("span", { key: i, className: "rounded-sm", style: { width: 11, height: 11, background: shade(q) } }))),
+            React.createElement("span", null, "viel"))));
+}
+function StatusButtons({ onPick, current, size = "sm" }) {
+    const opts = [
+        { k: "done", icon: Check, color: "#1E6E5A", label: "gemacht" },
+        { k: "moved", icon: ArrowRight, color: "#8A4E1C", label: "verschoben" },
+        { k: "skipped", icon: X, color: "#A03A5E", label: "ausgefallen" },
+    ];
+    const pick = (k) => {
+        if (k === "done")
+            buzz(14);
+        else if (k)
+            buzz(8);
+        onPick(k);
+    };
+    return (React.createElement("div", { className: "flex gap-1" }, opts.map((o) => {
+        const on = current === o.k;
+        return (React.createElement("button", { key: o.k, onClick: () => pick(on ? null : o.k), className: `pl-btn rounded flex items-center justify-center gap-1 mono text-xs ${size === "sm" ? "px-1.5 py-1" : "px-2.5 py-1.5 flex-1"} ${on && o.k === "done" ? "pl-glow" : ""}`, style: on ? { background: o.color, color: "#FFF", borderColor: o.color } : { color: o.color, borderColor: "var(--line)" }, "aria-label": o.label },
+            React.createElement(o.icon, { size: 13 }),
+            size === "lg" && o.label));
+    })));
+}
+function Metric({ label, value, color }) {
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "mono text-xs pl-muted" }, label),
+        React.createElement("div", { className: "mono text-sm font-medium", style: color ? { color } : {} }, value)));
+}
+function ReviewPanel({ stats, routines, yearGrid = [], onPickWeek, onStatus, onDemo, onReset, onConfetti }) {
+    const [confirm, setConfirm] = useState(null);
+    const { planned, done, skipped, byCat, pending, routineCount } = stats;
+    const quote = planned ? Math.round((done / planned) * 100) : 0;
+    const cats = Object.keys(byCat).sort((a, b) => byCat[b].planned - byCat[a].planned);
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-4" },
+        pending.length > 0 && (React.createElement("div", null,
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" },
+                "Warten auf R\u00FCckmeldung (",
+                pending.length,
+                ")"),
+            React.createElement("div", { className: "flex flex-col gap-1.5" }, pending.slice(0, 8).map((b) => {
+                var _a;
+                return (React.createElement("div", { key: b.id, className: "flex items-center gap-2" },
+                    React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: (_a = CATS[b.cat]) === null || _a === void 0 ? void 0 : _a.color } }),
+                    React.createElement("span", { className: "mono text-xs pl-muted shrink-0" },
+                        DAY_NAMES[(new Date(b.day + "T00:00:00").getDay() + 6) % 7],
+                        " ",
+                        minsToLabel(b.start)),
+                    React.createElement("span", { className: "text-sm truncate flex-1" }, b.title),
+                    React.createElement(StatusButtons, { current: b.status, onPick: (s) => onStatus(b.id, s) })));
+            })))),
+        React.createElement("div", { className: pending.length > 0 ? "border-t pl-hair pt-3" : "" },
+            React.createElement("div", { className: "flex items-baseline justify-between mb-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted" }, "Diese Woche"),
+                React.createElement("span", { className: "mono text-2xl font-medium", style: { color: quote >= 70 ? "#1E6E5A" : quote >= 40 ? "#8A4E1C" : "#A03A5E" } },
+                    quote,
+                    "%")),
+            React.createElement("div", { className: "grid grid-cols-3 gap-2 mb-3" },
+                React.createElement(Metric, { label: "geplant", value: durLabel(planned) }),
+                React.createElement(Metric, { label: "gemacht", value: durLabel(done), color: "#1E6E5A" }),
+                React.createElement(Metric, { label: "ausgefallen", value: durLabel(skipped), color: "#A03A5E" })),
+            cats.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted" }, "Noch nichts geplant. Sobald Bl\u00F6cke im Raster stehen, siehst du hier, wie viel davon wirklich passiert ist.")) : (React.createElement("div", { className: "flex flex-col gap-2" }, cats.map((c) => {
+                var _a, _b, _c;
+                const p = byCat[c].planned, d = byCat[c].done;
+                return (React.createElement("div", { key: c },
+                    React.createElement("div", { className: "flex items-baseline justify-between mb-1" },
+                        React.createElement("span", { className: "text-sm" }, ((_a = CATS[c]) === null || _a === void 0 ? void 0 : _a.label) || c),
+                        React.createElement("span", { className: "mono text-xs pl-muted" },
+                            durLabel(d),
+                            " / ",
+                            durLabel(p))),
+                    React.createElement("div", { className: "h-2 rounded-full overflow-hidden", style: { background: hexA(((_b = CATS[c]) === null || _b === void 0 ? void 0 : _b.color) || "#6F7A72", 0.16) } },
+                        React.createElement("div", { className: "h-2 rounded-full pl-bar", style: { width: `${p ? (d / p) * 100 : 0}%`, background: (_c = CATS[c]) === null || _c === void 0 ? void 0 : _c.color } }))));
+            })))),
+        yearGrid.length > 0 && (React.createElement("div", { className: "border-t pl-hair pt-3" },
+            React.createElement(YearGrid, { weeks: yearGrid, onPick: onPickWeek }))),
+        routines.length > 0 && (React.createElement("div", { className: "border-t pl-hair pt-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Routinen"),
+            React.createElement("div", { className: "flex flex-col gap-1" }, routines.map((r) => {
+                var _a;
+                return (React.createElement("div", { key: r.id, className: "flex items-center gap-2" },
+                    React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: (_a = CATS[r.cat]) === null || _a === void 0 ? void 0 : _a.color } }),
+                    React.createElement("span", { className: "text-sm truncate flex-1" }, r.title),
+                    React.createElement("div", { className: "flex gap-0.5" }, Array.from({ length: 7 }, (_, i) => {
+                        var _a;
+                        return (React.createElement("span", { key: i, className: "w-1.5 h-1.5 rounded-full", style: { background: i < (routineCount[r.id] || 0) ? (_a = CATS[r.cat]) === null || _a === void 0 ? void 0 : _a.color : "var(--line)" } }));
+                    })),
+                    React.createElement("span", { className: "mono text-xs pl-muted w-6 text-right" },
+                        routineCount[r.id] || 0,
+                        "\u00D7")));
+            })))),
+        React.createElement("div", { className: "border-t pl-hair pt-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Ausprobieren"),
+            React.createElement("div", { className: "flex flex-wrap gap-1" },
+                React.createElement("button", { onClick: onConfetti, className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Konfetti"),
+                React.createElement("button", { onClick: () => setConfirm(confirm === "demo" ? null : "demo"), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Beispieldaten"),
+                React.createElement("button", { onClick: () => setConfirm(confirm === "reset" ? null : "reset"), className: "pl-btn px-2 py-1 rounded mono text-xs", style: { color: "#A03A5E" } }, "Zur\u00FCcksetzen")),
+            confirm && (React.createElement("div", { className: "pl-rise mt-2 flex items-center gap-2" },
+                React.createElement("span", { className: "mono text-xs flex-1", style: { color: "#A03A5E" } }, confirm === "demo"
+                    ? "Ersetzt alles, was du bisher eingetragen hast."
+                    : "Löscht alle Blöcke, Projekte, Routinen und Vorlagen."),
+                React.createElement("button", { onClick: () => { if (confirm === "demo") {
+                        onDemo();
+                    }
+                    else {
+                        onReset();
+                    } setConfirm(null); }, className: "px-2 py-1 rounded mono text-xs", style: { background: "#A03A5E", color: "#FFF" } }, "Ja, machen"),
+                React.createElement("button", { onClick: () => setConfirm(null), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Abbrechen"))))));
+}
+/* ════════════════ Einplanen ════════════════ */
+function slotSuggestions(gaps, dur) {
+    const out = [];
+    for (const g of gaps) {
+        const end = g.start + g.dur;
+        if (g.dur < dur)
+            continue;
+        let t = g.start;
+        while (t + dur <= end) {
+            out.push({ start: t, gapEnd: end });
+            t = t % 30 === 0 ? t + 30 : Math.ceil(t / 30) * 30;
+        }
+    }
+    return out.sort((a, b) => a.start - b.start);
+}
+function ScheduleSheet({ item, weekStart: initialWeek, todayKey, gapsFor, blocksFor, onConfirm, onManual, onClose }) {
+    var _a, _b, _c;
+    const [dur, setDur] = useState(item.est || 60);
+    const [week, setWeek] = useState(initialWeek);
+    const [day, setDay] = useState(() => {
+        const keys = Array.from({ length: 7 }, (_, i) => dayKey(addDays(initialWeek, i)));
+        return keys.includes(todayKey) ? todayKey : keys[0];
+    });
+    const [showAll, setShowAll] = useState(false);
+    const [custom, setCustom] = useState(null);
+    const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week]);
+    const suggestions = useMemo(() => slotSuggestions(gapsFor(day), dur), [day, dur, gapsFor]);
+    const shown = showAll ? suggestions : suggestions.slice(0, 8);
+    const c = ((_a = CATS[item.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+    const jumpWeek = (dir) => {
+        const nw = addDays(week, dir * 7);
+        setWeek(nw);
+        setDay(dayKey(addDays(nw, (new Date(day + "T00:00:00").getDay() + 6) % 7)));
+        setShowAll(false);
+        setCustom(null);
+    };
+    const customStart = custom !== null && custom !== void 0 ? custom : ((_c = (_b = suggestions[0]) === null || _b === void 0 ? void 0 : _b.start) !== null && _c !== void 0 ? _c : 9 * 60);
+    const conflict = useMemo(() => blocksFor(day).some((b) => customStart < b.start + b.dur && customStart + dur > b.start), [blocksFor, day, customStart, dur]);
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.4)" }, onClick: onClose },
+        React.createElement("div", { className: "pl-sheet pl-rise w-full md:max-w-md rounded-t-lg md:rounded-lg flex flex-col", style: { maxHeight: "90vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "shrink-0 p-4 pb-3 flex flex-col gap-3" },
+                React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                    React.createElement("div", { className: "min-w-0" },
+                        React.createElement("div", { className: "mono text-xs pl-muted" }, "Einplanen"),
+                        React.createElement("div", { className: "text-lg font-medium truncate", style: { color: c } }, item.title)),
+                    React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schlie\u00DFen" },
+                        React.createElement(X, { size: 18 }))),
+                React.createElement("div", { className: "flex items-center gap-2" },
+                    React.createElement("span", { className: "mono text-xs pl-muted" }, "Dauer"),
+                    React.createElement("div", { className: "flex gap-1 flex-1" }, [30, 60, 90, 120, 180].map((m) => (React.createElement("button", { key: m, onClick: () => { setDur(m); setShowAll(false); }, className: "pl-btn flex-1 py-1.5 rounded mono text-xs", style: dur === m ? { background: c, color: "#FFF", borderColor: c } : {} }, m >= 60 ? `${m / 60}h` : `${m}m`))))),
+                React.createElement("div", null,
+                    React.createElement("div", { className: "flex items-center justify-between mb-1" },
+                        React.createElement("button", { onClick: () => jumpWeek(-1), className: "pl-btn px-2 py-1 rounded", "aria-label": "Woche zur\u00FCck" },
+                            React.createElement(ChevronLeft, { size: 14 })),
+                        React.createElement("span", { className: "mono text-xs pl-muted" },
+                            "KW ",
+                            isoWeek(week),
+                            " \u00B7 ",
+                            week.getDate(),
+                            ".",
+                            pad(week.getMonth() + 1),
+                            "."),
+                        React.createElement("button", { onClick: () => jumpWeek(1), className: "pl-btn px-2 py-1 rounded", "aria-label": "Woche vor" },
+                            React.createElement(ChevronRight, { size: 14 }))),
+                    React.createElement("div", { className: "grid grid-cols-7 gap-1" }, days.map((d, i) => {
+                        const k = dayKey(d);
+                        const on = k === day;
+                        const free = slotSuggestions(gapsFor(k), dur).length;
+                        return (React.createElement("button", { key: k, onClick: () => { setDay(k); setShowAll(false); setCustom(null); }, className: "py-1.5 rounded text-center", style: {
+                                background: on ? c : "transparent",
+                                color: on ? "#FFF" : free ? "var(--ink)" : "var(--muted)",
+                                border: `1px solid ${on ? c : k === todayKey ? "var(--muted)" : "var(--line)"}`,
+                                opacity: free ? 1 : 0.45,
+                            } },
+                            React.createElement("div", { className: "mono text-xs" }, DAY_NAMES[i]),
+                            React.createElement("div", { className: "mono text-sm" }, d.getDate())));
+                    })))),
+            React.createElement("div", { className: "pl-scroll overscroll-contain flex-1 min-h-0 overflow-y-auto px-4" },
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" },
+                    "Freie Startzeiten ",
+                    suggestions.length > 0 && `(${suggestions.length})`),
+                suggestions.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-2" },
+                    "An diesem Tag ist kein Fenster von ",
+                    durLabel(dur),
+                    " frei. W\u00E4hl einen anderen Tag oder eine k\u00FCrzere Dauer \u2014 oder stell unten eine Zeit von Hand ein.")) : (React.createElement("div", { className: "grid grid-cols-2 gap-1 pb-1" },
+                    shown.map((s) => (React.createElement("button", { key: s.start, onClick: () => onConfirm(day, s.start, dur), className: "pl-btn px-2 py-2 rounded text-left shrink-0" },
+                        React.createElement("div", { className: "mono text-sm font-medium" }, minsToLabel(s.start)),
+                        React.createElement("div", { className: "mono text-xs pl-muted" },
+                            "bis ",
+                            minsToLabel(s.start + dur))))),
+                    suggestions.length > shown.length && (React.createElement("button", { onClick: () => setShowAll(true), className: "mono text-xs pl-muted py-2 col-span-2" },
+                        suggestions.length - shown.length,
+                        " weitere anzeigen"))))),
+            React.createElement("div", { className: "shrink-0 p-4 pt-3 border-t pl-hair flex flex-col gap-2" },
+                React.createElement("div", { className: "flex items-center gap-2" },
+                    React.createElement(TimeField, { value: customStart, onChange: setCustom, color: c }),
+                    React.createElement("button", { onClick: () => onConfirm(day, customStart, dur), className: "ml-auto px-4 py-2 rounded mono text-xs", style: { background: c, color: "#FFF" } }, "Setzen")),
+                React.createElement("div", { className: "mono text-xs pl-muted" }, "Zeit antippen und direkt eintippen, z. B. 1430"),
+                conflict && (React.createElement("div", { className: "mono text-xs", style: { color: "#8A4E1C" } }, "\u00DCberschneidet sich mit etwas \u2014 geht trotzdem, liegt dann \u00FCbereinander.")),
+                React.createElement("button", { onClick: () => onManual(dur), className: "pl-btn w-full px-3 py-2 rounded mono text-xs" }, "Lieber selbst ins Raster tippen")))));
+}
+/* ════════════════ Zeitfeld ════════════════ */
+function parseTime(raw) {
+    const t = String(raw).trim().replace(/[.,\s]/g, ":");
+    let h, m;
+    if (t.includes(":")) {
+        const [a, b] = t.split(":");
+        h = parseInt(a, 10);
+        m = parseInt(b || "0", 10);
+    }
+    else if (/^\d{3,4}$/.test(t)) {
+        h = parseInt(t.slice(0, t.length - 2), 10);
+        m = parseInt(t.slice(-2), 10);
+    }
+    else if (/^\d{1,2}$/.test(t)) {
+        h = parseInt(t, 10);
+        m = 0;
+    }
+    else
+        return null;
+    if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59)
+        return null;
+    return h * 60 + m;
+}
+function TimeField({ value, onChange, color = "var(--ink)", step = SLOT }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState("");
+    const [dir, setDir] = useState("up");
+    const inputRef = useRef(null);
+    useEffect(() => { var _a; if (editing)
+        (_a = inputRef.current) === null || _a === void 0 ? void 0 : _a.focus(); }, [editing]);
+    const bump = (delta) => {
+        setDir(delta > 0 ? "up" : "down");
+        onChange(Math.max(0, Math.min(23 * 60 + 45, value + delta)));
+        buzz(6);
+    };
+    const finish = () => {
+        const parsed = parseTime(draft);
+        if (parsed !== null) {
+            setDir(parsed >= value ? "up" : "down");
+            onChange(parsed);
+            buzz(10);
+        }
+        setEditing(false);
+    };
+    const hh = pad(Math.floor(value / 60));
+    const mm = pad(value % 60);
+    const roll = dir === "up" ? "pl-roll-up" : "pl-roll-down";
+    return (React.createElement("div", { className: "flex items-center" },
+        React.createElement("button", { onClick: () => bump(-step), className: "pl-btn px-2.5 py-2 rounded-l", "aria-label": "fr\u00FCher" }, "\u2212"),
+        editing ? (React.createElement("input", { ref: inputRef, value: draft, inputMode: "numeric", onChange: (e) => setDraft(e.target.value), onBlur: finish, onKeyDown: (e) => { if (e.key === "Enter")
+                finish(); if (e.key === "Escape")
+                setEditing(false); }, placeholder: "14:30", className: "mono text-lg text-center border-t border-b", style: {
+                width: 96, padding: "6px 0", background: "var(--card)",
+                borderColor: color, color, outline: "none",
+            } })) : (React.createElement("button", { onClick: () => { setDraft(`${hh}:${mm}`); setEditing(true); }, className: "mono text-lg border-t border-b flex items-center justify-center gap-0.5", style: {
+                width: 96, padding: "6px 0", background: "var(--card)",
+                borderColor: "var(--line)", color,
+            }, title: "Antippen zum Eingeben" },
+            React.createElement("span", { className: "pl-digits" },
+                React.createElement("span", { key: hh, className: roll }, hh)),
+            React.createElement("span", { className: "pl-muted" }, ":"),
+            React.createElement("span", { className: "pl-digits" },
+                React.createElement("span", { key: mm, className: roll }, mm)))),
+        React.createElement("button", { onClick: () => bump(step), className: "pl-btn px-2.5 py-2 rounded-r", "aria-label": "sp\u00E4ter" }, "+")));
+}
+/* ════════════════ Termin-Detail ════════════════ */
+function relTime(block, now) {
+    const base = new Date(block.day + "T00:00:00");
+    const start = new Date(base);
+    start.setMinutes(block.start);
+    const end = new Date(base);
+    end.setMinutes(block.start + block.dur);
+    const ms = start - now;
+    if (now >= start && now < end) {
+        return { label: `läuft · noch ${durLabel(Math.round((end - now) / 60000))}`, live: true };
+    }
+    if (ms > 0) {
+        const m = Math.round(ms / 60000);
+        if (m < 60)
+            return { label: `beginnt in ${m} min` };
+        if (m < 60 * 24)
+            return { label: `beginnt in ${durLabel(m)}` };
+        return { label: `in ${Math.round(m / 60 / 24)} Tagen` };
+    }
+    const m = Math.round((now - end) / 60000);
+    if (m < 60)
+        return { label: `vor ${m} min vorbei`, past: true };
+    if (m < 60 * 24)
+        return { label: `vor ${durLabel(m)} vorbei`, past: true };
+    return { label: `vor ${Math.round(m / 60 / 24)} Tagen`, past: true };
+}
+function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete, onSync, syncing }) {
+    var _a, _b, _c, _d;
+    const [confirmDel, setConfirmDel] = useState(false);
+    const c = block.external ? "#6F7A72" : ((_a = CATS[block.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
+    const d = new Date(block.day + "T00:00:00");
+    const rel = relTime(block, now);
+    const project = projects.find((p) => p.id === block.projectId);
+    const MONTHS = ["Jänner", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.42)" }, onClick: onClose },
+        React.createElement("div", { className: "pl-sheet pl-zoom pl-scroll overscroll-contain w-full md:max-w-md rounded-t-lg md:rounded-lg overflow-y-auto", style: { maxHeight: "88vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { style: { background: hexA(c, 0.14), borderBottom: `2px solid ${c}` }, className: "px-5 pt-4 pb-4" },
+                React.createElement("div", { className: "flex items-start justify-between gap-3" },
+                    React.createElement("div", { className: "min-w-0" },
+                        React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, block.external ? "aus Google Kalender" : (_b = CATS[block.cat]) === null || _b === void 0 ? void 0 : _b.label),
+                        React.createElement("h2", { className: "text-2xl font-semibold leading-tight mt-0.5 break-words" }, block.title || "Ohne Titel")),
+                    React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schlie\u00DFen" },
+                        React.createElement(X, { size: 20 }))),
+                React.createElement("div", { className: "mono text-3xl font-medium mt-3", style: { color: c } },
+                    minsToLabel(block.start),
+                    React.createElement("span", { className: "pl-muted" }, " \u2013 "),
+                    minsToLabel(block.start + block.dur)),
+                React.createElement("div", { className: "mono text-xs pl-muted mt-1" },
+                    DAY_NAMES[(d.getDay() + 6) % 7],
+                    ", ",
+                    d.getDate(),
+                    ". ",
+                    MONTHS[d.getMonth()],
+                    " \u00B7 ",
+                    durLabel(block.dur)),
+                React.createElement("div", { className: "mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mono text-xs", style: {
+                        background: rel.live ? c : "var(--card)",
+                        color: rel.live ? "#FFF" : "var(--muted)",
+                        border: `1px solid ${rel.live ? c : "var(--line)"}`,
+                    } },
+                    rel.live && React.createElement("span", { className: "pl-pulse w-1.5 h-1.5 rounded-full", style: { background: "#FFF" } }),
+                    rel.label)),
+            React.createElement("div", { className: "p-5 flex flex-col gap-4" },
+                (project || block.tplId || block.synced || block.external) && (React.createElement("div", { className: "flex flex-wrap gap-1.5" },
+                    project && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs", style: { border: `1px solid ${(_c = CATS[project.cat]) === null || _c === void 0 ? void 0 : _c.color}`, color: (_d = CATS[project.cat]) === null || _d === void 0 ? void 0 : _d.color } }, project.title)),
+                    block.tplId && (React.createElement("span", { className: "pl-btn px-2 py-1 rounded mono text-xs flex items-center gap-1" },
+                        React.createElement(Repeat, { size: 11 }),
+                        " jede Woche")),
+                    block.synced && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs flex items-center gap-1", style: { border: "1px solid #1E6E5A", color: "#1E6E5A" } },
+                        React.createElement(Check, { size: 11 }),
+                        " im Kalender")))),
+                !block.external && (React.createElement(React.Fragment, null,
+                    React.createElement("div", null,
+                        React.createElement("div", { className: "mono text-xs pl-muted mb-1.5" }, "Wie ist es gelaufen?"),
+                        React.createElement(StatusButtons, { current: block.status, size: "lg", onPick: (s) => onStatus(s) })),
+                    React.createElement("div", { className: "flex items-center gap-2 pt-1" },
+                        React.createElement("button", { onClick: onEdit, className: "flex-1 px-3 py-2.5 rounded mono text-xs", style: block.title
+                                ? { background: "var(--ink)", color: "var(--paper)" }
+                                : { background: c, color: "#FFF" } }, block.title ? "Bearbeiten" : "Titel eintragen"),
+                        React.createElement("button", { onClick: onSync, disabled: syncing || block.synced, className: "pl-btn px-3 py-2.5 rounded flex items-center gap-1.5 mono text-xs", style: block.synced ? { color: "#1E6E5A", borderColor: "#1E6E5A" } : {} },
+                            React.createElement(UploadCloud, { size: 13 }),
+                            block.synced ? "gesichert" : "Kalender"),
+                        React.createElement("button", { onClick: () => { if (confirmDel) {
+                                onDelete();
+                            }
+                            else {
+                                setConfirmDel(true);
+                            } }, className: "pl-btn px-3 py-2.5 rounded flex items-center gap-1.5 mono text-xs", style: confirmDel
+                                ? { background: "#A03A5E", color: "#FFF", borderColor: "#A03A5E" }
+                                : { color: "#A03A5E", borderColor: "#A03A5E" } },
+                            React.createElement(Trash2, { size: 13 }),
+                            confirmDel && "sicher?")))),
+                block.external && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Dieser Termin kommt aus deinem Google Kalender und l\u00E4sst sich hier nicht \u00E4ndern."))))));
+}
+/* ════════════════ Block-Editor ════════════════ */
+function BlockEditor({ block, onClose, onSave, onDelete, onSync, onRepeat, projects = [], syncing }) {
+    var _a;
+    const [title, setTitle] = useState(block.title || "");
+    const [cat, setCat] = useState(block.cat || "fokus");
+    const [start, setStart] = useState(block.start);
+    const [dur, setDur] = useState(block.dur);
+    /* Alles wird sofort gesichert - Schliessen darf nichts verlieren */
+    const saveTitle = () => onSave({ title: title.trim() || "Ohne Titel" });
+    const setCatLive = (v) => { setCat(v); onSave({ cat: v }); };
+    const setStartLive = (v) => { setStart(v); onSave({ start: v }); };
+    const setDurLive = (v) => { setDur(v); onSave({ dur: v }); };
+    const commit = () => { saveTitle(); onClose(); };
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.4)" }, onClick: commit },
+        React.createElement("div", { className: "pl-sheet pl-scroll overscroll-contain w-full md:max-w-md rounded-t-lg md:rounded-lg p-4 flex flex-col gap-3 overflow-y-auto", style: { maxHeight: "88vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                React.createElement("div", { className: "mono text-xs pl-muted" },
+                    block.day,
+                    " \u00B7 ",
+                    minsToLabel(start),
+                    "\u2013",
+                    minsToLabel(start + dur)),
+                React.createElement("button", { onClick: commit, className: "pl-muted p-1", "aria-label": "Schlie\u00DFen" },
+                    React.createElement(X, { size: 18 }))),
+            React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onBlur: saveTitle, onKeyDown: (e) => e.key === "Enter" && commit(), placeholder: "Titel eingeben", className: "pl-input px-2 py-2 rounded text-base" }),
+            React.createElement(CatPicker, { value: cat, onChange: setCatLive }),
+            projects.length > 0 && (React.createElement("div", null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Geh\u00F6rt zu Projekt"),
+                React.createElement("div", { className: "flex flex-wrap gap-1" }, projects.map((p) => {
+                    var _a, _b;
+                    const on = block.projectId === p.id;
+                    return (React.createElement("button", { key: p.id, onClick: () => onSave({ projectId: on ? null : p.id }), className: "px-2 py-1 rounded mono text-xs", style: {
+                            background: on ? (_a = CATS[p.cat]) === null || _a === void 0 ? void 0 : _a.color : "transparent",
+                            color: on ? "#FFF" : "var(--muted)",
+                            border: `1px solid ${on ? (_b = CATS[p.cat]) === null || _b === void 0 ? void 0 : _b.color : "var(--line)"}`,
+                        } }, p.title));
+                })))),
+            React.createElement("div", { className: "flex flex-wrap items-end gap-4" },
+                React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Beginn"),
+                    React.createElement(TimeField, { value: start, onChange: setStartLive, color: (_a = CATS[cat]) === null || _a === void 0 ? void 0 : _a.color })),
+                React.createElement("div", { className: "flex-1 min-w-0" },
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Dauer"),
+                    React.createElement(Stepper, { value: durLabel(dur), onMinus: () => setDurLive(Math.max(15, dur - SLOT)), onPlus: () => setDurLive(Math.min(8 * 60, dur + SLOT)) }))),
+            React.createElement("div", null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wie ist es gelaufen?"),
+                React.createElement(StatusButtons, { current: block.status, size: "lg", onPick: (s) => { onSave({ status: s }); } })),
+            React.createElement("button", { onClick: () => onRepeat({ ...block, title: title.trim() || "Ohne Titel", cat, start, dur }), className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs", style: block.tplId ? { color: "#1E6E5A", borderColor: "#1E6E5A" } : {} },
+                React.createElement(Repeat, { size: 13 }),
+                block.tplId ? "Jede Woche — in der Vorlage" : "Jede Woche wiederholen"),
+            React.createElement("div", { className: "flex items-center gap-2 pt-1" },
+                React.createElement("button", { onClick: onDelete, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs", style: { color: "#A03A5E", borderColor: "#A03A5E" } },
+                    React.createElement(Trash2, { size: 13 }),
+                    " L\u00F6schen"),
+                React.createElement("button", { onClick: onSync, disabled: syncing || block.synced, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs ml-auto", style: block.synced ? { color: "#1E6E5A", borderColor: "#1E6E5A" } : {} },
+                    block.synced ? React.createElement(Check, { size: 13 }) : React.createElement(UploadCloud, { size: 13 }),
+                    block.synced ? "Im Kalender" : "In Kalender"),
+                React.createElement("button", { onClick: commit, className: "px-4 py-2 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Fertig")))));
+}
+function Stepper({ label, value, onMinus, onPlus }) {
+    return (React.createElement("div", null,
+        label && React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, label),
+        React.createElement("div", { className: "flex items-center" },
+            React.createElement("button", { onClick: onMinus, className: "pl-btn px-2 py-1.5 rounded-l" }, "\u2212"),
+            React.createElement("div", { className: "mono text-sm flex-1 text-center py-1.5 border-t border-b", style: { borderColor: "var(--line)", background: "var(--card)" } }, value),
+            React.createElement("button", { onClick: onPlus, className: "pl-btn px-2 py-1.5 rounded-r" }, "+"))));
+}
+/* Farbe mit Alpha */
+function hexA(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+/* ── Beispieldaten zum Ausprobieren ────────────────────────── */
+function makeDemoState() {
+    const thisMonday = mondayOf(new Date());
+    const projects = [
+        { id: "demo-p1", title: "Tutoring aufbauen", cat: "arbeit", target: 240 },
+        { id: "demo-p2", title: "Semestervorbereitung", cat: "uni", target: 180 },
+    ];
+    const routines = [
+        { id: "demo-r1", title: "Bouldern", cat: "training", weekTarget: 2 },
+        { id: "demo-r2", title: "Krafttraining", cat: "training", weekTarget: 2 },
+        { id: "demo-r3", title: "Stille Zeit", cat: "glaube", weekTarget: 5 },
+        { id: "demo-r4", title: "Lesen", cat: "privat", weekTarget: 3 },
+    ];
+    const pool = [
+        { t: "Lernblock", c: "fokus", d: 90, p: null },
+        { t: "Bewerbungen schreiben", c: "arbeit", d: 60, p: "demo-p1" },
+        { t: "Probestunde vorbereiten", c: "arbeit", d: 90, p: "demo-p1" },
+        { t: "Skript durchgehen", c: "uni", d: 120, p: "demo-p2" },
+        { t: "Bouldern", c: "training", d: 120, p: null },
+        { t: "Krafttraining", c: "training", d: 75, p: null },
+        { t: "Stille Zeit", c: "glaube", d: 30, p: null },
+        { t: "Lesen", c: "privat", d: 60, p: null },
+    ];
+    const blocks = [];
+    const checks = {};
+    for (let w = 13; w >= 0; w--) {
+        const ws = addDays(thisMonday, -7 * w);
+        const quality = 0.45 + Math.random() * 0.5;
+        const perWeek = 5 + Math.floor(Math.random() * 5);
+        for (let i = 0; i < perWeek; i++) {
+            const src = pool[Math.floor(Math.random() * pool.length)];
+            const day = addDays(ws, Math.floor(Math.random() * 6));
+            if (day > new Date())
+                continue;
+            const start = (8 + Math.floor(Math.random() * 10)) * 60;
+            const r = Math.random();
+            blocks.push({
+                id: uid(), day: dayKey(day), start, dur: src.d,
+                title: src.t, cat: src.c, projectId: src.p,
+                status: r < quality ? "done" : r < quality + 0.15 ? "moved" : "skipped",
+                synced: false, todoId: null,
+            });
+        }
+        for (const r of routines) {
+            const n = Math.random() < 0.78 ? r.weekTarget + (Math.random() < 0.3 ? 1 : 0) : r.weekTarget - 1;
+            const picked = new Set();
+            while (picked.size < Math.max(0, n))
+                picked.add(Math.floor(Math.random() * 7));
+            for (const d of picked) {
+                const day = addDays(ws, d);
+                if (day > new Date())
+                    continue;
+                const k = dayKey(day);
+                checks[k] = [...(checks[k] || []), r.id];
+            }
+        }
+    }
+    return {
+        ...DEFAULT_STATE,
+        blocks, checks, routines, projects,
+        todos: [
+            { id: uid(), title: "CV an zwei Betriebe schicken", cat: "arbeit", est: 60, done: false },
+            { id: uid(), title: "Superprof-Profil fertig machen", cat: "arbeit", est: 90, done: false },
+        ],
+        reached: {},
+    };
+}
+/* ════════════════ Konfetti ════════════════ */
+function Confetti({ trigger }) {
+    const [pieces, setPieces] = useState([]);
+    useEffect(() => {
+        if (!trigger)
+            return;
+        const colors = CAT_KEYS.map((k) => CATS[k].color);
+        const next = Array.from({ length: 46 }, (_, i) => ({
+            id: `${trigger}-${i}`,
+            left: Math.random() * 100,
+            dx: `${(Math.random() - 0.5) * 260}px`,
+            rot: `${Math.random() * 900 - 450}deg`,
+            dur: 1.5 + Math.random() * 1.3,
+            delay: Math.random() * 0.35,
+            color: colors[i % colors.length],
+            w: 5 + Math.random() * 5,
+            h: 8 + Math.random() * 8,
+            round: Math.random() > 0.65,
+        }));
+        setPieces(next);
+        const t = setTimeout(() => setPieces([]), 3200);
+        return () => clearTimeout(t);
+    }, [trigger]);
+    if (pieces.length === 0)
+        return null;
+    return (React.createElement("div", { "aria-hidden": "true" }, pieces.map((p) => (React.createElement("span", { key: p.id, className: "pl-confetti", style: {
+            left: `${p.left}%`, width: p.w, height: p.h, background: p.color,
+            borderRadius: p.round ? "50%" : 1,
+            animationDuration: `${p.dur}s`, animationDelay: `${p.delay}s`,
+            "--dx": p.dx, "--rot": p.rot,
+        } })))));
+}
+/* ════════════════ Fehlerabfangung ════════════════ */
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { error: null };
+    }
+    static getDerivedStateFromError(error) {
+        return { error };
+    }
+    render() {
+        var _a;
+        if (this.state.error) {
+            return (React.createElement("div", { style: { minHeight: "100vh", background: "#E4E6E1", color: "#191D1A", padding: 24 } },
+                React.createElement("div", { style: {
+                        maxWidth: 560, margin: "0 auto", background: "#FAFAF8",
+                        border: "1px solid #191D1A", borderRadius: 4, padding: 20,
+                    } },
+                    React.createElement("h2", { style: { fontSize: 18, fontWeight: 600, marginBottom: 8 } }, "Der Planer ist abgest\u00FCrzt"),
+                    React.createElement("p", { style: { fontSize: 14, color: "#6F7A72", marginBottom: 12 } }, "Schick mir den folgenden Text, dann finde ich die Ursache sofort:"),
+                    React.createElement("pre", { style: {
+                            fontFamily: "ui-monospace, monospace", fontSize: 12, whiteSpace: "pre-wrap",
+                            background: "#EDEEEA", padding: 12, borderRadius: 3, overflowX: "auto",
+                        } }, String(((_a = this.state.error) === null || _a === void 0 ? void 0 : _a.message) || this.state.error)),
+                    React.createElement("button", { onClick: () => this.setState({ error: null }), style: {
+                            marginTop: 12, padding: "8px 14px", borderRadius: 3,
+                            background: "#191D1A", color: "#E4E6E1", border: "none",
+                            fontFamily: "ui-monospace, monospace", fontSize: 12, cursor: "pointer",
+                        } }, "Nochmal versuchen"))));
+        }
+        return this.props.children;
+    }
+}
+function Wochenplaner() {
+    return (React.createElement(ErrorBoundary, null,
+        React.createElement(PlannerApp, null)));
+}
+(function () {
+  try {
+    if (!window.React || !window.ReactDOM) throw new Error("React nicht geladen");
+    var el = document.getElementById("root");
+    if (ReactDOM.createRoot) {
+      ReactDOM.createRoot(el).render(React.createElement(Wochenplaner));
+    } else {
+      ReactDOM.render(React.createElement(Wochenplaner), el);
+    }
+  } catch (e) {
+    if (window.__plannerError) window.__plannerError("Der Planer konnte nicht starten", String(e && e.stack || e));
+    else throw e;
+  }
+})();
