@@ -1370,26 +1370,35 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                         blocks.map((b) => {
                             const c = blockColor(b);
                             const fill = b.status === "done" ? 0.3 : b.status === "skipped" ? 0.06 : b.status === "moved" ? 0.1 : 0.16;
-                            const h = Math.max(b.dur * ppm - 2, 11);
-                            const roomy = !compact && h >= 34;
-                            const showText = h >= (compact ? 20 : 16);
+                            const h = Math.max(b.dur * ppm - 1, 15);
+                            const roomy = !compact && h >= 36;
+                            const flat = h < 24; // zu flach für zwei Zeilen
+                            const fs = h >= 36 ? 12 : h >= 24 ? 11 : h >= 18 ? 10 : 9;
                             return (React.createElement("button", { key: b.id, onClick: (e) => { e.stopPropagation(); onBlock(b); }, className: `pl-block absolute ${b.external ? "pl-ext cursor-default" : ""}`, style: {
                                     top: (b.start - DAY_START * 60) * ppm,
                                     height: h, left: 2, right: 2,
                                     background: hexA(c, b.external ? 0.1 : fill),
                                     borderLeft: `${compact ? 2 : 3}px ${b.status === "skipped" ? "dashed" : "solid"} ${c}`,
                                     opacity: b.status === "skipped" ? 0.55 : 1,
-                                } }, showText && (React.createElement("div", { className: "leading-tight text-left", style: { paddingLeft: 3, paddingRight: 2, paddingTop: roomy ? 2 : 0 } },
-                                roomy && React.createElement("div", { className: "mono text-xs pl-muted" }, minsToLabel(b.start)),
-                                React.createElement("div", { className: "font-medium truncate", style: {
-                                        fontSize: compact ? 9.5 : h >= 24 ? 12 : 10,
-                                        lineHeight: compact ? "11px" : h >= 24 ? "14px" : "12px",
-                                        color: c,
-                                        textDecoration: b.status === "skipped" ? "line-through" : "none",
+                                } },
+                                React.createElement("div", { className: "text-left overflow-hidden", style: {
+                                        paddingLeft: 3, paddingRight: 2,
+                                        paddingTop: roomy ? 2 : 0,
+                                        height: "100%",
+                                        display: flat ? "flex" : "block",
+                                        alignItems: flat ? "center" : undefined,
                                     } },
-                                    b.cont ? "▸ " : "",
-                                    b.title || "—",
-                                    b.goesOn ? " ▸" : "")))));
+                                    React.createElement("div", { style: { minWidth: 0, width: "100%" } },
+                                        roomy && React.createElement("div", { className: "mono text-xs pl-muted" }, minsToLabel(b.start)),
+                                        React.createElement("div", { className: "font-medium truncate", style: {
+                                                fontSize: fs,
+                                                lineHeight: flat ? "1" : fs + 2 + "px",
+                                                color: c,
+                                                textDecoration: b.status === "skipped" ? "line-through" : "none",
+                                            } },
+                                            b.cont ? "▸" : "",
+                                            b.title || "—",
+                                            b.goesOn ? "▸" : "")))));
                         }),
                         k === todayKey && showNow && (React.createElement("div", { className: "absolute left-0 right-0 pointer-events-none z-10", style: { top: (nowMin - DAY_START * 60) * ppm } },
                             React.createElement("div", { style: { height: 1.5, background: "#C2410C" } })))));
