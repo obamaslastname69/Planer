@@ -151,7 +151,7 @@ function weekHits(routine, checks, weekStartDate) {
    Ohne ID läuft alles außer der Kalenderanbindung.
 ──────────────────────────────────────────────────────────── */
 const GOOGLE_CLIENT_ID = "";
-const GC_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const GC_SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.appdata";
 const GC_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 let gcToken = null, gcExpiry = 0;
 const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
@@ -237,6 +237,58 @@ async function pushToCalendar(block) {
             reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 15 }] },
         }),
     });
+    return true;
+}
+/* ── Abgleich über Google Drive ────────────────────────────
+   Speichert im versteckten appDataFolder: nur diese App sieht ihn.
+──────────────────────────────────────────────────────────── */
+const DRIVE_FILE = "planer-daten.json";
+const DRIVE_API = "https://www.googleapis.com/drive/v3/files";
+const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
+let driveFileId = null;
+async function driveFindFile() {
+    if (driveFileId)
+        return driveFileId;
+    const q = new URLSearchParams({
+        spaces: "appDataFolder",
+        q: "name='" + DRIVE_FILE + "'",
+        fields: "files(id)",
+        pageSize: "1",
+    });
+    const data = await gcFetch(DRIVE_API + "?" + q);
+    driveFileId = data.files && data.files[0] ? data.files[0].id : null;
+    return driveFileId;
+}
+async function driveLoad() {
+    const id = await driveFindFile();
+    if (!id)
+        return null;
+    const token = await gcAuth();
+    const res = await fetch(DRIVE_API + "/" + id + "?alt=media", {
+        headers: { Authorization: "Bearer " + token },
+    });
+    if (!res.ok)
+        throw new Error("Laden fehlgeschlagen (" + res.status + ")");
+    return res.json();
+}
+async function driveSave(data) {
+    let id = await driveFindFile();
+    if (!id) {
+        const created = await gcFetch(DRIVE_API, {
+            method: "POST",
+            body: JSON.stringify({ name: DRIVE_FILE, parents: ["appDataFolder"] }),
+        });
+        id = created.id;
+        driveFileId = id;
+    }
+    const token = await gcAuth();
+    const res = await fetch(DRIVE_UPLOAD + "/" + id + "?uploadType=media", {
+        method: "PATCH",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+    });
+    if (!res.ok)
+        throw new Error("Speichern fehlgeschlagen (" + res.status + ")");
     return true;
 }
 /* ── Lernplan Restprüfungen 4. Semester ────────────────────── */
@@ -352,6 +404,16 @@ const STUDY_WEEKS = [
         ],
         extra: [] },
 ];
+function initStudy() {
+    return {
+        exam: { title: STUDY_EXAM.title, date: STUDY_EXAM.date },
+        weeks: STUDY_WEEKS.map((w) => ({
+            n: w.n, from: w.from, to: w.to, title: w.title,
+            must: w.must.map((t, i) => ({ id: "w" + w.n + "-must-" + i, t: t.t, m: t.m, s: t.s })),
+            extra: w.extra.map((t, i) => ({ id: "w" + w.n + "-extra-" + i, t: t.t, m: t.m, s: t.s })),
+        })),
+    };
+}
 const DEFAULT_STATE = {
     blocks: [],
     todos: [],
@@ -366,6 +428,8 @@ const DEFAULT_STATE = {
     materialized: {},
     projects: [],
     studyDone: {},
+    study: null,
+    updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
    Hauptkomponente
@@ -394,6 +458,8 @@ function PlannerApp() {
     const [celebration, setCelebration] = useState(null);
     const [manualPick, setManualPick] = useState(null);
     const [detailId, setDetailId] = useState(null);
+    const [cloud, setCloud] = useState({ state: "off", msg: "" });
+    const cloudRef = useRef({ armed: false, timer: null });
     const [zoom, setZoom] = useState("fit");
     const [cols, setCols] = useState(() => (typeof window !== "undefined" && window.innerWidth >= 900 ? 7 : 5));
     const [viewH, setViewH] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
@@ -427,20 +493,41 @@ function PlannerApp() {
         (async () => {
             try {
                 const r = await window.storage.get(STORE_KEY);
-                if (r === null || r === void 0 ? void 0 : r.value)
-                    setState({ ...DEFAULT_STATE, ...JSON.parse(r.value) });
+                if (r === null || r === void 0 ? void 0 : r.value) {
+                    const loaded = { ...DEFAULT_STATE, ...JSON.parse(r.value) };
+                    if (!loaded.study)
+                        loaded.study = initStudy();
+                    setState(loaded);
+                }
+                else {
+                    setState({ ...DEFAULT_STATE, study: initStudy() });
+                }
             }
             catch {
-                /* noch nichts gespeichert */
+                setState({ ...DEFAULT_STATE, study: initStudy() });
             }
             setLoaded(true);
         })();
     }, []);
     /* Speichern */
+    /* Nur lokal sichern - ohne Rückspielen in die Cloud */
+    const persistLocal = useCallback((next) => {
+        setState(next);
+        window.storage.set(STORE_KEY, JSON.stringify(next)).catch(() => { });
+    }, []);
     const persist = useCallback((nextOrFn) => {
         setState((prev) => {
-            const next = typeof nextOrFn === "function" ? nextOrFn(prev) : nextOrFn;
+            const base = typeof nextOrFn === "function" ? nextOrFn(prev) : nextOrFn;
+            const next = { ...base, updatedAt: Date.now() };
             window.storage.set(STORE_KEY, JSON.stringify(next)).catch(() => { });
+            if (cloudRef.current.armed) {
+                clearTimeout(cloudRef.current.timer);
+                cloudRef.current.timer = setTimeout(() => {
+                    driveSave(next)
+                        .then(() => setCloud({ state: "ok", msg: "gesichert " + new Date().toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" }) }))
+                        .catch((e) => setCloud({ state: "error", msg: e.message }));
+                }, 4000);
+            }
             return next;
         });
     }, []);
@@ -454,6 +541,7 @@ function PlannerApp() {
                 status: "ok",
                 msg: evs.length ? `${evs.length} Termine geladen` : "Keine Termine in dieser Woche",
             });
+            cloudRef.current.armed = true;
         }
         catch (err) {
             setSync({ status: "error", msg: gcConfigured() ? ("Kalender: " + err.message) : "Keine Google-Client-ID hinterlegt — siehe SETUP.md" });
@@ -683,6 +771,31 @@ function PlannerApp() {
             };
         });
     }, [state.blocks, weekStart]);
+    /* Lernplan bearbeiten */
+    const studyWeeks = (state.study && state.study.weeks) || [];
+    const studyExam = (state.study && state.study.exam) || STUDY_EXAM;
+    const updateStudy = (fn) => persist((prev) => {
+        const st = prev.study || initStudy();
+        return { ...prev, study: fn(st) };
+    });
+    const setWeekField = (idx, field, value) => updateStudy((st) => ({
+        ...st,
+        weeks: st.weeks.map((w, i) => (i === idx ? { ...w, [field]: value } : w)),
+    }));
+    const addStudyTask = (idx, kind) => updateStudy((st) => ({
+        ...st,
+        weeks: st.weeks.map((w, i) => i === idx ? { ...w, [kind]: [...w[kind], { id: uid(), t: "", m: 60, s: "molbio" }] } : w),
+    }));
+    const editStudyTask = (idx, kind, id, patch) => updateStudy((st) => ({
+        ...st,
+        weeks: st.weeks.map((w, i) => i === idx ? { ...w, [kind]: w[kind].map((t) => (t.id === id ? { ...t, ...patch } : t)) } : w),
+    }));
+    const deleteStudyTask = (idx, kind, id) => updateStudy((st) => ({
+        ...st,
+        weeks: st.weeks.map((w, i) => i === idx ? { ...w, [kind]: w[kind].filter((t) => t.id !== id) } : w),
+    }));
+    const setExamField = (field, value) => updateStudy((st) => ({ ...st, exam: { ...st.exam, [field]: value } }));
+    const resetStudyPlan = () => persist((prev) => ({ ...prev, study: initStudy() }));
     /* Ausprobieren */
     const loadDemo = () => {
         persist(makeDemoState());
@@ -850,12 +963,49 @@ function PlannerApp() {
         ...prev,
         studyDone: { ...(prev.studyDone || {}), [k]: !(prev.studyDone || {})[k] },
     }));
-    const planStudyTask = (task, k) => {
-        var _a;
-        return setPendingTodo({
-            title: `${(_a = SUBJECTS[task.s]) === null || _a === void 0 ? void 0 : _a.short}: ${task.t}`,
-            cat: "uni", est: task.m, studyKey: k,
-        });
+    const planStudyTask = (task) => startPlacing({
+        title: (SUBJECTS[task.s] ? SUBJECTS[task.s].short + ": " : "") + task.t,
+        cat: "uni", est: task.m, studyKey: task.id,
+    });
+    /* Abgleich mit Google Drive: der neuere Stand gewinnt */
+    const syncCloud = useCallback(async (silent) => {
+        if (!gcConfigured()) {
+            if (!silent)
+                setCloud({ state: "error", msg: "keine Google-Client-ID hinterlegt" });
+            return;
+        }
+        setCloud({ state: "busy", msg: "Abgleich läuft…" });
+        try {
+            const remote = await driveLoad();
+            const localAt = state.updatedAt || 0;
+            const remoteAt = (remote && remote.updatedAt) || 0;
+            if (remote && remoteAt > localAt) {
+                persistLocal({ ...DEFAULT_STATE, ...remote });
+                setCloud({ state: "ok", msg: "neuerer Stand geladen" });
+            }
+            else if (localAt > remoteAt) {
+                await driveSave({ ...state, updatedAt: localAt });
+                setCloud({ state: "ok", msg: "hochgeladen" });
+            }
+            else {
+                setCloud({ state: "ok", msg: "alles auf demselben Stand" });
+            }
+            cloudRef.current.armed = true;
+        }
+        catch (e) {
+            setCloud({ state: "error", msg: e.message });
+        }
+    }, [state, persistLocal]);
+    /* Einplanen: direkt ins Wochenraster, Sheet bleibt als Alternative */
+    const startPlacing = (item) => {
+        if (!item) {
+            setManualPick(null);
+            return;
+        }
+        setPendingTodo(null);
+        setDetailId(null);
+        setManualPick({ ...item, est: item.est || 60 });
+        setView("woche");
     };
     const addTerminHere = () => {
         const isToday = selectedDay === todayKey;
@@ -984,12 +1134,17 @@ function PlannerApp() {
                     : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
                 lbl,
                 k === "auswerten" && weekStats.pending.length > 0 && (React.createElement("span", { className: "ml-1.5", style: { color: view === k ? "#F0B429" : "#A03A5E" } }, weekStats.pending.length)))))),
+            React.createElement("div", { className: "mt-2 flex items-center gap-2" },
+                React.createElement("button", { onClick: () => syncCloud(false), disabled: cloud.state === "busy", className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
+                    React.createElement(RefreshCw, { size: 12, className: cloud.state === "busy" ? "animate-spin" : "" }),
+                    "Ger\u00E4te abgleichen"),
+                cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : "var(--muted)" } }, cloud.msg))),
             sync.msg && (React.createElement("div", { className: "mt-2 mono text-xs flex items-center gap-2", style: { color: sync.status === "error" ? "#A03A5E" : "var(--muted)" } },
                 sync.status === "error" && React.createElement(AlertCircle, { size: 13 }),
                 sync.msg))),
         React.createElement("div", { onTouchStart: onTouchStart, onTouchMove: onTouchMove, onTouchEnd: onTouchEnd, onClickCapture: onClickCapture, className: slide === "l" ? "pl-in-l" : slide === "r" ? "pl-in-r" : "" },
             view === "heute" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
-                React.createElement(TodayView, { dayK: selectedDay, blocks: blocksFor(selectedDay), now: now, isToday: selectedDay === todayKey, routines: state.routines, checks: state.checks, onToggleCheck: toggleCheck, onBlock: (b) => setDetailId(b.id), onStatus: setBlockStatus, onAdd: addTerminHere, onShiftDay: (dir) => {
+                React.createElement(TodayView, { dayK: selectedDay, blocks: blocksFor(selectedDay), now: now, isToday: selectedDay === todayKey, routines: state.routines, checks: state.checks, onToggleCheck: toggleCheck, onBlock: (b) => setDetailId(b.id), onStatus: setBlockStatus, onAdd: addTerminHere, onSlot: handleSlotClick, ppm: ppm, onShiftDay: (dir) => {
                         const nd = addDays(new Date(selectedDay + "T00:00:00"), dir);
                         setSelectedDay(dayKey(nd));
                         setWeekStart(mondayOf(nd));
@@ -1014,14 +1169,19 @@ function PlannerApp() {
                             React.createElement("button", { onClick: syncWeek, disabled: sync.status === "loading", className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs" },
                                 React.createElement(UploadCloud, { size: 14 }),
                                 "sichern"))),
-                    manualPick && (React.createElement("div", { className: "pl-rise mt-2 px-3 py-2 rounded flex items-center gap-2", style: { background: hexA(((_a = CATS[manualPick.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72", 0.14) } },
-                        React.createElement("span", { className: "mono text-xs flex-1", style: { color: (_b = CATS[manualPick.cat]) === null || _b === void 0 ? void 0 : _b.color } },
-                            "Tippe die Startzeit f\u00FCr \u201E",
-                            manualPick.title,
-                            "\" (",
-                            durLabel(manualPick.est),
-                            ") ins Raster"),
-                        React.createElement("button", { onClick: () => setManualPick(null), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Abbrechen")))),
+                    manualPick && (React.createElement("div", { className: "pl-rise mt-2 px-3 py-2.5 rounded flex flex-col gap-2", style: { background: hexA(((_a = CATS[manualPick.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72", 0.14) } },
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("span", { className: "text-sm font-medium truncate flex-1", style: { color: (_b = CATS[manualPick.cat]) === null || _b === void 0 ? void 0 : _b.color } }, manualPick.title),
+                            React.createElement("button", { onClick: () => setManualPick(null), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Abbrechen")),
+                        React.createElement("div", { className: "flex items-center gap-1" },
+                            React.createElement("span", { className: "mono text-xs pl-muted shrink-0" }, "Dauer"),
+                            [30, 60, 90, 120, 180].map((m) => {
+                                var _a, _b;
+                                return (React.createElement("button", { key: m, onClick: () => setManualPick({ ...manualPick, est: m }), className: "pl-btn flex-1 py-1 rounded mono text-xs", style: manualPick.est === m
+                                        ? { background: (_a = CATS[manualPick.cat]) === null || _a === void 0 ? void 0 : _a.color, color: "#FFF", borderColor: (_b = CATS[manualPick.cat]) === null || _b === void 0 ? void 0 : _b.color }
+                                        : {} }, m >= 60 ? `${m / 60}h` : `${m}m`));
+                            })),
+                        React.createElement("span", { className: "mono text-xs pl-muted" }, "Tippe jetzt die Startzeit im Raster an")))),
                 React.createElement("div", { className: "px-4 md:px-6" },
                     React.createElement("div", { className: "grid grid-cols-7 gap-1" }, days.map((d, i) => {
                         const k = dayKey(d);
@@ -1052,11 +1212,11 @@ function PlannerApp() {
                             React.createElement(TabBtn, { active: panel === "todos", onClick: () => setPanel("todos"), icon: List, label: "To-dos" }),
                             React.createElement(TabBtn, { active: panel === "projekte", onClick: () => setPanel("projekte"), icon: Target, label: "Projekte" }),
                             React.createElement(TabBtn, { active: panel === "vorlage", onClick: () => setPanel("vorlage"), icon: LayoutGrid, label: "Vorlage" })),
-                        panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: setPendingTodo, pending: pendingTodo })),
-                        panel === "projekte" && (React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: setPendingTodo })),
+                        panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: startPlacing, pending: pendingTodo })),
+                        panel === "projekte" && (React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing })),
                         panel === "vorlage" && (React.createElement(TemplatePanel, { template: state.template || [], onApply: applyTemplate, onSaveWeek: saveWeekAsTemplate, onRemove: removeTemplateEntry, onToggleAuto: toggleTemplateAuto })))))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
-                React.createElement(LearnView, { done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: weekIdx, setWeekIdx: setWeekIdx, today: today }))),
+                React.createElement(LearnView, { weeks: studyWeeks, exam: studyExam, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onReset: resetStudyPlan }))),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -1069,9 +1229,8 @@ function PlannerApp() {
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, 7)), className: "pl-btn p-2 rounded", "aria-label": "Woche vor" },
                         React.createElement(ChevronRight, { size: 16 }))),
                 React.createElement(ReviewPanel, { stats: weekStats, routines: state.routines, yearGrid: yearGrid, onPickWeek: (d) => setWeekStart(mondayOf(d)), onDemo: loadDemo, onReset: resetAll, onConfetti: testConfetti, onStatus: setBlockStatus }),
-                React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: setPendingTodo }),
-                React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onPlan: (r) => setPendingTodo({ title: r.title, cat: r.cat, est: 60 }) })))),
-        pendingTodo && (React.createElement(ScheduleSheet, { item: pendingTodo, weekStart: weekStart, todayKey: todayKey, gapsFor: gapsFor, blocksFor: blocksFor, onConfirm: confirmSchedule, onManual: (dur) => { setManualPick({ ...pendingTodo, est: dur }); setPendingTodo(null); }, onClose: () => setPendingTodo(null) })),
+                React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing }),
+                React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
         React.createElement(Confetti, { trigger: celebration === null || celebration === void 0 ? void 0 : celebration.id }),
         celebration && (React.createElement("button", { onClick: () => setCelebration(null), className: "fixed inset-0 z-50 flex items-center justify-center p-6", style: { background: "rgba(25,29,26,.28)" } },
             React.createElement("div", { className: "pl-sheet pl-rise rounded-lg px-8 py-6 text-center" },
@@ -1146,7 +1305,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
 function HourRail({ hours, ppm, every = 1, compact = false }) {
     return (React.createElement("div", { className: "relative", style: { height: (DAY_END - DAY_START) * 60 * ppm } }, hours.map((h, i) => (i % every === 0 ? (React.createElement("div", { key: h, className: "absolute mono pl-muted", style: { right: compact ? 3 : 6, top: (h - DAY_START) * 60 * ppm - 6, fontSize: compact ? 9 : 11 } }, compact ? h : pad(h))) : null))));
 }
-function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday }) {
+function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, ppm }) {
     var _a, _b;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const d = new Date(dayK + "T00:00:00");
@@ -1202,12 +1361,21 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                 React.createElement("span", { className: "mono text-xs pl-muted shrink-0" }, minsToLabel(b.start)),
                 React.createElement("span", { className: "text-sm truncate flex-1" }, b.title),
                 React.createElement(StatusButtons, { current: b.status, onPick: (s) => onStatus(b.id, s) }))))))),
-        React.createElement("div", { className: "pl-card rounded p-3" },
-            React.createElement("div", { className: "flex items-center justify-between mb-2" },
-                React.createElement("span", { className: "mono text-xs pl-muted" }, "Tagesplan"),
+        React.createElement("div", null,
+            React.createElement("div", { className: "flex items-center justify-between mb-1" },
+                React.createElement("span", { className: "mono text-xs pl-muted" },
+                    "Tagesplan \u00B7 ",
+                    DAY_START,
+                    "\u2013",
+                    DAY_END,
+                    " Uhr"),
                 React.createElement("button", { onClick: onAdd, className: "px-2.5 py-1 rounded flex items-center gap-1 mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } },
                     React.createElement(Plus, { size: 12 }),
                     " Termin")),
+            React.createElement("div", { className: "pl-card rounded" },
+                React.createElement(Grid, { visibleDays: [new Date(dayK + "T00:00:00")], todayKey: isToday ? dayK : "-", now: now, blocksFor: () => blocks, onSlot: onSlot, onBlock: onBlock, ppm: ppm, maxH: ppm * (DAY_END - DAY_START) * 60 + 4 }))),
+        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Als Liste"),
             blocks.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-3" }, "Nichts eingetragen. \u00DCber \u201ETermin\" oder die Wochenansicht f\u00FCllst du den Tag.")) : (React.createElement("div", { className: "flex flex-col" }, blocks.map((b) => {
                 var _a;
                 const c = b.external ? "#6F7A72" : ((_a = CATS[b.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
@@ -1242,46 +1410,72 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                     r.title));
             }))))));
 }
-function LearnView({ done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today }) {
+function LearnView({ weeks, exam, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onReset }) {
     const [openSubject, setOpenSubject] = useState(null);
     const [showInfo, setShowInfo] = useState(false);
-    const wk = STUDY_WEEKS[weekIdx];
-    const examDate = new Date(STUDY_EXAM.date + "T00:00:00");
+    const [edit, setEdit] = useState(false);
+    const [confirmReset, setConfirmReset] = useState(false);
+    const wk = weeks[weekIdx];
+    if (!wk)
+        return React.createElement("p", { className: "mono text-xs pl-muted" }, "Kein Lernplan vorhanden.");
+    const examDate = new Date(exam.date + "T00:00:00");
     const daysLeft = Math.ceil((examDate - new Date(dayKey(today) + "T00:00:00")) / 86400000);
-    const key = (kind, i) => `w${wk.n}-${kind}-${i}`;
-    const mustDone = wk.must.filter((_, i) => done[key("must", i)]).length;
+    const mustDone = wk.must.filter((t) => done[t.id]).length;
     const mustMin = wk.must.reduce((s, t) => s + t.m, 0);
-    const doneMin = wk.must.reduce((s, t, i) => s + (done[key("must", i)] ? t.m : 0), 0);
+    const doneMin = wk.must.reduce((s, t) => s + (done[t.id] ? t.m : 0), 0);
     const pct = mustMin ? (doneMin / mustMin) * 100 : 0;
-    const Row = ({ task, kind, i }) => {
-        var _a;
-        const k = key(kind, i);
-        const on = !!done[k];
+    const Row = ({ task, kind }) => {
+        const on = !!done[task.id];
         const c = kind === "must" ? "#2B4B8F" : "#6F7A72";
+        if (edit) {
+            return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
+                React.createElement("div", { className: "flex-1 min-w-0 flex flex-col gap-1" },
+                    React.createElement("input", { value: task.t, placeholder: "Aufgabe", onChange: (e) => onEditTask(weekIdx, kind, task.id, { t: e.target.value }), className: "pl-input px-2 py-1 rounded text-sm" }),
+                    React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
+                        React.createElement("button", { onClick: () => onEditTask(weekIdx, kind, task.id, { m: Math.max(15, task.m - 15) }), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+                        React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 58, textAlign: "center" } }, durLabel(task.m)),
+                        React.createElement("button", { onClick: () => onEditTask(weekIdx, kind, task.id, { m: Math.min(360, task.m + 15) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
+                        React.createElement("select", { value: task.s, onChange: (e) => onEditTask(weekIdx, kind, task.id, { s: e.target.value }), className: "pl-input px-1 py-1 rounded mono text-xs", style: { width: "auto" } }, Object.keys(SUBJECTS).map((k) => (React.createElement("option", { key: k, value: k }, SUBJECTS[k].short)))),
+                        React.createElement("button", { onClick: () => onDeleteTask(weekIdx, kind, task.id), className: "pl-btn px-2 py-1 rounded ml-auto", style: { color: "#A03A5E" }, "aria-label": "L\u00F6schen" },
+                            React.createElement(Trash2, { size: 12 }))))));
+        }
         return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
             React.createElement("button", { onClick: () => { if (!on)
-                    buzz(12); onToggleTask(k); }, className: `w-5 h-5 rounded-sm shrink-0 flex items-center justify-center mt-0.5 ${on ? "pl-pop" : ""}`, style: { background: on ? c : "transparent", border: `1.5px solid ${on ? c : "var(--line)"}` }, "aria-label": "Erledigt" }, on && React.createElement(Check, { size: 13, color: "#FFF" })),
+                    buzz(12); onToggleTask(task.id); }, className: `w-5 h-5 rounded-sm shrink-0 flex items-center justify-center mt-0.5 ${on ? "pl-pop" : ""}`, style: { background: on ? c : "transparent", border: `1.5px solid ${on ? c : "var(--line)"}` }, "aria-label": "Erledigt" }, on && React.createElement(Check, { size: 13, color: "#FFF" })),
             React.createElement("div", { className: "flex-1 min-w-0" },
-                React.createElement("div", { className: "text-sm leading-snug", style: { textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1 } }, task.t),
-                React.createElement("div", { className: "mono text-xs pl-muted" }, (_a = SUBJECTS[task.s]) === null || _a === void 0 ? void 0 :
-                    _a.short,
+                React.createElement("div", { className: "text-sm leading-snug", style: { textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1 } }, task.t || "(ohne Titel)"),
+                React.createElement("div", { className: "mono text-xs pl-muted" },
+                    SUBJECTS[task.s] ? SUBJECTS[task.s].short : task.s,
                     " \u00B7 ",
                     durLabel(task.m))),
-            !on && (React.createElement("button", { onClick: () => onPlanTask(task, k), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" }, "einplanen"))));
+            !on && task.t && (React.createElement("button", { onClick: () => onPlanTask(task), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" }, "einplanen"))));
     };
     return (React.createElement("div", { className: "flex flex-col gap-3" },
         React.createElement("div", { className: "pl-card rounded p-4" },
             React.createElement("div", { className: "flex items-end justify-between gap-3" },
-                React.createElement("div", { className: "min-w-0" },
+                React.createElement("div", { className: "min-w-0 flex-1" },
                     React.createElement("div", { className: "mono text-xs pl-muted" }, "n\u00E4chste Pr\u00FCfung"),
-                    React.createElement("div", { className: "text-lg font-semibold leading-tight truncate" }, STUDY_EXAM.title),
-                    React.createElement("div", { className: "mono text-xs pl-muted mt-0.5" }, "27. September 2026")),
+                    edit ? (React.createElement("div", { className: "flex flex-col gap-1 mt-1" },
+                        React.createElement("input", { value: exam.title, onChange: (e) => onExamField("title", e.target.value), className: "pl-input px-2 py-1 rounded text-sm", placeholder: "Fach" }),
+                        React.createElement("input", { type: "date", value: exam.date, onChange: (e) => onExamField("date", e.target.value), className: "pl-input px-2 py-1 rounded mono text-xs" }))) : (React.createElement(React.Fragment, null,
+                        React.createElement("div", { className: "text-lg font-semibold leading-tight truncate" }, exam.title),
+                        React.createElement("div", { className: "mono text-xs pl-muted mt-0.5" }, examDate.toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }))))),
                 React.createElement("div", { className: "text-right shrink-0" },
                     React.createElement("div", { className: "mono text-4xl font-semibold leading-none", style: { color: daysLeft <= 14 ? "#A03A5E" : "#2B4B8F" } }, daysLeft),
-                    React.createElement("div", { className: "mono text-xs pl-muted" }, "Tage"))),
-            React.createElement("p", { className: "mono text-xs pl-muted mt-3 pt-3 border-t pl-hair leading-relaxed" }, "Pr\u00FCf bitte, ob der 27.09. stimmt \u2014 das ist ein Sonntag.")),
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, "Tage")))),
         React.createElement("div", { className: "flex items-center gap-2" },
-            React.createElement("button", { onClick: () => setWeekIdx(Math.max(0, weekIdx - 1)), className: "pl-btn p-2 rounded", disabled: weekIdx === 0, "aria-label": "Woche zur\u00FCck" },
+            React.createElement("button", { onClick: () => setEdit(!edit), className: "pl-btn px-3 py-1.5 rounded mono text-xs", style: edit ? { background: "var(--ink)", color: "var(--paper)", borderColor: "var(--ink)" } : {} }, edit ? "Fertig" : "Plan bearbeiten"),
+            edit && (React.createElement("button", { onClick: () => { if (confirmReset) {
+                    onReset();
+                    setConfirmReset(false);
+                    setEdit(false);
+                }
+                else
+                    setConfirmReset(true); }, className: "pl-btn px-3 py-1.5 rounded mono text-xs ml-auto", style: confirmReset
+                    ? { background: "#A03A5E", color: "#FFF", borderColor: "#A03A5E" }
+                    : { color: "#A03A5E", borderColor: "#A03A5E" } }, confirmReset ? "wirklich? alles zurück" : "Ursprungsplan"))),
+        React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement("button", { onClick: () => setWeekIdx(Math.max(0, weekIdx - 1)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
                 React.createElement(ChevronLeft, { size: 16 })),
             React.createElement("div", { className: "flex-1 text-center" },
                 React.createElement("div", { className: "mono text-xs pl-muted" },
@@ -1296,10 +1490,14 @@ function LearnView({ done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today 
                     ".",
                     wk.to.slice(5, 7),
                     "."),
-                React.createElement("div", { className: "text-base font-medium leading-tight" }, wk.title)),
-            React.createElement("button", { onClick: () => setWeekIdx(Math.min(STUDY_WEEKS.length - 1, weekIdx + 1)), className: "pl-btn p-2 rounded", disabled: weekIdx === STUDY_WEEKS.length - 1, "aria-label": "Woche vor" },
+                edit ? (React.createElement("input", { value: wk.title, onChange: (e) => onWeekField(weekIdx, "title", e.target.value), className: "pl-input px-2 py-1 rounded text-sm mt-1", placeholder: "Titel der Woche" })) : (React.createElement("div", { className: "text-base font-medium leading-tight" }, wk.title))),
+            React.createElement("button", { onClick: () => setWeekIdx(Math.min(weeks.length - 1, weekIdx + 1)), className: "pl-btn p-2 rounded", "aria-label": "Woche vor" },
                 React.createElement(ChevronRight, { size: 16 }))),
-        React.createElement("div", { className: "pl-card rounded p-3" },
+        edit && (React.createElement("div", { className: "pl-card rounded p-3 flex items-center gap-2" },
+            React.createElement("span", { className: "mono text-xs pl-muted" }, "Zeitraum"),
+            React.createElement("input", { type: "date", value: wk.from, onChange: (e) => onWeekField(weekIdx, "from", e.target.value), className: "pl-input px-2 py-1 rounded mono text-xs" }),
+            React.createElement("input", { type: "date", value: wk.to, onChange: (e) => onWeekField(weekIdx, "to", e.target.value), className: "pl-input px-2 py-1 rounded mono text-xs" }))),
+        !edit && (React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "flex items-baseline justify-between mb-2" },
                 React.createElement("span", { className: "mono text-xs pl-muted" }, "Pflichtprogramm"),
                 React.createElement("span", { className: "mono text-sm" },
@@ -1311,31 +1509,33 @@ function LearnView({ done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today 
                     " von ",
                     durLabel(mustMin))),
             React.createElement("div", { className: "h-2 rounded-full overflow-hidden", style: { background: hexA("#2B4B8F", 0.15) } },
-                React.createElement("div", { className: "h-2 rounded-full pl-bar", style: { width: `${pct}%`, background: "#2B4B8F" } }))),
+                React.createElement("div", { className: "h-2 rounded-full pl-bar", style: { width: `${pct}%`, background: "#2B4B8F" } })))),
         React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs mb-1", style: { color: "#2B4B8F" } }, "Muss \u2014 auch in einer schlechten Woche"),
-            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.must.map((t, i) => React.createElement(Row, { key: i, task: t, kind: "must", i: i })))),
-        wk.extra.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.must.map((t) => React.createElement(Row, { key: t.id, task: t, kind: "must" }))),
+            edit && (React.createElement("button", { onClick: () => onAddTask(weekIdx, "must"), className: "pl-btn mt-2 px-2 py-1 rounded mono text-xs flex items-center gap-1" },
+                React.createElement(Plus, { size: 12 }),
+                " Aufgabe"))),
+        (wk.extra.length > 0 || edit) && (React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wenn Zeit \u2014 Aufbau auf 8\u201310 h"),
-            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.extra.map((t, i) => React.createElement(Row, { key: i, task: t, kind: "extra", i: i }))))),
-        wk.n === 7 && (React.createElement("div", { className: "pl-card rounded p-4 text-center" },
-            React.createElement("div", { className: "mono text-xs pl-muted" }, "So 27.09."),
-            React.createElement("div", { className: "text-lg font-semibold" }, "Molekularbiologie 2"),
-            React.createElement("p", { className: "mono text-xs pl-muted mt-2" }, "Am Pr\u00FCfungstag nichts Neues mehr lernen."))),
-        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.extra.map((t) => React.createElement(Row, { key: t.id, task: t, kind: "extra" }))),
+            edit && (React.createElement("button", { onClick: () => onAddTask(weekIdx, "extra"), className: "pl-btn mt-2 px-2 py-1 rounded mono text-xs flex items-center gap-1" },
+                React.createElement(Plus, { size: 12 }),
+                " Aufgabe")))),
+        !edit && (React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "F\u00E4cher"),
             React.createElement("div", { className: "flex flex-col" }, ["molbio", "thermo", "prozess", "allergien"].map((id) => {
-                const s = SUBJECTS[id];
+                const sub = SUBJECTS[id];
                 const open = openSubject === id;
                 return (React.createElement("div", { key: id, className: "border-b pl-hair last:border-0" },
                     React.createElement("button", { onClick: () => setOpenSubject(open ? null : id), className: "w-full flex items-center gap-2 py-2 text-left" },
                         React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: CATS.uni.color } }),
-                        React.createElement("span", { className: "text-sm flex-1" }, s.title),
+                        React.createElement("span", { className: "text-sm flex-1" }, sub.title),
                         React.createElement(ChevronRight, { size: 14, className: "pl-muted", style: { transform: open ? "rotate(90deg)" : "none", transition: "transform .18s" } })),
-                    open && (React.createElement("p", { className: "pl-rise text-sm pl-muted leading-relaxed pb-3 pl-3.5" }, s.note))));
-            }))),
-        React.createElement("button", { onClick: () => setShowInfo(!showInfo), className: "pl-btn px-3 py-2 rounded mono text-xs" }, showInfo ? "Regeln ausblenden" : "Lernregeln & FH-Fristen"),
-        showInfo && (React.createElement("div", { className: "pl-card pl-rise rounded p-3 flex flex-col gap-3" },
+                    open && React.createElement("p", { className: "pl-rise text-sm pl-muted leading-relaxed pb-3 pl-3.5" }, sub.note)));
+            })))),
+        !edit && (React.createElement("button", { onClick: () => setShowInfo(!showInfo), className: "pl-btn px-3 py-2 rounded mono text-xs" }, showInfo ? "Regeln ausblenden" : "Lernregeln & FH-Fristen")),
+        showInfo && !edit && (React.createElement("div", { className: "pl-card pl-rise rounded p-3 flex flex-col gap-3" },
             React.createElement("div", null,
                 React.createElement("div", { className: "mono text-xs pl-muted mb-1.5" }, "Sechs Regeln"),
                 React.createElement("ol", { className: "flex flex-col gap-1.5" }, STUDY_RULES.map((r, i) => (React.createElement("li", { key: i, className: "text-sm flex gap-2" },
@@ -2171,17 +2371,5 @@ function Wochenplaner() {
     return (React.createElement(ErrorBoundary, null,
         React.createElement(PlannerApp, null)));
 }
-(function () {
-  try {
-    if (!window.React || !window.ReactDOM) throw new Error("React nicht geladen");
-    var el = document.getElementById("root");
-    if (ReactDOM.createRoot) {
-      ReactDOM.createRoot(el).render(React.createElement(Wochenplaner));
-    } else {
-      ReactDOM.render(React.createElement(Wochenplaner), el);
-    }
-  } catch (e) {
-    if (window.__plannerError) window.__plannerError("Der Planer konnte nicht starten", String(e && e.stack || e));
-    else throw e;
-  }
-})();
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(Wochenplaner));
