@@ -8,7 +8,7 @@
 <title>Wochenplaner</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Planer">
@@ -53,8 +53,7 @@
         lokal
           ? 'Die Datei "' + name + '" wurde nicht gefunden.\n\n' +
             'Alle neun Dateien müssen im selben Ordner liegen und exakt so heißen:\n\n' +
-            'index.html\napp.js\nstyle.css\nmanifest.json\nsw.js\nicon.svg\n' +
-            'icon-192.png\nicon-512.png\nicon-512-maskable.png\n\n' +
+            'index.html\napp.js\nstyle.css\nmanifest.json\nsw.js\nicon.svg\n\n' +
             'Häufigster Grund: beim zweiten Download hat der Browser die Datei ' +
             '"app (1).js" genannt. Dann die alte löschen und die neue in "app.js" umbenennen.'
           : 'Konnte nicht aus dem Netz geladen werden:\n' + file);
@@ -90,6 +89,7 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="config.js"></script>
 <script src="app.js" onerror="window.__appMissing=true"></script>
 <script>
   if ('serviceWorker' in navigator) {
