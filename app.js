@@ -1,6 +1,6 @@
 "use strict";
 /* ── Icons: lucide-Pfade, lokal eingebettet ── */
-const ICONS = { "ChevronLeft": "<path d=\"m15 18-6-6 6-6\"/>", "ChevronRight": "<path d=\"m9 18 6-6-6-6\"/>", "Plus": "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>", "Check": "<path d=\"M20 6 9 17l-5-5\"/>", "X": "<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>", "ArrowRight": "<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>", "Trash2": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><path d=\"M10 11v6\"/><path d=\"M14 11v6\"/>", "RefreshCw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>", "Calendar": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/><path d=\"M16 2v4\"/><path d=\"M8 2v4\"/><path d=\"M3 10h18\"/>", "List": "<path d=\"M8 6h13\"/><path d=\"M8 12h13\"/><path d=\"M8 18h13\"/><path d=\"M3 6h.01\"/><path d=\"M3 12h.01\"/><path d=\"M3 18h.01\"/>", "Repeat": "<path d=\"m17 2 4 4-4 4\"/><path d=\"M3 11v-1a4 4 0 0 1 4-4h14\"/><path d=\"m7 22-4-4 4-4\"/><path d=\"M21 13v1a4 4 0 0 1-4 4H3\"/>", "UploadCloud": "<path d=\"M12 13v8\"/><path d=\"M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24\"/><path d=\"m8 17 4-4 4 4\"/>", "AlertCircle": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4\"/><path d=\"M12 16h.01\"/>", "LayoutGrid": "<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>", "Target": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>", "Undo2": "<path d=\"M9 14 4 9l5-5\"/><path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\"/>", "Flame": "<path d=\"M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z\"/>" };
+const ICONS = { "ChevronLeft": "<path d=\"m15 18-6-6 6-6\"/>", "ChevronRight": "<path d=\"m9 18 6-6-6-6\"/>", "Plus": "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>", "Check": "<path d=\"M20 6 9 17l-5-5\"/>", "X": "<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>", "ArrowRight": "<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>", "Trash2": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><path d=\"M10 11v6\"/><path d=\"M14 11v6\"/>", "RefreshCw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>", "Calendar": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/><path d=\"M16 2v4\"/><path d=\"M8 2v4\"/><path d=\"M3 10h18\"/>", "List": "<path d=\"M8 6h13\"/><path d=\"M8 12h13\"/><path d=\"M8 18h13\"/><path d=\"M3 6h.01\"/><path d=\"M3 12h.01\"/><path d=\"M3 18h.01\"/>", "Repeat": "<path d=\"m17 2 4 4-4 4\"/><path d=\"M3 11v-1a4 4 0 0 1 4-4h14\"/><path d=\"m7 22-4-4 4-4\"/><path d=\"M21 13v1a4 4 0 0 1-4 4H3\"/>", "UploadCloud": "<path d=\"M12 13v8\"/><path d=\"M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24\"/><path d=\"m8 17 4-4 4 4\"/>", "AlertCircle": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4\"/><path d=\"M12 16h.01\"/>", "LayoutGrid": "<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>", "Target": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>", "Undo2": "<path d=\"M9 14 4 9l5-5\"/><path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\"/>", "Timer": "<circle cx=\"12\" cy=\"13\" r=\"8\"/><path d=\"M12 9v4l2 2\"/><path d=\"M9 2h6\"/>", "Flame": "<path d=\"M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z\"/>" };
 function mkIcon(name) {
     return function Icon(props) {
         const p = props || {};
@@ -30,6 +30,7 @@ const LayoutGrid = mkIcon("LayoutGrid");
 const Target = mkIcon("Target");
 const Flame = mkIcon("Flame");
 const Undo2 = mkIcon("Undo2");
+const Timer = mkIcon("Timer");
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 /* ────────────────────────────────────────────────────────────
    Design-Tokens
@@ -37,7 +38,7 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
    farben tragen die Information. Zeiten immer in Mono (Messwert-
    Logik), Titel in Space Grotesk.
 ──────────────────────────────────────────────────────────── */
-const CATS = {
+const DEFAULT_CATS = {
     uni: { label: "Uni", color: "#2B4B8F" },
     fokus: { label: "Lernen", color: "#5B3FA0" },
     arbeit: { label: "Arbeit", color: "#8A4E1C" },
@@ -45,11 +46,27 @@ const CATS = {
     privat: { label: "Privat", color: "#A03A5E" },
     glaube: { label: "Glauben", color: "#12657F" },
 };
-const CAT_KEYS = Object.keys(CATS);
+/* Wird beim Laden aus den gespeicherten Daten befüllt */
+let CATS = { ...DEFAULT_CATS };
+let CAT_KEYS = Object.keys(CATS);
+function applyCats(custom) {
+    CATS = custom && Object.keys(custom).length ? { ...custom } : { ...DEFAULT_CATS };
+    CAT_KEYS = Object.keys(CATS);
+}
+/* Farbpalette zur Auswahl */
+const PALETTE = [
+    "#2B4B8F", "#3F51B5", "#5B3FA0", "#7A3F9E", "#A03A5E", "#C2185B",
+    "#B3261E", "#D14343", "#C2410C", "#8A4E1C", "#A8761A", "#8C7211",
+    "#5E7A1E", "#3F8A1E", "#1E6E5A", "#0F7A6C", "#12657F", "#0B6E8F",
+    "#546E7A", "#5D4037", "#6D4C6E", "#37474F", "#7A5C3E", "#4A5D23",
+];
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
 const STORE_KEY = "planner:v1";
+const TIMER_KEY = "planer:timer";
+const FOCUS_MIN = 25;
+const BREAK_MIN = 5;
 /* localStorage hinter derselben Schnittstelle wie im Artifact */
 window.storage = {
     async get(key) {
@@ -602,6 +619,16 @@ function PlannerApp() {
     const cloudRef = useRef({ armed: false, timer: null });
     const undoRef = useRef([]);
     const [canUndo, setCanUndo] = useState(false);
+    const [timer, setTimer] = useState(() => {
+        try {
+            const raw = localStorage.getItem(TIMER_KEY);
+            return raw ? JSON.parse(raw) : null;
+        }
+        catch (e) {
+            return null;
+        }
+    });
+    const [beat, setBeat] = useState(0);
     const [zoom, setZoom] = useState("fit");
     const [cols, setCols] = useState(() => (typeof window !== "undefined" && window.innerWidth >= 900 ? 7 : 5));
     const [viewH, setViewH] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
@@ -614,6 +641,19 @@ function PlannerApp() {
         const t = setInterval(() => setNow(new Date()), 60000);
         return () => clearInterval(t);
     }, []);
+    /* Sekundentakt, nur solange ein Timer läuft */
+    useEffect(() => {
+        if (!timer || timer.phase === "done" || timer.paused)
+            return;
+        const i = setInterval(() => setBeat((b) => b + 1), 1000);
+        return () => clearInterval(i);
+    }, [timer]);
+    useEffect(() => {
+        if (!timer || timer.phase === "done" || timer.paused)
+            return;
+        if (timer.endsAt - Date.now() <= 0)
+            advanceFocus();
+    }, [beat, timer, advanceFocus]);
     /* Bildschirmhöhe für die Maßstabsberechnung */
     useEffect(() => {
         const on = () => setViewH(window.innerHeight);
@@ -639,6 +679,7 @@ function PlannerApp() {
                     const loaded = { ...DEFAULT_STATE, ...JSON.parse(r.value) };
                     if (!loaded.study)
                         loaded.study = initStudy();
+                    applyCats(loaded.cats);
                     setState(loaded);
                 }
                 else {
@@ -1077,6 +1118,78 @@ function PlannerApp() {
         }
         return next;
     });
+    /* ── Fokus-Timer ─────────────────────────────────────────
+       Runden ergeben sich aus der Blockdauer: 25 min Fokus + 5 min Pause. */
+    const startFocus = (block) => {
+        const rounds = Math.max(1, Math.round(block.dur / 30));
+        const t = {
+            blockId: block.id, title: block.title, cat: block.cat, blockDur: block.dur,
+            rounds: rounds, round: 1, phase: "focus",
+            endsAt: Date.now() + FOCUS_MIN * 60000, focused: 0, paused: false, remain: 0,
+        };
+        setTimer(t);
+        try {
+            localStorage.setItem(TIMER_KEY, JSON.stringify(t));
+        }
+        catch (e) { }
+        buzz(14);
+    };
+    const stopFocus = (fertig) => {
+        const t = timer;
+        setTimer(null);
+        try {
+            localStorage.removeItem(TIMER_KEY);
+        }
+        catch (e) { }
+        if (!t)
+            return;
+        const min = t.focused;
+        if (min > 0) {
+            persist((prev) => ({
+                ...prev,
+                blocks: prev.blocks.map((b) => (b.id === t.blockId ? { ...b, focused: (b.focused || 0) + min } : b)),
+            }));
+        }
+        if (fertig && min >= t.blockDur * 0.7)
+            setBlockStatus(t.blockId, "done");
+    };
+    const advanceFocus = useCallback(() => {
+        setTimer((t) => {
+            if (!t)
+                return t;
+            const war = t.phase;
+            const focused = war === "focus" ? t.focused + FOCUS_MIN : t.focused;
+            buzz([20, 80, 20]);
+            if (war === "focus" && t.round >= t.rounds) {
+                const fertig = { ...t, phase: "done", focused: focused, remain: 0 };
+                try {
+                    localStorage.setItem(TIMER_KEY, JSON.stringify(fertig));
+                }
+                catch (e) { }
+                return fertig;
+            }
+            const next = war === "focus"
+                ? { ...t, phase: "break", focused: focused, endsAt: Date.now() + BREAK_MIN * 60000 }
+                : { ...t, phase: "focus", round: t.round + 1, endsAt: Date.now() + FOCUS_MIN * 60000 };
+            try {
+                localStorage.setItem(TIMER_KEY, JSON.stringify(next));
+            }
+            catch (e) { }
+            return next;
+        });
+    }, []);
+    const pauseFocus = () => setTimer((t) => {
+        if (!t)
+            return t;
+        const n = t.paused
+            ? { ...t, paused: false, endsAt: Date.now() + t.remain }
+            : { ...t, paused: true, remain: Math.max(0, t.endsAt - Date.now()) };
+        try {
+            localStorage.setItem(TIMER_KEY, JSON.stringify(n));
+        }
+        catch (e) { }
+        return n;
+    });
     const moveBlock = (id, day, start) => persist((prev) => ({
         ...prev,
         blocks: prev.blocks.map((b) => (b.id === id ? { ...b, day: day, start: start, synced: false } : b)),
@@ -1285,6 +1398,20 @@ function PlannerApp() {
     const removeTodo = (id) => persist({ ...state, todos: state.todos.filter((t) => t.id !== id) });
     /* Routinen */
     const addRoutine = (title, cat) => persist({ ...state, routines: [...state.routines, { id: uid(), title, cat }] });
+    const catsNow = state.cats || DEFAULT_CATS;
+    const saveCats = (next) => {
+        applyCats(next);
+        persist((prev) => ({ ...prev, cats: next }));
+    };
+    const setCatField = (key, field, value) => saveCats({ ...catsNow, [key]: { ...catsNow[key], [field]: value } });
+    const addCat = (label, color) => saveCats({ ...catsNow, ["c" + uid()]: { label: label, color: color } });
+    const removeCat = (key) => {
+        const next = { ...catsNow };
+        delete next[key];
+        if (Object.keys(next).length === 0)
+            return;
+        saveCats(next);
+    };
     const setRoutineTarget = (id, weekTarget) => persist((prev) => ({
         ...prev,
         routines: prev.routines.map((r) => (r.id === id ? { ...r, weekTarget } : r)),
@@ -1473,14 +1600,16 @@ function PlannerApp() {
                         React.createElement(ChevronRight, { size: 16 }))),
                 React.createElement(ReviewPanel, { stats: weekStats, routines: state.routines, yearGrid: yearGrid, onPickWeek: (d) => setWeekStart(mondayOf(d)), onDemo: loadDemo, onReset: resetAll, onConfetti: testConfetti, onStatus: setBlockStatus }),
                 React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing }),
+                React.createElement(CatPanel, { cats: catsNow, onField: setCatField, onAdd: addCat, onRemove: removeCat }),
                 React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
+        timer && (React.createElement(FocusTimer, { timer: timer, beat: beat, onPause: pauseFocus, onSkip: advanceFocus, onStop: () => stopFocus(false), onDone: () => stopFocus(true) })),
         React.createElement(Confetti, { trigger: celebration === null || celebration === void 0 ? void 0 : celebration.id }),
         celebration && (React.createElement("button", { onClick: () => setCelebration(null), className: "fixed inset-0 z-50 flex items-center justify-center p-6", style: { background: "rgba(25,29,26,.28)" } },
             React.createElement("div", { className: "pl-sheet pl-rise rounded-lg px-8 py-6 text-center" },
                 React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest mb-1" }, "geschafft"),
                 React.createElement("div", { className: "text-4xl font-semibold", style: { color: celebration.color } }, celebration.title),
                 React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
-        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onDelete: () => { removeBlock(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
+        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onDelete: () => { removeBlock(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
         editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor({ ...editor, ...patch }); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
 }
 /* ════════════════ Raster ════════════════ */
@@ -2143,6 +2272,40 @@ function YearGrid({ weeks, onPick }) {
             [null, 0.2, 0.5, 0.7, 0.95].map((q, i) => (React.createElement("span", { key: i, className: "rounded-sm", style: { width: 11, height: 11, background: shade(q) } }))),
             React.createElement("span", null, "viel"))));
 }
+function CatPanel({ cats, onField, onAdd, onRemove }) {
+    const [neu, setNeu] = useState("");
+    const [farbe, setFarbe] = useState(PALETTE[0]);
+    const [offen, setOffen] = useState(null);
+    const keys = Object.keys(cats);
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+        React.createElement("div", { className: "mono text-xs pl-muted" }, "Kategorien"),
+        React.createElement("div", { className: "flex flex-col gap-2" }, keys.map((k) => (React.createElement("div", { key: k },
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("button", { onClick: () => setOffen(offen === k ? null : k), className: "w-6 h-6 rounded-sm shrink-0", style: { background: cats[k].color, border: "1px solid rgba(0,0,0,.15)" }, "aria-label": "Farbe \u00E4ndern" }),
+                React.createElement("input", { value: cats[k].label, onChange: (e) => onField(k, "label", e.target.value), className: "pl-input px-2 py-1 rounded text-sm flex-1" }),
+                keys.length > 1 && (React.createElement("button", { onClick: () => onRemove(k), className: "pl-muted px-1", "aria-label": "Kategorie l\u00F6schen" },
+                    React.createElement(Trash2, { size: 13 })))),
+            offen === k && (React.createElement("div", { className: "pl-rise grid gap-1 mt-2 pl-8", style: { gridTemplateColumns: "repeat(8,1fr)" } }, PALETTE.map((c) => (React.createElement("button", { key: c, onClick: () => { onField(k, "color", c); setOffen(null); }, className: "rounded-sm", style: {
+                    height: 22, background: c,
+                    border: cats[k].color === c ? "2px solid var(--ink)" : "1px solid rgba(0,0,0,.12)",
+                }, "aria-label": c }))))))))),
+        React.createElement("div", { className: "border-t pl-hair pt-2 flex flex-col gap-2" },
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("span", { className: "w-6 h-6 rounded-sm shrink-0", style: { background: farbe, border: "1px solid rgba(0,0,0,.15)" } }),
+                React.createElement("input", { value: neu, onChange: (e) => setNeu(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && neu.trim()) {
+                        onAdd(neu.trim(), farbe);
+                        setNeu("");
+                    } }, placeholder: "Neue Kategorie", className: "pl-input px-2 py-1 rounded text-sm flex-1" }),
+                React.createElement("button", { onClick: () => { if (neu.trim()) {
+                        onAdd(neu.trim(), farbe);
+                        setNeu("");
+                    } }, className: "pl-btn px-2 rounded", "aria-label": "Anlegen" },
+                    React.createElement(Plus, { size: 14 }))),
+            React.createElement("div", { className: "grid gap-1", style: { gridTemplateColumns: "repeat(12,1fr)" } }, PALETTE.map((c) => (React.createElement("button", { key: c, onClick: () => setFarbe(c), className: "rounded-sm", style: {
+                    height: 18, background: c,
+                    border: farbe === c ? "2px solid var(--ink)" : "1px solid rgba(0,0,0,.12)",
+                }, "aria-label": c })))))));
+}
 function StatusButtons({ onPick, current, size = "sm" }) {
     const opts = [
         { k: "done", icon: Check, color: "#1E6E5A", label: "gemacht" },
@@ -2445,7 +2608,7 @@ function relTime(block, now) {
         return { label: `vor ${durLabel(m)} vorbei`, past: true };
     return { label: `vor ${Math.round(m / 60 / 24)} Tagen`, past: true };
 }
-function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete, onSync, onSave, syncing }) {
+function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete, onSync, onSave, onFocus, syncing }) {
     var _a, _b, _c;
     const [confirmDel, setConfirmDel] = useState(false);
     const c = blockColor(block);
@@ -2509,6 +2672,9 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                         React.createElement("div", { className: "mono text-xs pl-muted mb-1.5" }, "Wie ist es gelaufen?"),
                         React.createElement(StatusButtons, { current: block.status, size: "lg", onPick: (s) => onStatus(s) })),
                     React.createElement("div", { className: "flex items-center gap-2 pt-1" },
+                        onFocus && (React.createElement("button", { onClick: () => onFocus(block), className: "px-3 py-2.5 rounded mono text-xs flex items-center gap-1.5", style: { background: c, color: "#FFF" } },
+                            React.createElement(Timer, { size: 13 }),
+                            " Fokus")),
                         React.createElement("button", { onClick: onEdit, className: "flex-1 px-3 py-2.5 rounded mono text-xs", style: block.title
                                 ? { background: "var(--ink)", color: "var(--paper)" }
                                 : { background: c, color: "#FFF" } }, block.title ? "Titel & Kategorie" : "Titel eintragen"),
@@ -2670,6 +2836,56 @@ function makeDemoState() {
         ],
         reached: {},
     };
+}
+/* ════════════════ Fokus-Timer ════════════════ */
+function FocusTimer({ timer, beat, onPause, onSkip, onStop, onDone }) {
+    const [gross, setGross] = useState(false);
+    const c = (CATS[timer.cat] && CATS[timer.cat].color) || "#5B3FA0";
+    const pause = timer.phase === "break";
+    const fertig = timer.phase === "done";
+    const farbe = fertig ? "#1E6E5A" : pause ? "#8A4E1C" : c;
+    const ganz = (pause ? BREAK_MIN : FOCUS_MIN) * 60000;
+    const rest = fertig ? 0 : Math.max(0, timer.paused ? timer.remain : timer.endsAt - Date.now());
+    const sek = Math.ceil(rest / 1000);
+    const uhr = pad(Math.floor(sek / 60)) + ":" + pad(sek % 60);
+    const anteil = fertig ? 1 : 1 - rest / ganz;
+    const R = 54, U = 2 * Math.PI * R;
+    return (React.createElement(React.Fragment, null,
+        React.createElement("button", { onClick: () => setGross(true), className: "fixed flex items-center gap-2 px-3 py-2 rounded-full", style: {
+                left: "50%", transform: "translateX(-50%)", bottom: 16, zIndex: 40,
+                background: farbe, color: "#FFF",
+                boxShadow: "0 6px 20px -6px rgba(25,29,26,.5)",
+            } },
+            React.createElement(Timer, { size: 14 }),
+            React.createElement("span", { className: "mono text-sm font-medium" }, uhr),
+            React.createElement("span", { className: "mono text-xs", style: { opacity: 0.85 } }, fertig ? "fertig" : pause ? "Pause" : `${timer.round}/${timer.rounds}`)),
+        gross && (React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center p-6", style: { background: "rgba(25,29,26,.55)" }, onClick: () => setGross(false) },
+            React.createElement("div", { className: "pl-sheet pl-zoom rounded-lg p-6 flex flex-col items-center gap-4", style: { minWidth: 280 }, onClick: (e) => e.stopPropagation() },
+                React.createElement("div", { className: "text-center" },
+                    React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" }, fertig ? "geschafft" : pause ? "Pause" : "Fokus"),
+                    React.createElement("div", { className: "text-lg font-medium leading-tight mt-0.5" }, timer.title || "Lernblock")),
+                React.createElement("div", { className: "relative", style: { width: 140, height: 140 } },
+                    React.createElement("svg", { width: "140", height: "140", viewBox: "0 0 140 140" },
+                        React.createElement("circle", { cx: "70", cy: "70", r: R, fill: "none", stroke: "var(--line)", strokeWidth: "9" }),
+                        React.createElement("circle", { cx: "70", cy: "70", r: R, fill: "none", stroke: farbe, strokeWidth: "9", strokeLinecap: "round", strokeDasharray: U, strokeDashoffset: U * (1 - anteil), transform: "rotate(-90 70 70)", style: { transition: "stroke-dashoffset .9s linear" } })),
+                    React.createElement("div", { className: "absolute inset-0 flex flex-col items-center justify-center" },
+                        React.createElement("span", { className: "mono text-3xl font-semibold", style: { color: farbe } }, uhr),
+                        React.createElement("span", { className: "mono text-xs pl-muted" },
+                            "Runde ",
+                            timer.round,
+                            " von ",
+                            timer.rounds))),
+                React.createElement("div", { className: "mono text-xs pl-muted" },
+                    timer.focused,
+                    " von ",
+                    timer.blockDur,
+                    " min fokussiert"),
+                fertig ? (React.createElement("div", { className: "flex gap-2 w-full" },
+                    React.createElement("button", { onClick: onDone, className: "flex-1 px-3 py-2.5 rounded mono text-xs", style: { background: "#1E6E5A", color: "#FFF" } }, "Erledigt"),
+                    React.createElement("button", { onClick: onStop, className: "pl-btn px-3 py-2.5 rounded mono text-xs" }, "Nur schlie\u00DFen"))) : (React.createElement("div", { className: "flex gap-2 w-full" },
+                    React.createElement("button", { onClick: onPause, className: "pl-btn flex-1 px-3 py-2.5 rounded mono text-xs" }, timer.paused ? "Weiter" : "Anhalten"),
+                    React.createElement("button", { onClick: onSkip, className: "pl-btn px-3 py-2.5 rounded mono text-xs" }, "\u00DCberspringen"),
+                    React.createElement("button", { onClick: onStop, className: "pl-btn px-3 py-2.5 rounded mono text-xs", style: { color: "#A03A5E", borderColor: "#A03A5E" } }, "Beenden"))))))));
 }
 /* ════════════════ Konfetti ════════════════ */
 function Confetti({ trigger }) {
