@@ -641,19 +641,6 @@ function PlannerApp() {
         const t = setInterval(() => setNow(new Date()), 60000);
         return () => clearInterval(t);
     }, []);
-    /* Sekundentakt, nur solange ein Timer läuft */
-    useEffect(() => {
-        if (!timer || timer.phase === "done" || timer.paused)
-            return;
-        const i = setInterval(() => setBeat((b) => b + 1), 1000);
-        return () => clearInterval(i);
-    }, [timer]);
-    useEffect(() => {
-        if (!timer || timer.phase === "done" || timer.paused)
-            return;
-        if (timer.endsAt - Date.now() <= 0)
-            advanceFocus();
-    }, [beat, timer, advanceFocus]);
     /* Bildschirmhöhe für die Maßstabsberechnung */
     useEffect(() => {
         const on = () => setViewH(window.innerHeight);
@@ -1190,6 +1177,19 @@ function PlannerApp() {
         catch (e) { }
         return n;
     });
+    /* Sekundentakt, nur solange ein Timer läuft */
+    useEffect(() => {
+        if (!timer || timer.phase === "done" || timer.paused)
+            return;
+        const i = setInterval(() => setBeat((b) => b + 1), 1000);
+        return () => clearInterval(i);
+    }, [timer]);
+    useEffect(() => {
+        if (!timer || timer.phase === "done" || timer.paused)
+            return;
+        if (timer.endsAt - Date.now() <= 0)
+            advanceFocus();
+    }, [beat, timer, advanceFocus]);
     const moveBlock = (id, day, start) => persist((prev) => ({
         ...prev,
         blocks: prev.blocks.map((b) => (b.id === id ? { ...b, day: day, start: start, synced: false } : b)),
