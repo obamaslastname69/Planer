@@ -63,6 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
+const APP_VERSION = "2026-08-11 · Timer & Kategorien";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -2394,7 +2395,9 @@ function ReviewPanel({ stats, routines, yearGrid = [], onPickWeek, onStatus, onD
                         "\u00D7")));
             })))),
         React.createElement("div", { className: "border-t pl-hair pt-3" },
-            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Ausprobieren"),
+            React.createElement("div", { className: "flex items-baseline justify-between mb-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted" }, "Ausprobieren"),
+                React.createElement("span", { className: "mono text-xs pl-muted", style: { opacity: 0.7 } }, APP_VERSION)),
             React.createElement("div", { className: "flex flex-wrap gap-1" },
                 React.createElement("button", { onClick: onConfetti, className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Konfetti"),
                 React.createElement("button", { onClick: () => setConfirm(confirm === "demo" ? null : "demo"), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Beispieldaten"),
