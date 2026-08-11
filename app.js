@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-11 · Timer & Kategorien";
+const APP_VERSION = "2026-08-11b · Eingabe-Fix";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -1871,6 +1871,32 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                     r.title));
             }))))));
 }
+function StudyRow({ task, kind, done, edit, weekIdx, onEditTask, onDeleteTask, onToggleTask, onPlanTask }) {
+    const on = !!done[task.id];
+    const c = kind === "must" ? "#2B4B8F" : "#6F7A72";
+    if (edit) {
+        return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
+            React.createElement("div", { className: "flex-1 min-w-0 flex flex-col gap-1" },
+                React.createElement("input", { value: task.t, placeholder: "Aufgabe", onChange: (e) => onEditTask(weekIdx, kind, task.id, { t: e.target.value }), className: "pl-input px-2 py-1 rounded text-sm" }),
+                React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
+                    React.createElement("button", { onClick: () => onEditTask(weekIdx, kind, task.id, { m: Math.max(15, task.m - 15) }), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+                    React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 58, textAlign: "center" } }, durLabel(task.m)),
+                    React.createElement("button", { onClick: () => onEditTask(weekIdx, kind, task.id, { m: Math.min(360, task.m + 15) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
+                    React.createElement("select", { value: task.s, onChange: (e) => onEditTask(weekIdx, kind, task.id, { s: e.target.value }), className: "pl-input px-1 py-1 rounded mono text-xs", style: { width: "auto" } }, Object.keys(SUBJECTS).map((k) => (React.createElement("option", { key: k, value: k }, SUBJECTS[k].short)))),
+                    React.createElement("button", { onClick: () => onDeleteTask(weekIdx, kind, task.id), className: "pl-btn px-2 py-1 rounded ml-auto", style: { color: "#A03A5E" }, "aria-label": "L\u00F6schen" },
+                        React.createElement(Trash2, { size: 12 }))))));
+    }
+    return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
+        React.createElement("button", { onClick: () => { if (!on)
+                buzz(12); onToggleTask(task.id); }, className: `w-5 h-5 rounded-sm shrink-0 flex items-center justify-center mt-0.5 ${on ? "pl-pop" : ""}`, style: { background: on ? c : "transparent", border: `1.5px solid ${on ? c : "var(--line)"}` }, "aria-label": "Erledigt" }, on && React.createElement(Check, { size: 13, color: "#FFF" })),
+        React.createElement("div", { className: "flex-1 min-w-0" },
+            React.createElement("div", { className: "text-sm leading-snug", style: { textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1 } }, task.t || "(ohne Titel)"),
+            React.createElement("div", { className: "mono text-xs pl-muted" },
+                SUBJECTS[task.s] ? SUBJECTS[task.s].short : task.s,
+                " \u00B7 ",
+                durLabel(task.m))),
+        !on && task.t && (React.createElement("button", { onClick: () => onPlanTask(task), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" }, "einplanen"))));
+}
 function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onAddExam, onDeleteExam, onReset }) {
     const [openSubject, setOpenSubject] = useState(null);
     const [showInfo, setShowInfo] = useState(false);
@@ -1884,32 +1910,6 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
     const mustMin = wk.must.reduce((s, t) => s + t.m, 0);
     const doneMin = wk.must.reduce((s, t) => s + (done[t.id] ? t.m : 0), 0);
     const pct = mustMin ? (doneMin / mustMin) * 100 : 0;
-    const Row = ({ task, kind }) => {
-        const on = !!done[task.id];
-        const c = kind === "must" ? "#2B4B8F" : "#6F7A72";
-        if (edit) {
-            return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
-                React.createElement("div", { className: "flex-1 min-w-0 flex flex-col gap-1" },
-                    React.createElement("input", { value: task.t, placeholder: "Aufgabe", onChange: (e) => onEditTask(weekIdx, kind, task.id, { t: e.target.value }), className: "pl-input px-2 py-1 rounded text-sm" }),
-                    React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
-                        React.createElement("button", { onClick: () => onEditTask(weekIdx, kind, task.id, { m: Math.max(15, task.m - 15) }), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
-                        React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 58, textAlign: "center" } }, durLabel(task.m)),
-                        React.createElement("button", { onClick: () => onEditTask(weekIdx, kind, task.id, { m: Math.min(360, task.m + 15) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
-                        React.createElement("select", { value: task.s, onChange: (e) => onEditTask(weekIdx, kind, task.id, { s: e.target.value }), className: "pl-input px-1 py-1 rounded mono text-xs", style: { width: "auto" } }, Object.keys(SUBJECTS).map((k) => (React.createElement("option", { key: k, value: k }, SUBJECTS[k].short)))),
-                        React.createElement("button", { onClick: () => onDeleteTask(weekIdx, kind, task.id), className: "pl-btn px-2 py-1 rounded ml-auto", style: { color: "#A03A5E" }, "aria-label": "L\u00F6schen" },
-                            React.createElement(Trash2, { size: 12 }))))));
-        }
-        return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
-            React.createElement("button", { onClick: () => { if (!on)
-                    buzz(12); onToggleTask(task.id); }, className: `w-5 h-5 rounded-sm shrink-0 flex items-center justify-center mt-0.5 ${on ? "pl-pop" : ""}`, style: { background: on ? c : "transparent", border: `1.5px solid ${on ? c : "var(--line)"}` }, "aria-label": "Erledigt" }, on && React.createElement(Check, { size: 13, color: "#FFF" })),
-            React.createElement("div", { className: "flex-1 min-w-0" },
-                React.createElement("div", { className: "text-sm leading-snug", style: { textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1 } }, task.t || "(ohne Titel)"),
-                React.createElement("div", { className: "mono text-xs pl-muted" },
-                    SUBJECTS[task.s] ? SUBJECTS[task.s].short : task.s,
-                    " \u00B7 ",
-                    durLabel(task.m))),
-            !on && task.t && (React.createElement("button", { onClick: () => onPlanTask(task), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" }, "einplanen"))));
-    };
     return (React.createElement("div", { className: "flex flex-col gap-3" },
         React.createElement("div", { className: "pl-card rounded p-4 flex flex-col gap-3" },
             exams.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Keine Pr\u00FCfung eingetragen.")),
@@ -1983,13 +1983,13 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
                 React.createElement("div", { className: "h-2 rounded-full pl-bar", style: { width: `${pct}%`, background: "#2B4B8F" } })))),
         React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs mb-1", style: { color: "#2B4B8F" } }, "Muss \u2014 auch in einer schlechten Woche"),
-            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.must.map((t) => React.createElement(Row, { key: t.id, task: t, kind: "must" }))),
+            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.must.map((t) => React.createElement(StudyRow, { key: t.id, task: t, kind: "must", done: done, edit: edit, weekIdx: weekIdx, onEditTask: onEditTask, onDeleteTask: onDeleteTask, onToggleTask: onToggleTask, onPlanTask: onPlanTask }))),
             edit && (React.createElement("button", { onClick: () => onAddTask(weekIdx, "must"), className: "pl-btn mt-2 px-2 py-1 rounded mono text-xs flex items-center gap-1" },
                 React.createElement(Plus, { size: 12 }),
                 " Aufgabe"))),
         (wk.extra.length > 0 || edit) && (React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wenn Zeit \u2014 Aufbau auf 8\u201310 h"),
-            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.extra.map((t) => React.createElement(Row, { key: t.id, task: t, kind: "extra" }))),
+            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.extra.map((t) => React.createElement(StudyRow, { key: t.id, task: t, kind: "extra", done: done, edit: edit, weekIdx: weekIdx, onEditTask: onEditTask, onDeleteTask: onDeleteTask, onToggleTask: onToggleTask, onPlanTask: onPlanTask }))),
             edit && (React.createElement("button", { onClick: () => onAddTask(weekIdx, "extra"), className: "pl-btn mt-2 px-2 py-1 rounded mono text-xs flex items-center gap-1" },
                 React.createElement(Plus, { size: 12 }),
                 " Aufgabe")))),
