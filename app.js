@@ -1,6 +1,6 @@
 "use strict";
 /* ── Icons: lucide-Pfade, lokal eingebettet ── */
-const ICONS = { "ChevronLeft": "<path d=\"m15 18-6-6 6-6\"/>", "ChevronRight": "<path d=\"m9 18 6-6-6-6\"/>", "Plus": "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>", "Check": "<path d=\"M20 6 9 17l-5-5\"/>", "X": "<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>", "ArrowRight": "<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>", "Trash2": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><path d=\"M10 11v6\"/><path d=\"M14 11v6\"/>", "RefreshCw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>", "Calendar": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/><path d=\"M16 2v4\"/><path d=\"M8 2v4\"/><path d=\"M3 10h18\"/>", "List": "<path d=\"M8 6h13\"/><path d=\"M8 12h13\"/><path d=\"M8 18h13\"/><path d=\"M3 6h.01\"/><path d=\"M3 12h.01\"/><path d=\"M3 18h.01\"/>", "Repeat": "<path d=\"m17 2 4 4-4 4\"/><path d=\"M3 11v-1a4 4 0 0 1 4-4h14\"/><path d=\"m7 22-4-4 4-4\"/><path d=\"M21 13v1a4 4 0 0 1-4 4H3\"/>", "UploadCloud": "<path d=\"M12 13v8\"/><path d=\"M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24\"/><path d=\"m8 17 4-4 4 4\"/>", "AlertCircle": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4\"/><path d=\"M12 16h.01\"/>", "LayoutGrid": "<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>", "Target": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>", "Flame": "<path d=\"M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z\"/>" };
+const ICONS = { "ChevronLeft": "<path d=\"m15 18-6-6 6-6\"/>", "ChevronRight": "<path d=\"m9 18 6-6-6-6\"/>", "Plus": "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>", "Check": "<path d=\"M20 6 9 17l-5-5\"/>", "X": "<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>", "ArrowRight": "<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>", "Trash2": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><path d=\"M10 11v6\"/><path d=\"M14 11v6\"/>", "RefreshCw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>", "Calendar": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/><path d=\"M16 2v4\"/><path d=\"M8 2v4\"/><path d=\"M3 10h18\"/>", "List": "<path d=\"M8 6h13\"/><path d=\"M8 12h13\"/><path d=\"M8 18h13\"/><path d=\"M3 6h.01\"/><path d=\"M3 12h.01\"/><path d=\"M3 18h.01\"/>", "Repeat": "<path d=\"m17 2 4 4-4 4\"/><path d=\"M3 11v-1a4 4 0 0 1 4-4h14\"/><path d=\"m7 22-4-4 4-4\"/><path d=\"M21 13v1a4 4 0 0 1-4 4H3\"/>", "UploadCloud": "<path d=\"M12 13v8\"/><path d=\"M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24\"/><path d=\"m8 17 4-4 4 4\"/>", "AlertCircle": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4\"/><path d=\"M12 16h.01\"/>", "LayoutGrid": "<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>", "Target": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>", "Undo2": "<path d=\"M9 14 4 9l5-5\"/><path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\"/>", "Flame": "<path d=\"M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z\"/>" };
 function mkIcon(name) {
     return function Icon(props) {
         const p = props || {};
@@ -29,6 +29,7 @@ const AlertCircle = mkIcon("AlertCircle");
 const LayoutGrid = mkIcon("LayoutGrid");
 const Target = mkIcon("Target");
 const Flame = mkIcon("Flame");
+const Undo2 = mkIcon("Undo2");
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 /* ────────────────────────────────────────────────────────────
    Design-Tokens
@@ -311,6 +312,64 @@ async function pushToCalendar(block) {
     });
     return true;
 }
+/* ── Todoist ───────────────────────────────────────────────
+   Token liegt nur im Browser des Geräts, nie im Repository.
+──────────────────────────────────────────────────────────── */
+const TD_API = "https://api.todoist.com/api/v1";
+const TD_KEY = "planer:todoist";
+function tdToken() {
+    try {
+        return localStorage.getItem(TD_KEY) || "";
+    }
+    catch (e) {
+        return "";
+    }
+}
+function tdSetToken(v) {
+    try {
+        v ? localStorage.setItem(TD_KEY, v.trim()) : localStorage.removeItem(TD_KEY);
+    }
+    catch (e) { }
+}
+async function tdFetch(path, opts) {
+    const o = opts || {};
+    const token = tdToken();
+    if (!token)
+        throw new Error("kein Todoist-Token hinterlegt");
+    const res = await fetch(TD_API + path, Object.assign({}, o, {
+        headers: Object.assign({ Authorization: "Bearer " + token, "Content-Type": "application/json" }, o.headers || {}),
+    }));
+    if (res.status === 401 || res.status === 403)
+        throw new Error("Token ungültig");
+    if (!res.ok)
+        throw new Error("Todoist " + res.status);
+    if (res.status === 204)
+        return null;
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+}
+/* Offene Aufgaben holen (erste Seite reicht für den Alltag) */
+async function tdLoadTasks() {
+    const data = await tdFetch("/tasks");
+    const items = (data && data.results) || data || [];
+    return items.map((t) => {
+        let est = 60;
+        if (t.duration && t.duration.amount) {
+            est = t.duration.unit === "day" ? 8 * 60 : t.duration.amount;
+        }
+        return {
+            todoistId: String(t.id),
+            title: t.content,
+            est: Math.max(15, Math.min(8 * 60, est)),
+            due: (t.due && t.due.date) || null,
+            priority: t.priority || 1,
+        };
+    });
+}
+async function tdCloseTask(id) {
+    await tdFetch("/tasks/" + id + "/close", { method: "POST" });
+    return true;
+}
 /* ── Abgleich über Google Drive ────────────────────────────
    Speichert im versteckten appDataFolder: nur diese App sieht ihn.
 ──────────────────────────────────────────────────────────── */
@@ -370,7 +429,10 @@ async function driveSave(data) {
     return true;
 }
 /* ── Lernplan Restprüfungen 4. Semester ────────────────────── */
-const STUDY_EXAM = { title: "Molekularbiologie 2", date: "2026-09-27" };
+const STUDY_EXAMS = [
+    { id: "ex1", title: "Molekularbiologie 2", date: "2026-09-23" },
+    { id: "ex2", title: "Biochemie & Diätetik", date: "2026-09-28" },
+];
 const SUBJECTS = {
     orga: { short: "Orga", title: "Organisation & LEVIS" },
     molbio: { short: "MolBio", title: "Molekularbiologie 2",
@@ -484,7 +546,7 @@ const STUDY_WEEKS = [
 ];
 function initStudy() {
     return {
-        exam: { title: STUDY_EXAM.title, date: STUDY_EXAM.date },
+        exams: STUDY_EXAMS.map((e) => ({ ...e })),
         weeks: STUDY_WEEKS.map((w) => ({
             n: w.n, from: w.from, to: w.to, title: w.title,
             must: w.must.map((t, i) => ({ id: "w" + w.n + "-must-" + i, t: t.t, m: t.m, s: t.s })),
@@ -538,6 +600,8 @@ function PlannerApp() {
     const [detailId, setDetailId] = useState(null);
     const [cloud, setCloud] = useState({ state: "off", msg: "" });
     const cloudRef = useRef({ armed: false, timer: null });
+    const undoRef = useRef([]);
+    const [canUndo, setCanUndo] = useState(false);
     const [zoom, setZoom] = useState("fit");
     const [cols, setCols] = useState(() => (typeof window !== "undefined" && window.innerWidth >= 900 ? 7 : 5));
     const [viewH, setViewH] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
@@ -588,6 +652,17 @@ function PlannerApp() {
         })();
     }, []);
     /* Speichern */
+    const undo = () => {
+        const prev = undoRef.current.pop();
+        if (!prev) {
+            setCanUndo(false);
+            return;
+        }
+        setState(prev);
+        window.storage.set(STORE_KEY, JSON.stringify(prev)).catch(() => { });
+        setCanUndo(undoRef.current.length > 0);
+        buzz(10);
+    };
     /* Nur lokal sichern - ohne Rückspielen in die Cloud */
     const persistLocal = useCallback((next) => {
         setState(next);
@@ -595,6 +670,10 @@ function PlannerApp() {
     }, []);
     const persist = useCallback((nextOrFn) => {
         setState((prev) => {
+            undoRef.current.push(prev);
+            if (undoRef.current.length > 25)
+                undoRef.current.shift();
+            setCanUndo(true);
             const base = typeof nextOrFn === "function" ? nextOrFn(prev) : nextOrFn;
             const next = { ...base, updatedAt: Date.now() };
             window.storage.set(STORE_KEY, JSON.stringify(next)).catch(() => { });
@@ -872,7 +951,8 @@ function PlannerApp() {
     }, [state.blocks, weekStart]);
     /* Lernplan bearbeiten */
     const studyWeeks = (state.study && state.study.weeks) || [];
-    const studyExam = (state.study && state.study.exam) || STUDY_EXAM;
+    const studyExams = (state.study && state.study.exams)
+        || (state.study && state.study.exam ? [{ id: "ex1", ...state.study.exam }] : STUDY_EXAMS);
     const updateStudy = (fn) => persist((prev) => {
         const st = prev.study || initStudy();
         return { ...prev, study: fn(st) };
@@ -893,7 +973,15 @@ function PlannerApp() {
         ...st,
         weeks: st.weeks.map((w, i) => i === idx ? { ...w, [kind]: w[kind].filter((t) => t.id !== id) } : w),
     }));
-    const setExamField = (field, value) => updateStudy((st) => ({ ...st, exam: { ...st.exam, [field]: value } }));
+    const setExamField = (id, field, value) => updateStudy((st) => ({
+        ...st,
+        exams: (st.exams || []).map((e) => (e.id === id ? { ...e, [field]: value } : e)),
+    }));
+    const addExam = () => updateStudy((st) => ({
+        ...st,
+        exams: [...(st.exams || []), { id: uid(), title: "Neue Prüfung", date: dayKey(addDays(new Date(), 30)) }],
+    }));
+    const deleteExam = (id) => updateStudy((st) => ({ ...st, exams: (st.exams || []).filter((e) => e.id !== id) }));
     const resetStudyPlan = () => persist((prev) => ({ ...prev, study: initStudy() }));
     /* Ausprobieren */
     const loadDemo = () => {
@@ -989,6 +1077,10 @@ function PlannerApp() {
         }
         return next;
     });
+    const moveBlock = (id, day, start) => persist((prev) => ({
+        ...prev,
+        blocks: prev.blocks.map((b) => (b.id === id ? { ...b, day: day, start: start, synced: false } : b)),
+    }));
     const removeBlock = (id) => persist({ ...state, blocks: state.blocks.filter((b) => b.id !== id) });
     const handleSlotClick = (day, minutes) => {
         if (manualPick) {
@@ -1147,7 +1239,49 @@ function PlannerApp() {
     };
     /* To-dos */
     const addTodo = (title, cat, est) => persist({ ...state, todos: [...state.todos, { id: uid(), title, cat, est, done: false }] });
-    const toggleTodo = (id) => persist({ ...state, todos: state.todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) });
+    /* Todoist-Aufgaben übernehmen: vorhandene aktualisieren, neue anlegen */
+    const importTodoist = useCallback(async () => {
+        setSync({ status: "loading", msg: "Todoist wird gelesen…" });
+        try {
+            const remote = await tdLoadTasks();
+            persist((prev) => {
+                const byId = {};
+                for (const t of prev.todos)
+                    if (t.todoistId)
+                        byId[t.todoistId] = t;
+                const kept = prev.todos.filter((t) => !t.todoistId || remote.some((r) => r.todoistId === t.todoistId));
+                const merged = kept.map((t) => {
+                    if (!t.todoistId)
+                        return t;
+                    const r = remote.find((x) => x.todoistId === t.todoistId);
+                    return r ? { ...t, title: r.title } : t;
+                });
+                const neu = remote
+                    .filter((r) => !byId[r.todoistId])
+                    .map((r) => ({
+                    id: uid(), title: r.title, cat: "arbeit", est: r.est,
+                    done: false, todoistId: r.todoistId,
+                }));
+                return { ...prev, todos: [...merged, ...neu] };
+            });
+            setSync({ status: "ok", msg: `${remote.length} Aufgaben aus Todoist` });
+        }
+        catch (e) {
+            setSync({ status: "error", msg: e.message });
+        }
+    }, [persist]);
+    const toggleTodo = (id) => {
+        const t = state.todos.find((x) => x.id === id);
+        if (t && t.todoistId && !t.done) {
+            tdCloseTask(t.todoistId)
+                .then(() => setSync({ status: "ok", msg: "in Todoist erledigt" }))
+                .catch((e) => setSync({ status: "error", msg: "Todoist: " + e.message }));
+        }
+        persist((prev) => ({
+            ...prev,
+            todos: prev.todos.map((x) => (x.id === id ? { ...x, done: !x.done } : x)),
+        }));
+    };
     const removeTodo = (id) => persist({ ...state, todos: state.todos.filter((t) => t.id !== id) });
     /* Routinen */
     const addRoutine = (title, cat) => persist({ ...state, routines: [...state.routines, { id: uid(), title, cat }] });
@@ -1241,6 +1375,9 @@ function PlannerApp() {
                 lbl,
                 k === "auswerten" && weekStats.pending.length > 0 && (React.createElement("span", { className: "ml-1.5", style: { color: view === k ? "#F0B429" : "#A03A5E" } }, weekStats.pending.length)))))),
             React.createElement("div", { className: "mt-2 flex items-center gap-2" },
+                canUndo && (React.createElement("button", { onClick: undo, className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
+                    React.createElement(Undo2, { size: 12 }),
+                    " R\u00FCckg\u00E4ngig")),
                 React.createElement("button", { onClick: () => syncCloud(false), disabled: cloud.state === "busy", className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
                     React.createElement(RefreshCw, { size: 12, className: cloud.state === "busy" ? "animate-spin" : "" }),
                     "Ger\u00E4te abgleichen"),
@@ -1312,17 +1449,17 @@ function PlannerApp() {
                                 React.createElement(Plus, { size: 13 }),
                                 " Termin")),
                         React.createElement("div", { className: `pl-card rounded ${manualPick ? "pl-arm" : ""}` },
-                            React.createElement(Grid, { visibleDays: visibleDays, todayKey: todayKey, now: now, blocksFor: blocksFor, onSlot: handleSlotClick, onBlock: (b) => setDetailId(b.id), gridRef: gridRef, ppm: ppm, maxH: gridMaxH }))),
+                            React.createElement(Grid, { visibleDays: visibleDays, todayKey: todayKey, now: now, blocksFor: blocksFor, onSlot: handleSlotClick, onBlock: (b) => setDetailId(b.id), onMove: moveBlock, gridRef: gridRef, ppm: ppm, maxH: gridMaxH }))),
                     React.createElement("aside", { className: "lg:w-80 shrink-0 flex flex-col gap-3" },
                         React.createElement("div", { className: "flex gap-1" },
                             React.createElement(TabBtn, { active: panel === "todos", onClick: () => setPanel("todos"), icon: List, label: "To-dos" }),
                             React.createElement(TabBtn, { active: panel === "projekte", onClick: () => setPanel("projekte"), icon: Target, label: "Projekte" }),
                             React.createElement(TabBtn, { active: panel === "vorlage", onClick: () => setPanel("vorlage"), icon: LayoutGrid, label: "Vorlage" })),
-                        panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: startPlacing, pending: pendingTodo })),
+                        panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: startPlacing, pending: pendingTodo, onImportTodoist: importTodoist })),
                         panel === "projekte" && (React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing })),
                         panel === "vorlage" && (React.createElement(TemplatePanel, { template: state.template || [], onApply: applyTemplate, onSaveWeek: saveWeekAsTemplate, onRemove: removeTemplateEntry, onToggleAuto: toggleTemplateAuto })))))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
-                React.createElement(LearnView, { weeks: studyWeeks, exam: studyExam, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onReset: resetStudyPlan }))),
+                React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan }))),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -1347,7 +1484,7 @@ function PlannerApp() {
         editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor({ ...editor, ...patch }); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
 }
 /* ════════════════ Raster ════════════════ */
-function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef, ppm, maxH }) {
+function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, gridRef, ppm, maxH }) {
     const totalMin = (DAY_END - DAY_START) * 60;
     const height = totalMin * ppm;
     const hours = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i);
@@ -1357,6 +1494,50 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
     const n = visibleDays.length;
     const compact = n >= 5;
     const tpl = `${compact ? 26 : 38}px repeat(${n},1fr)`;
+    /* Ziehen zum Verschieben: erst ab 4px Bewegung, sonst gilt es als Tippen */
+    const dragRef = useRef(null);
+    const areaRef = useRef(null);
+    const [drag, setDrag] = useState(null);
+    const beginDrag = (e, b) => {
+        if (b.external || b.allDay || !onMove)
+            return;
+        dragRef.current = {
+            id: b.id, day: b.day, start: b.start, dur: b.dur,
+            x0: e.clientX, y0: e.clientY, moved: false,
+        };
+    };
+    const onAreaMove = (e) => {
+        const d = dragRef.current;
+        if (!d)
+            return;
+        const dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+        if (!d.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4)
+            return;
+        d.moved = true;
+        const rect = areaRef.current && areaRef.current.getBoundingClientRect();
+        if (!rect)
+            return;
+        const railW = compact ? 26 : 38;
+        const colW = (rect.width - railW) / n;
+        const colShift = colW > 0 ? Math.round(dx / colW) : 0;
+        const idx = visibleDays.findIndex((x) => dayKey(x) === d.day);
+        const target = Math.max(0, Math.min(n - 1, idx + colShift));
+        const minuteShift = Math.round(dy / ppm / SLOT) * SLOT;
+        const start = Math.max(DAY_START * 60, Math.min(DAY_END * 60 - d.dur, d.start + minuteShift));
+        setDrag({ id: d.id, day: dayKey(visibleDays[target]), start: start, dur: d.dur });
+    };
+    const endDrag = () => {
+        const d = dragRef.current;
+        dragRef.current = null;
+        const preview = drag;
+        setDrag(null);
+        if (!d || !d.moved || !preview)
+            return;
+        if (preview.day !== d.day || preview.start !== d.start) {
+            onMove(d.id, preview.day, preview.start);
+            buzz(10);
+        }
+    };
     const handleClick = (e, day) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const raw = DAY_START * 60 + (e.clientY - rect.top) / ppm;
@@ -1376,7 +1557,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                     React.createElement("div", { className: "mono text-sm font-medium", style: { color: isToday ? "#2B4B8F" : "var(--ink)" } }, d.getDate())));
             }))),
         allDayRows > 0 && (React.createElement("div", { className: "grid border-b pl-hair", style: { gridTemplateColumns: tpl } },
-            React.createElement("div", { className: "mono text-xs pl-muted flex items-center justify-end pr-1", style: { fontSize: compact ? 8 : 10 } }, "ganztags"),
+            React.createElement("div", { className: "mono pl-muted flex items-center justify-end pr-1 overflow-hidden", style: { fontSize: 9 } }, compact ? "" : "ganztags"),
             visibleDays.map((d) => {
                 const k = dayKey(d);
                 const items = blocksFor(k).filter((b) => b.allDay);
@@ -1389,11 +1570,21 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                 })));
             }))),
         React.createElement("div", { ref: gridRef, className: "pl-scroll overflow-y-auto", style: { maxHeight: maxH } },
-            React.createElement("div", { className: "grid", style: { gridTemplateColumns: tpl } },
+            React.createElement("div", { className: "grid", ref: areaRef, style: { gridTemplateColumns: tpl, touchAction: "pan-y" }, onPointerMove: onAreaMove, onPointerUp: endDrag, onPointerLeave: endDrag },
                 React.createElement(HourRail, { hours: hours, ppm: ppm, every: labelEvery, compact: compact }),
                 visibleDays.map((d) => {
                     const k = dayKey(d);
-                    const blocks = blocksFor(k).filter((b) => !b.allDay);
+                    let blocks = blocksFor(k).filter((b) => !b.allDay);
+                    if (drag) {
+                        blocks = blocks.filter((b) => b.id !== drag.id);
+                        if (drag.day === k) {
+                            const orig = visibleDays
+                                .map((dd) => blocksFor(dayKey(dd)).find((x) => x.id === drag.id))
+                                .find(Boolean);
+                            if (orig)
+                                blocks = [...blocks, { ...orig, day: k, start: drag.start }];
+                        }
+                    }
                     return (React.createElement("div", { key: k, className: "relative border-l pl-hair", style: { height } },
                         React.createElement("div", { className: "pl-slot absolute inset-0 cursor-copy", onClick: (e) => handleClick(e, k) }),
                         hours.map((h) => (React.createElement("div", { key: h, className: "absolute left-0 right-0 border-t pl-hair pointer-events-none", style: { top: (h - DAY_START) * 60 * ppm } }))),
@@ -1404,9 +1595,18 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
                             const roomy = !compact && h >= 36;
                             const flat = h < 24; // zu flach für zwei Zeilen
                             const fs = h >= 36 ? 12 : h >= 24 ? 11 : h >= 18 ? 10 : 9;
-                            return (React.createElement("button", { key: b.id, onClick: (e) => { e.stopPropagation(); onBlock(b); }, className: `pl-block absolute ${b.external ? "pl-ext cursor-default" : ""}`, style: {
+                            const dragged = drag && drag.id === b.id && drag.day === k ? drag : null;
+                            return (React.createElement("button", { key: b.id, onPointerDown: (e) => beginDrag(e, b), onClick: (e) => {
+                                    e.stopPropagation();
+                                    if (dragRef.current && dragRef.current.moved)
+                                        return;
+                                    onBlock(b);
+                                }, className: `pl-block absolute ${b.external ? "pl-ext cursor-default" : ""}`, style: {
                                     top: (b.start - DAY_START * 60) * ppm,
                                     height: h, left: 2, right: 2,
+                                    cursor: b.external || b.allDay ? "default" : "grab",
+                                    zIndex: dragged ? 20 : undefined,
+                                    boxShadow: dragged ? "0 6px 16px -4px rgba(25,29,26,.4)" : undefined,
                                     background: hexA(c, b.external ? 0.1 : fill),
                                     borderLeft: `${compact ? 2 : 3}px ${b.status === "skipped" ? "dashed" : "solid"} ${c}`,
                                     opacity: b.status === "skipped" ? 0.55 : 1,
@@ -1437,7 +1637,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, gridRef,
 function HourRail({ hours, ppm, every = 1, compact = false }) {
     return (React.createElement("div", { className: "relative", style: { height: (DAY_END - DAY_START) * 60 * ppm } }, hours.map((h, i) => (i % every === 0 ? (React.createElement("div", { key: h, className: "absolute mono pl-muted", style: { right: compact ? 3 : 6, top: (h - DAY_START) * 60 * ppm - 6, fontSize: compact ? 9 : 11 } }, compact ? h : pad(h))) : null))));
 }
-function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, ppm }) {
+function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, onMove, ppm }) {
     var _a, _b;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const d = new Date(dayK + "T00:00:00");
@@ -1541,7 +1741,7 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                     r.title));
             }))))));
 }
-function LearnView({ weeks, exam, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onReset }) {
+function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onAddExam, onDeleteExam, onReset }) {
     const [openSubject, setOpenSubject] = useState(null);
     const [showInfo, setShowInfo] = useState(false);
     const [edit, setEdit] = useState(false);
@@ -1549,8 +1749,7 @@ function LearnView({ weeks, exam, done, onToggleTask, onPlanTask, weekIdx, setWe
     const wk = weeks[weekIdx];
     if (!wk)
         return React.createElement("p", { className: "mono text-xs pl-muted" }, "Kein Lernplan vorhanden.");
-    const examDate = new Date(exam.date + "T00:00:00");
-    const daysLeft = Math.ceil((examDate - new Date(dayKey(today) + "T00:00:00")) / 86400000);
+    const exams = [...(examsRaw || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
     const mustDone = wk.must.filter((t) => done[t.id]).length;
     const mustMin = wk.must.reduce((s, t) => s + t.m, 0);
     const doneMin = wk.must.reduce((s, t) => s + (done[t.id] ? t.m : 0), 0);
@@ -1582,18 +1781,29 @@ function LearnView({ weeks, exam, done, onToggleTask, onPlanTask, weekIdx, setWe
             !on && task.t && (React.createElement("button", { onClick: () => onPlanTask(task), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" }, "einplanen"))));
     };
     return (React.createElement("div", { className: "flex flex-col gap-3" },
-        React.createElement("div", { className: "pl-card rounded p-4" },
-            React.createElement("div", { className: "flex items-end justify-between gap-3" },
-                React.createElement("div", { className: "min-w-0 flex-1" },
-                    React.createElement("div", { className: "mono text-xs pl-muted" }, "n\u00E4chste Pr\u00FCfung"),
-                    edit ? (React.createElement("div", { className: "flex flex-col gap-1 mt-1" },
-                        React.createElement("input", { value: exam.title, onChange: (e) => onExamField("title", e.target.value), className: "pl-input px-2 py-1 rounded text-sm", placeholder: "Fach" }),
-                        React.createElement("input", { type: "date", value: exam.date, onChange: (e) => onExamField("date", e.target.value), className: "pl-input px-2 py-1 rounded mono text-xs" }))) : (React.createElement(React.Fragment, null,
-                        React.createElement("div", { className: "text-lg font-semibold leading-tight truncate" }, exam.title),
-                        React.createElement("div", { className: "mono text-xs pl-muted mt-0.5" }, examDate.toLocaleDateString("de-AT", { day: "numeric", month: "long", year: "numeric" }))))),
-                React.createElement("div", { className: "text-right shrink-0" },
-                    React.createElement("div", { className: "mono text-4xl font-semibold leading-none", style: { color: daysLeft <= 14 ? "#A03A5E" : "#2B4B8F" } }, daysLeft),
-                    React.createElement("div", { className: "mono text-xs pl-muted" }, "Tage")))),
+        React.createElement("div", { className: "pl-card rounded p-4 flex flex-col gap-3" },
+            exams.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Keine Pr\u00FCfung eingetragen.")),
+            exams.map((ex, idx) => {
+                const d = new Date(ex.date + "T00:00:00");
+                const left = Math.ceil((d - new Date(dayKey(today) + "T00:00:00")) / 86400000);
+                const naechste = idx === 0;
+                return (React.createElement("div", { key: ex.id, className: idx > 0 ? "border-t pl-hair pt-3" : "" },
+                    React.createElement("div", { className: "flex items-end justify-between gap-3" },
+                        React.createElement("div", { className: "min-w-0 flex-1" },
+                            React.createElement("div", { className: "mono text-xs pl-muted" }, naechste ? "nächste Prüfung" : "danach"),
+                            edit ? (React.createElement("div", { className: "flex flex-col gap-1 mt-1" },
+                                React.createElement("input", { value: ex.title, onChange: (e) => onExamField(ex.id, "title", e.target.value), className: "pl-input px-2 py-1 rounded text-sm", placeholder: "Fach" }),
+                                React.createElement("div", { className: "flex gap-2" },
+                                    React.createElement("input", { type: "date", value: ex.date, onChange: (e) => onExamField(ex.id, "date", e.target.value), className: "pl-input px-2 py-1 rounded mono text-xs flex-1" }),
+                                    React.createElement("button", { onClick: () => onDeleteExam(ex.id), className: "pl-btn px-2 rounded", style: { color: "#A03A5E", borderColor: "#A03A5E" }, "aria-label": "Pr\u00FCfung l\u00F6schen" },
+                                        React.createElement(Trash2, { size: 13 }))))) : (React.createElement(React.Fragment, null,
+                                React.createElement("div", { className: naechste ? "text-lg font-semibold leading-tight" : "text-sm font-medium leading-tight" }, ex.title),
+                                React.createElement("div", { className: "mono text-xs pl-muted mt-0.5" }, d.toLocaleDateString("de-AT", { weekday: "short", day: "numeric", month: "long" }))))),
+                        React.createElement("div", { className: "text-right shrink-0" },
+                            React.createElement("div", { className: naechste ? "mono text-4xl font-semibold leading-none" : "mono text-2xl font-medium leading-none", style: { color: left <= 14 ? "#A03A5E" : left <= 30 ? "#8A4E1C" : "#2B4B8F" } }, left),
+                            React.createElement("div", { className: "mono text-xs pl-muted" }, "Tage")))));
+            }),
+            edit && (React.createElement("button", { onClick: onAddExam, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-start" }, "+ Pr\u00FCfung"))),
         React.createElement("div", { className: "flex items-center gap-2" },
             React.createElement("button", { onClick: () => setEdit(!edit), className: "pl-btn px-3 py-1.5 rounded mono text-xs", style: edit ? { background: "var(--ink)", color: "var(--paper)", borderColor: "var(--ink)" } : {} }, edit ? "Fertig" : "Plan bearbeiten"),
             edit && (React.createElement("button", { onClick: () => { if (confirmReset) {
@@ -1692,10 +1902,13 @@ function CatPicker({ value, onChange }) {
             border: `1px solid ${CATS[k].color}`,
         } }, CATS[k].label)))));
 }
-function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending }) {
+function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending, onImportTodoist }) {
     const [title, setTitle] = useState("");
     const [cat, setCat] = useState("fokus");
     const [est, setEst] = useState(60);
+    const [tdOpen, setTdOpen] = useState(false);
+    const [tdDraft, setTdDraft] = useState("");
+    const hasToken = !!tdToken();
     const submit = () => {
         if (!title.trim())
             return;
@@ -1713,6 +1926,20 @@ function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending }) {
                 React.createElement("button", { onClick: submit, className: "pl-btn ml-auto px-2.5 py-1 rounded flex items-center gap-1 mono text-xs" },
                     React.createElement(Plus, { size: 13 }),
                     " Anlegen"))),
+        React.createElement("div", { className: "border-t pl-hair pt-2 flex items-center gap-2" },
+            React.createElement("span", { className: "mono text-xs pl-muted flex-1" }, "Todoist"),
+            hasToken ? (React.createElement(React.Fragment, null,
+                React.createElement("button", { onClick: onImportTodoist, className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Aufgaben holen"),
+                React.createElement("button", { onClick: () => { tdSetToken(""); setTdOpen(false); setTdDraft(""); }, className: "mono text-xs pl-muted px-1" }, "trennen"))) : (React.createElement("button", { onClick: () => setTdOpen(!tdOpen), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "verbinden"))),
+        tdOpen && !hasToken && (React.createElement("div", { className: "pl-rise flex flex-col gap-2" },
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Token in Todoist unter Einstellungen \u2192 Integrationen \u2192 Entwickler kopieren. Es bleibt nur auf diesem Ger\u00E4t gespeichert."),
+            React.createElement("div", { className: "flex gap-2" },
+                React.createElement("input", { value: tdDraft, onChange: (e) => setTdDraft(e.target.value), placeholder: "API-Token einf\u00FCgen", className: "pl-input px-2 py-1.5 rounded text-sm flex-1" }),
+                React.createElement("button", { onClick: () => { if (tdDraft.trim()) {
+                        tdSetToken(tdDraft);
+                        setTdOpen(false);
+                        onImportTodoist();
+                    } }, className: "px-3 py-1.5 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Sichern")))),
         React.createElement("div", { className: "border-t pl-hair pt-2 flex flex-col gap-1.5" },
             open.length === 0 && done.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted py-2" }, "Noch keine Aufgaben. Leg eine an \u2014 danach kannst du sie direkt in eine freie Zeit ziehen.")),
             open.map((t) => {
@@ -1720,6 +1947,7 @@ function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending }) {
                 return (React.createElement("div", { key: t.id, className: "flex items-center gap-2 group" },
                     React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0", style: { border: `1.5px solid ${((_a = CATS[t.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72"}` }, "aria-label": "Erledigt" }),
                     React.createElement("span", { className: "text-sm truncate flex-1" }, t.title),
+                    t.todoistId && React.createElement("span", { className: "mono text-xs pl-muted", title: "aus Todoist" }, "\u2197"),
                     React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(t.est)),
                     React.createElement("button", { onClick: () => onPlan((pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? null : { title: t.title, cat: t.cat, est: t.est, todoId: t.id }), className: "mono text-xs px-1.5 py-0.5 rounded", style: {
                             border: `1px solid ${(pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? (_b = CATS[t.cat]) === null || _b === void 0 ? void 0 : _b.color : "var(--line)"}`,
