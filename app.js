@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-11b · Eingabe-Fix";
+const APP_VERSION = "2026-08-14c · 4 Prüfungen bis Oktober";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -269,7 +269,7 @@ async function loadCalendar(weekStart) {
     for (const ev of data.items || []) {
         const color = GC_COLORS[ev.colorId] || null;
         const title = ev.summary || "Termin";
-        const base = { title: title, cat: "extern", color: color, external: true };
+        const base = { title: title, cat: "extern", color: color, external: true, gcalRawId: String(ev.id || "") };
         /* Ganztägig: end.date ist der Tag NACH dem letzten Tag */
         if (ev.start && ev.start.date) {
             let d = new Date(ev.start.date + "T00:00:00");
@@ -319,15 +319,30 @@ async function pushToCalendar(block) {
     const e = new Date(date);
     e.setMinutes(block.start + block.dur);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Vienna";
-    await gcFetch(GC_API, {
-        method: "POST",
-        body: JSON.stringify({
-            summary: block.title,
-            start: { dateTime: s.toISOString(), timeZone: tz },
-            end: { dateTime: e.toISOString(), timeZone: tz },
-            reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 15 }] },
-        }),
+    const body = JSON.stringify({
+        summary: block.title,
+        start: { dateTime: s.toISOString(), timeZone: tz },
+        end: { dateTime: e.toISOString(), timeZone: tz },
+        reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 15 }] },
     });
+    /* Schon einmal gesichert? Dann aktualisieren statt neu anlegen. */
+    if (block.gcalId) {
+        try {
+            const upd = await gcFetch(GC_API + "/" + block.gcalId, { method: "PATCH", body: body });
+            return upd.id || block.gcalId;
+        }
+        catch (err) {
+            /* Termin wurde in Google gelöscht - dann neu anlegen */
+        }
+    }
+    const created = await gcFetch(GC_API, { method: "POST", body: body });
+    return created.id;
+}
+async function deleteFromCalendar(gcalId) {
+    try {
+        await gcFetch(GC_API + "/" + gcalId, { method: "DELETE" });
+    }
+    catch (e) { /* schon weg oder keine Rechte - kein Grund zum Abbruch */ }
     return true;
 }
 /* ── Todoist ───────────────────────────────────────────────
@@ -450,17 +465,21 @@ async function driveSave(data) {
 const STUDY_EXAMS = [
     { id: "ex1", title: "Molekularbiologie 2", date: "2026-09-23" },
     { id: "ex2", title: "Biochemie & Diätetik", date: "2026-09-28" },
+    { id: "ex3", title: "Lebensmittelprozesstechnik", date: "2026-10-02" },
+    { id: "ex4", title: "Technische Thermodynamik", date: "2026-10-27" },
 ];
 const SUBJECTS = {
     orga: { short: "Orga", title: "Organisation & LEVIS" },
-    molbio: { short: "MolBio", title: "Molekularbiologie 2",
-        note: "Priorität 1 · 27.09. · Mechanismen verstehen + Faktenmenge. Themenlandkarte zuerst, Mechanismuskarten aus dem Kopf, Karteikarten nur für echte Faktenlast. Letzte 10 Tage kein neuer Stoff." },
-    thermo: { short: "Thermo", title: "Technische Thermodynamik",
-        note: "Strategisch wichtigstes Fach. Fertigkeit, kein Wissen — wächst nur durch Wiederholung. Aufgabentypen katalogisieren (meist 6–10), eigene Formelsammlung schreiben, immer mit Einheiten rechnen. Grundlage für Verfahrenstechnik thermisch im 5. Semester." },
+    molbio: { short: "MolBio", title: "Molekularbiologie 2 (MBI4)",
+        note: "23.09. · Weghuber. 38 Fragen plus eine Liste mit 24 Begriffen, die in zwei Sätzen zu definieren sind. Fast jede Frage verlangt „Skizzieren Sie\" — also üben, die Schemata frei zu zeichnen, nicht nur zu lesen. Schwerpunkte nach Häufigkeit: transgene Pflanzen und Ti-Plasmid, Antikörper und ihre Produktion, SPR, pflanzliche Bioreaktoren, dann FISH, ELISA-Varianten, PCR/qRT-PCR, Klonierung, FACS. Die Begriffsliste ist geschenkte Punktezahl — die kannst du nebenbei mit Karteikarten abdecken." },
+    biochem: { short: "BioChem", title: "Biochemie & Diätetik",
+        note: "28.09. · 77 Fragen in 6 Blöcken: Enzyme (1–27), Fermentation (28–54), Mikroplastik (55–60), Zelltod (61–67), Gewichtsregulation (68–73), Geschmack (74–77). Der Katalog IST die Prüfung — Frage für Frage arbeiten, nicht Folie für Folie. Enzyme und Fermentation sind zwei Drittel des Stoffs, die vier kleinen Blöcke am Ende sind schnelle Punkte." },
     prozess: { short: "Prozess", title: "Lebensmittelprozesstechnik & Analytik",
-        note: "Direkt nach Thermo lernen, solange Bilanzen und Wärmeübertragung frisch sitzen. Pro Grundoperation eine Seite im selben Raster: Zweck, Prinzip, Apparat, Kenngrößen, Anwendung, Grenze." },
-    allergien: { short: "Allergien", title: "Allergien & Unverträglichkeiten",
-        note: "Effizientestes Fach, gut in 20–30-Minuten-Fenstern lernbar. Erst Systematik (Allergie/Intoleranz/Autoimmun, Reaktionstypen I–IV), dann Einzelbilder. Raster je Krankheitsbild: Mechanismus, Auslöser, Symptomatik, Diagnostik, Ernährungstherapie, Kennzeichnung." },
+        note: "02.10. · Drei Vorlesungen in einer Prüfung. Obst & Gemüse (Gössinger, 34 Fragen), Fleischwaren (Hennes, 36 Fragen), Milch (Stessl, 66 Fragen). Milch ist fast die Hälfte — früh anfangen. Alles beschreibend, kaum Rechnen: Verfahren, Apparate, Keime, Grenzwerte. Bei jedem Verfahren dasselbe Raster: Ziel, Prinzip, Apparat, Parameter, Fehler. Achtung: Von TOGV gibt es zwei Katalogfassungen mit leicht verschiedener Nummerierung — arbeite mit der neueren, nach Abschnitten gegliederten." },
+    thermo: { short: "Thermo", title: "Technische Thermodynamik",
+        note: "27.10. · Vier Wochen nach den anderen dreien, also erst danach ernsthaft angehen. Fertigkeit, kein Wissen: wächst nur durch Rechnen, nicht durch Lesen. Aufgabentypen aus Altklausuren katalogisieren (meist 6–10), eigene Formelsammlung schreiben, Fehlerlogbuch führen, immer mit Einheiten rechnen. Die Aufgaben im Plan sind noch grob — sobald du die Unterlagen schickst, mache ich sie konkret." },
+    allergien: { short: "Allerg", title: "Allergien & Unverträglichkeiten",
+        note: "Gut in 20–30-Minuten-Fenstern lernbar. Erst Systematik, dann Einzelbilder." },
 };
 const STUDY_RULES = [
     "Rückwärts von der Altklausur lernen, nicht vorwärts von Folie 1.",
@@ -477,88 +496,137 @@ const STUDY_NOTES = [
     "80 % Anwesenheit bei Übungen und Laborübungen — lässt sich nicht nachlernen.",
 ];
 const STUDY_WEEKS = [
-    { n: 0, from: "2026-08-05", to: "2026-08-09", title: "Klarheit schaffen",
+    { n: 0, from: "2026-08-14", to: "2026-08-16", title: "Aufsetzen",
         must: [
-            { t: "LEVIS: offene LVs und Antrittszahlen je Fach prüfen", m: 30, s: "orga" },
-            { t: "Vergessenes fünftes Fach identifizieren", m: 15, s: "orga" },
-            { t: "Alle Prüfungstermine aus dem Terminplan sammeln", m: 30, s: "orga" },
-            { t: "Prüfungsformat je Fach klären", m: 30, s: "orga" },
-            { t: "Hilfsmittel klären: Formelsammlung, Taschenrechner", m: 15, s: "orga" },
-            { t: "Semesterstart in der Studienjahreseinteilung prüfen", m: 15, s: "orga" },
-            { t: "Material sortieren: Ordner je Fach", m: 45, s: "orga" },
+            { t: "LEVIS: Anmeldung für alle vier Prüfungen prüfen", m: 20, s: "orga" },
+            { t: "Antrittszahlen je Fach nachsehen", m: 15, s: "orga" },
+            { t: "Prüfungsformat klären: schriftlich, mündlich, Punkteschlüssel?", m: 20, s: "orga" },
+            { t: "Alle Fragenkataloge als Checkliste anlegen", m: 40, s: "orga" },
         ],
         extra: [
-            { t: "Altklausur MolBio ansehen, Themen markieren", m: 45, s: "molbio" },
-            { t: "Altklausur Thermo ansehen, Themen markieren", m: 45, s: "thermo" },
-            { t: "Lernslots für 7 Wochen in den Kalender legen", m: 30, s: "orga" },
+            { t: "Lernslots für die nächsten Wochen in den Kalender legen", m: 30, s: "orga" },
+            { t: "Prozess: Milch-Katalog überfliegen — 66 Fragen, Umfang begreifen", m: 30, s: "prozess" },
         ] },
-    { n: 1, from: "2026-08-10", to: "2026-08-16", title: "Fundament legen",
+    { n: 1, from: "2026-08-17", to: "2026-08-23", title: "Drei Baustellen öffnen",
         must: [
-            { t: "MolBio: Themenlandkarte bauen", m: 90, s: "molbio" },
-            { t: "MolBio: Kapitel 1–2 mit Mechanismuskarten", m: 120, s: "molbio" },
-            { t: "Thermo: Aufgabentypen aus Altklausuren katalogisieren", m: 60, s: "thermo" },
-            { t: "Thermo: Typ 1 rechnen", m: 30, s: "thermo" },
+            { t: "MolBio: Antikörper — Aufbau, VDJ, Arten, Produktion", m: 120, s: "molbio" },
+            { t: "MolBio: ELISA-Varianten (direkt, indirekt, Sandwich, kompetitiv) skizzieren", m: 90, s: "molbio" },
+            { t: "BioChem: Enzyme 1–8 (Grundlagen, LDH, Trypsin)", m: 120, s: "biochem" },
+            { t: "BioChem: Enzyme 9–15 (endogene Enzyme, Bräunung, Hydrolasen)", m: 90, s: "biochem" },
+            { t: "TOGV: Rohware & Grundlagen + Zerkleinerung/Reinigung (1–9)", m: 120, s: "prozess" },
         ],
         extra: [
-            { t: "MolBio: Kapitel 3", m: 90, s: "molbio" },
-            { t: "Thermo: Typ 2", m: 45, s: "thermo" },
-            { t: "Karteikarten für die reinen Faktenteile", m: 45, s: "molbio" },
+            { t: "MolBio: Begriffsliste — erste 12 Begriffe als Karteikarten", m: 45, s: "molbio" },
+            { t: "TOGV: Blanchieren, Konglomerate & Schönung (10–13)", m: 75, s: "prozess" },
         ] },
-    { n: 2, from: "2026-08-17", to: "2026-08-23", title: "Stoff aufbauen",
+    { n: 2, from: "2026-08-24", to: "2026-08-30", title: "Methoden und Enzyme",
         must: [
-            { t: "MolBio: Kapitel 3–4", m: 210, s: "molbio" },
-            { t: "Abruf Woche 1 aus dem Kopf", m: 30, s: "molbio" },
-            { t: "Thermo: Typ 2–3 rechnen", m: 60, s: "thermo" },
-            { t: "Thermo: Formelsammlung Teil 1 schreiben", m: 30, s: "thermo" },
+            { t: "MolBio: Western Blot, Flow Cytometry, FACS", m: 105, s: "molbio" },
+            { t: "MolBio: FISH — Prinzip, Labeling, Inter-/Metaphase, break-apart", m: 105, s: "molbio" },
+            { t: "BioChem: Enzyme 16–22 (Proteasen, Lyasen, exogene Enzyme)", m: 120, s: "biochem" },
+            { t: "BioChem: Enzyme 23–27 (Lipasen, Glycosidasen, Stärke, Laktase)", m: 90, s: "biochem" },
+            { t: "TOGV: Blanchieren & Schönung + Haltbarmachung/Mikrobiologie (10–18)", m: 150, s: "prozess" },
         ],
         extra: [
-            { t: "MolBio: Kapitel 5", m: 90, s: "molbio" },
-            { t: "Thermo: Typ 4", m: 45, s: "thermo" },
-            { t: "Fehlerlogbuch anlegen", m: 20, s: "thermo" },
+            { t: "BioChem: Enzymblock komplett frei abrufen", m: 60, s: "biochem" },
+            { t: "MolBio: Begriffsliste — Begriffe 13–24", m: 45, s: "molbio" },
         ] },
-    { n: 3, from: "2026-08-24", to: "2026-08-30", title: "Mitte des Stoffs",
+    { n: 3, from: "2026-08-31", to: "2026-09-06", title: "PCR, Fermentation, Milch beginnen",
         must: [
-            { t: "MolBio: Kapitel 5–6", m: 210, s: "molbio" },
-            { t: "Abruf Kapitel 1–4", m: 30, s: "molbio" },
-            { t: "Thermo: Typ 4–5 rechnen", m: 90, s: "thermo" },
+            { t: "MolBio: PCR, RT-PCR, qRT-PCR — Taqman gegen SYBR green", m: 120, s: "molbio" },
+            { t: "MolBio: SPR — Prinzip, Signalverschiebung, Diagramm", m: 75, s: "molbio" },
+            { t: "BioChem: Fermentation 28–35 (Grundlagen, Arten, Faktoren)", m: 120, s: "biochem" },
+            { t: "BioChem: Fermentation 36–41 (Glykolyse, EMP-Weg, alkoholische Gärung)", m: 120, s: "biochem" },
+            { t: "TOGV: Verfahrenstechnik & Konzentrate (19–27)", m: 120, s: "prozess" },
+            { t: "Milch: Gefahren & Fremdstoffe (1–13)", m: 105, s: "prozess" },
         ],
         extra: [
-            { t: "Halbzeit-Kontrolle: Altklausur MolBio überfliegen", m: 45, s: "molbio" },
+            { t: "BioChem: EMP-Weg auf leeres Blatt zeichnen", m: 45, s: "biochem" },
+            { t: "TOGV: Destillat-Technologie (28–34)", m: 90, s: "prozess" },
         ] },
-    { n: 4, from: "2026-08-31", to: "2026-09-06", title: "Stoff schließen",
+    { n: 4, from: "2026-09-07", to: "2026-09-13", title: "Klonierung, Fermentation schließen, Milch",
         must: [
-            { t: "MolBio: restliche Kapitel abschließen", m: 240, s: "molbio" },
-            { t: "Thermo: gemischte Aufgaben über alle Typen", m: 90, s: "thermo" },
+            { t: "MolBio: rekombinante Klonierung, Vektoren, Affinity-Tags", m: 120, s: "molbio" },
+            { t: "MolBio: transgene Pflanzen — Ti-Plasmid, Biolistics, Elektroporation", m: 120, s: "molbio" },
+            { t: "BioChem: Fermentation 42–48 (Milchsäure, ED-Weg, TCA)", m: 120, s: "biochem" },
+            { t: "BioChem: Fermentation 49–54 (Glyoxylat, Säuregärungen, SCOBY)", m: 90, s: "biochem" },
+            { t: "TOGV: Destillat-Technologie abschließen (28–34)", m: 90, s: "prozess" },
+            { t: "Milch: Mikrobiologie & Kühlung + Verarbeitung (14–34)", m: 150, s: "prozess" },
         ],
         extra: [
-            { t: "Erste vollständige MolBio-Altklausur unter Zeitdruck", m: 120, s: "molbio" },
+            { t: "MolBio: Bioreaktoren, hairy root, CRISPR-Cas9", m: 105, s: "molbio" },
+            { t: "TOGV: komplett frei abrufen", m: 60, s: "prozess" },
         ] },
-    { n: 5, from: "2026-09-07", to: "2026-09-13", title: "Lücken schließen",
+    { n: 5, from: "2026-09-14", to: "2026-09-20", title: "MolBio-Endspurt, Milch fertig",
         must: [
-            { t: "MolBio: gezielt die Lücken aus der Altklausur", m: 240, s: "molbio" },
-            { t: "Thermo: Fehlerlogbuch durchgehen und Typen wiederholen", m: 90, s: "thermo" },
+            { t: "MolBio: Bioreaktoren, hairy root, CRISPR nachziehen", m: 105, s: "molbio" },
+            { t: "MolBio: alle 38 Fragen durchgehen, Lücken markieren", m: 150, s: "molbio" },
+            { t: "MolBio: die zehn wichtigsten Skizzen frei zeichnen", m: 90, s: "molbio" },
+            { t: "BioChem: Mikroplastik & Zelltod (55–67)", m: 150, s: "biochem" },
+            { t: "Milch: Erzeugnisse & Käsereitechnologie (35–66)", m: 180, s: "prozess" },
         ],
         extra: [
-            { t: "Zweite MolBio-Altklausur", m: 120, s: "molbio" },
-            { t: "Alle Mechanismuskarten aus dem Kopf nachzeichnen", m: 60, s: "molbio" },
+            { t: "MolBio: Begriffsliste komplett abfragen", m: 45, s: "molbio" },
+            { t: "BioChem: Gewichtsregulation & Geschmack (68–77)", m: 105, s: "biochem" },
         ] },
-    { n: 6, from: "2026-09-14", to: "2026-09-20", title: "Nur noch abrufen",
+    { n: 6, from: "2026-09-21", to: "2026-09-27", title: "Prüfung 1, dann BioChem",
         must: [
-            { t: "MolBio: Themenlandkarte komplett aus dem Kopf", m: 90, s: "molbio" },
-            { t: "MolBio: Mechanismen zeichnen und laut erklären", m: 120, s: "molbio" },
-            { t: "MolBio: weitere Abrufrunde", m: 90, s: "molbio" },
+            { t: "Mo: MolBio markierte Lücken schließen", m: 120, s: "molbio" },
+            { t: "Di: MolBio Skizzen und Begriffe, Sachen für morgen richten", m: 120, s: "molbio" },
+            { t: "Mi 23.09.: PRÜFUNG Molekularbiologie 2", m: 15, s: "molbio" },
+            { t: "Do: BioChem Gewicht & Geschmack abschließen (68–77)", m: 105, s: "biochem" },
+            { t: "Fr: BioChem Enzyme + Fermentation frei abrufen", m: 150, s: "biochem" },
+            { t: "Sa: BioChem alle 77 Fragen überfliegen, Lücken markieren", m: 120, s: "biochem" },
+            { t: "So: BioChem Lücken gezielt nacharbeiten", m: 120, s: "biochem" },
         ],
         extra: [
-            { t: "Dritte Altklausur unter echten Prüfungsbedingungen", m: 150, s: "molbio" },
+            { t: "Fleisch: Grundlagen + Kochpökelerzeugnisse (1–12)", m: 105, s: "prozess" },
         ] },
-    { n: 7, from: "2026-09-21", to: "2026-09-27", title: "Endspurt & Prüfung",
+    { n: 7, from: "2026-09-28", to: "2026-10-04", title: "Prüfung 2 und 3",
         must: [
-            { t: "Mo: Durchgang Themenlandkarte, schwächste 20 %", m: 90, s: "molbio" },
-            { t: "Di: Durchgang Themenlandkarte, schwächste 20 %", m: 90, s: "molbio" },
-            { t: "Mi: Durchgang Themenlandkarte, schwächste 20 %", m: 90, s: "molbio" },
-            { t: "Do: Durchgang Themenlandkarte, schwächste 20 %", m: 90, s: "molbio" },
-            { t: "Fr: letzte Altklausur unter Prüfungsbedingungen", m: 150, s: "molbio" },
-            { t: "Sa: leichte Wiederholung, Weg und Sachen klären", m: 60, s: "molbio" },
+            { t: "Mo 28.09.: PRÜFUNG Biochemie & Diätetik", m: 15, s: "biochem" },
+            { t: "Mo: Fleisch Grundlagen, Kochpökelwaren, Brühwurst (1–17)", m: 150, s: "prozess" },
+            { t: "Di: Fleisch frisches Fleisch, Mariniertes, Rohwurst (18–36)", m: 180, s: "prozess" },
+            { t: "Mi: TOGV komplett wiederholen", m: 120, s: "prozess" },
+            { t: "Do: Milch komplett wiederholen", m: 180, s: "prozess" },
+            { t: "Do: alle drei Kataloge überfliegen, Restlücken markieren", m: 90, s: "prozess" },
+            { t: "Fr 02.10.: PRÜFUNG Lebensmittelprozesstechnik", m: 15, s: "prozess" },
+        ],
+        extra: [] },
+    { n: 8, from: "2026-10-05", to: "2026-10-11", title: "Thermo: Bestandsaufnahme",
+        must: [
+            { t: "Thermo: Altklausuren sammeln, Aufgabentypen katalogisieren", m: 90, s: "thermo" },
+            { t: "Thermo: eigene Formelsammlung Teil 1 schreiben", m: 90, s: "thermo" },
+            { t: "Thermo: Typ 1 und 2 rechnen, Fehlerlogbuch anlegen", m: 120, s: "thermo" },
+        ],
+        extra: [
+            { t: "Thermo: Grundbegriffe und Einheiten auffrischen", m: 60, s: "thermo" },
+        ] },
+    { n: 9, from: "2026-10-12", to: "2026-10-18", title: "Thermo: Aufgabentypen durcharbeiten",
+        must: [
+            { t: "Thermo: Typ 3 und 4 rechnen", m: 120, s: "thermo" },
+            { t: "Thermo: Typ 5 und 6 rechnen", m: 120, s: "thermo" },
+            { t: "Thermo: Formelsammlung vervollständigen", m: 60, s: "thermo" },
+            { t: "Thermo: Fehlerlogbuch durchgehen, Muster erkennen", m: 45, s: "thermo" },
+        ],
+        extra: [
+            { t: "Thermo: gemischte Aufgaben ohne Vorlage", m: 90, s: "thermo" },
+        ] },
+    { n: 10, from: "2026-10-19", to: "2026-10-25", title: "Thermo: unter Zeitdruck",
+        must: [
+            { t: "Thermo: erste Altklausur unter Prüfungsbedingungen", m: 120, s: "thermo" },
+            { t: "Thermo: Fehler aus der Altklausur gezielt nacharbeiten", m: 90, s: "thermo" },
+            { t: "Thermo: zweite Altklausur unter Zeitdruck", m: 120, s: "thermo" },
+            { t: "Thermo: alle Aufgabentypen einmal frei durchrechnen", m: 120, s: "thermo" },
+        ],
+        extra: [
+            { t: "Thermo: Formelsammlung auswendig reproduzieren", m: 45, s: "thermo" },
+        ] },
+    { n: 11, from: "2026-10-26", to: "2026-11-01", title: "Thermo-Prüfung",
+        must: [
+            { t: "Mo: schwächste Aufgabentypen wiederholen", m: 120, s: "thermo" },
+            { t: "Mo: Formelsammlung und Taschenrechner richten", m: 20, s: "thermo" },
+            { t: "Di 27.10.: PRÜFUNG Technische Thermodynamik", m: 15, s: "thermo" },
         ],
         extra: [] },
 ];
@@ -865,12 +933,12 @@ function PlannerApp() {
             return;
         }
         let ok = 0;
-        const done = [];
+        const ids = {};
         for (let i = 0; i < open.length; i++) {
             setSync({ status: "loading", msg: `Schreibe ${i + 1} von ${open.length}…` });
             try {
-                await pushToCalendar(open[i]);
-                done.push(open[i].id);
+                const gid = await pushToCalendar(open[i]);
+                ids[open[i].id] = gid || open[i].gcalId || null;
                 ok++;
             }
             catch {
@@ -879,7 +947,9 @@ function PlannerApp() {
         }
         persist((prev) => ({
             ...prev,
-            blocks: prev.blocks.map((b) => (done.includes(b.id) ? { ...b, synced: true } : b)),
+            blocks: prev.blocks.map((b) => Object.prototype.hasOwnProperty.call(ids, b.id)
+                ? { ...b, synced: true, gcalId: ids[b.id] }
+                : b),
         }));
         setSync(ok === open.length
             ? { status: "ok", msg: `${ok} Blöcke im Kalender` }
@@ -1056,10 +1126,18 @@ function PlannerApp() {
         return { planned, done, skipped, moved, byCat, pending, routineCount };
     }, [state.blocks, state.routines, state.checks, weekKeys, now]);
     /* Blöcke pro Tag */
+    /* Google-IDs, die zu eigenen Blöcken gehören - die dürfen nicht doppelt erscheinen */
+    const eigeneGcalIds = useMemo(() => {
+        const set = {};
+        for (const b of state.blocks)
+            if (b.gcalId)
+                set[b.gcalId] = true;
+        return set;
+    }, [state.blocks]);
     const blocksFor = useCallback((key) => [
         ...state.blocks.filter((b) => b.day === key),
-        ...external.filter((b) => b.day === key),
-    ].sort((a, b) => a.start - b.start), [state.blocks, external]);
+        ...external.filter((b) => b.day === key && !eigeneGcalIds[b.gcalRawId]),
+    ].sort((a, b) => a.start - b.start), [state.blocks, external, eigeneGcalIds]);
     const plannedMinutes = useCallback((key) => blocksFor(key).reduce((s, b) => s + b.dur, 0), [blocksFor]);
     /* Freie Lücken eines Tages */
     const gapsFor = useCallback((key) => {
@@ -1195,6 +1273,12 @@ function PlannerApp() {
         ...prev,
         blocks: prev.blocks.map((b) => (b.id === id ? { ...b, day: day, start: start, synced: false } : b)),
     }));
+    const removeBlockAndCalendar = (id) => {
+        const b = state.blocks.find((x) => x.id === id);
+        if (b && b.gcalId)
+            deleteFromCalendar(b.gcalId);
+        removeBlock(id);
+    };
     const removeBlock = (id) => persist({ ...state, blocks: state.blocks.filter((b) => b.id !== id) });
     const handleSlotClick = (day, minutes) => {
         if (manualPick) {
@@ -1342,8 +1426,8 @@ function PlannerApp() {
     const syncBlock = async (block) => {
         setSync({ status: "loading", msg: `„${block.title}" wird gespeichert…` });
         try {
-            await pushToCalendar(block);
-            updateBlock(block.id, { synced: true });
+            const gid = await pushToCalendar(block);
+            updateBlock(block.id, { synced: true, gcalId: gid || block.gcalId || null });
             setSync({ status: "ok", msg: "In Google Calendar gespeichert" });
             setEditor((e) => (e && e.id === block.id ? { ...e, synced: true } : e));
         }
@@ -1610,7 +1694,7 @@ function PlannerApp() {
                 React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest mb-1" }, "geschafft"),
                 React.createElement("div", { className: "text-4xl font-semibold", style: { color: celebration.color } }, celebration.title),
                 React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
-        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onDelete: () => { removeBlock(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
+        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onDelete: () => { removeBlockAndCalendar(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
         editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor({ ...editor, ...patch }); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
 }
 /* ════════════════ Raster ════════════════ */
