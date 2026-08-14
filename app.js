@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14f · Bilanz komplett bearbeitbar";
+const APP_VERSION = "2026-08-14g · Training";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -659,6 +659,7 @@ const DEFAULT_STATE = {
     projects: [],
     studyDone: {},
     study: null,
+    training: null,
     updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
@@ -738,6 +739,9 @@ function PlannerApp() {
                 const r = await window.storage.get(STORE_KEY);
                 if (r === null || r === void 0 ? void 0 : r.value) {
                     const loaded = { ...DEFAULT_STATE, ...JSON.parse(r.value) };
+                    if (!loaded.training || loaded.training.v !== TRAINING_VERSION) {
+                        loaded.training = initTraining();
+                    }
                     if (!loaded.study || loaded.study.v !== STUDY_PLAN_VERSION) {
                         loaded.study = initStudy();
                         loaded.studyDone = {};
@@ -747,11 +751,11 @@ function PlannerApp() {
                     setState(loaded);
                 }
                 else {
-                    setState({ ...DEFAULT_STATE, study: initStudy() });
+                    setState({ ...DEFAULT_STATE, study: initStudy(), training: initTraining() });
                 }
             }
             catch {
-                setState({ ...DEFAULT_STATE, study: initStudy() });
+                setState({ ...DEFAULT_STATE, study: initStudy(), training: initTraining() });
             }
             if (planErneuert) {
                 setSync({ status: "ok", msg: "Lernplan auf den neuen Stand gebracht" });
@@ -999,6 +1003,24 @@ function PlannerApp() {
         return state.blocks.find((b) => b.id === detailId)
             || external.find((b) => b.id === detailId) || null;
     }, [detailId, state.blocks, external]);
+    /* Feier, sobald der Trainingszyklus voll ist */
+    const trainStats = useMemo(() => trainingStats(state.training, todayKey), [state.training, todayKey]);
+    const zyklusRef = useRef(null);
+    useEffect(() => {
+        if (!loaded) return;
+        const vorher = zyklusRef.current;
+        zyklusRef.current = trainStats.komplett;
+        if (vorher === false && trainStats.komplett) {
+            setCelebration({
+                id: uid(),
+                title: trainStats.ist + " Einheiten",
+                sub: "Zyklus komplett in " + trainStats.win + " Tagen",
+                color: "#1E6E5A",
+            });
+            buzz([18, 60, 25]);
+        }
+    }, [loaded, trainStats.komplett, trainStats.ist, trainStats.win]);
+
     /* Kumulierte Projektstunden über alle Wochen */
     const projectTotals = useMemo(() => {
         const map = {};
@@ -1306,7 +1328,7 @@ function PlannerApp() {
         addBlock(day, minutes);
     };
     /* Wischen zwischen den Ansichten */
-    const VIEWS = ["heute", "woche", "lernen", "auswerten"];
+    const VIEWS = ["heute", "woche", "training", "lernen", "auswerten"];
     const goView = (k, dir) => {
         if (k === view)
             return;
@@ -1415,6 +1437,70 @@ function PlannerApp() {
         setManualPick({ ...item, est: item.est || 60 });
         setView("woche");
     };
+    /* ── Training ───────────────────────────────────────── */
+    const trainingNow = state.training || initTraining();
+
+    const saveTraining = (fn) => persist((prev) => ({
+        ...prev,
+        training: fn(prev.training || initTraining()),
+    }));
+
+    const logSession = (typeId, datum) => {
+        const ty = (trainingNow.types || []).find((x) => x.id === typeId);
+        buzz(14);
+        persist((prev) => {
+            const tr = prev.training || initTraining();
+            const neu = {
+                id: uid(), date: datum, typeId: typeId,
+                dur: ty && ty.name.toLowerCase().indexOf("boulder") === 0 ? 120 : 60,
+                rpe: 3, note: "",
+            };
+            /* Passende Routine gleich mit abhaken */
+            let checks = prev.checks;
+            const r = ty && prev.routines.find((x) =>
+                x.title.toLowerCase() === String(ty.routine || ty.name).toLowerCase());
+            if (r && !(prev.checks[datum] || []).includes(r.id)) {
+                checks = { ...prev.checks, [datum]: [...(prev.checks[datum] || []), r.id] };
+            }
+            return { ...prev, checks: checks, training: { ...tr, sessions: [...(tr.sessions || []), neu] } };
+        });
+    };
+
+    const removeSession = (id) =>
+        saveTraining((tr) => ({ ...tr, sessions: (tr.sessions || []).filter((x) => x.id !== id) }));
+
+    const editSession = (id, patch) =>
+        saveTraining((tr) => ({
+            ...tr,
+            sessions: (tr.sessions || []).map((x) => (x.id === id ? { ...x, ...patch } : x)),
+        }));
+
+    const setCheck = (datum, feld, wert) => {
+        buzz(8);
+        saveTraining((tr) => ({
+            ...tr,
+            checks: { ...(tr.checks || {}), [datum]: { ...((tr.checks || {})[datum] || {}), [feld]: wert } },
+        }));
+    };
+
+    const setTypeField = (id, feld, wert) =>
+        saveTraining((tr) => ({
+            ...tr,
+            types: (tr.types || []).map((x) => (x.id === id ? { ...x, [feld]: wert } : x)),
+        }));
+
+    const addTrainingType = () =>
+        saveTraining((tr) => ({
+            ...tr,
+            types: [...(tr.types || []), { id: uid(), name: "Neue Art", color: PALETTE[12], target: 1, routine: "" }],
+        }));
+
+    const removeTrainingType = (id) =>
+        saveTraining((tr) => ({ ...tr, types: (tr.types || []).filter((x) => x.id !== id) }));
+
+    const setGoalField = (feld, wert) =>
+        saveTraining((tr) => ({ ...tr, goal: { ...(tr.goal || {}), [feld]: wert } }));
+
     const addTerminHere = () => {
         const isToday = selectedDay === todayKey;
         const earliest = isToday
@@ -1593,7 +1679,7 @@ function PlannerApp() {
         .pl-roll-down{animation:pl-roll-down .2s cubic-bezier(.2,.9,.3,1);}
       `),
         React.createElement("div", { className: "px-4 pt-4 pb-2 md:px-6" },
-            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["lernen", "Lernen"], ["auswerten", "Bilanz"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
+            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["training", "Training"], ["lernen", "Lernen"], ["auswerten", "Bilanz"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
                     ? { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" }
                     : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
                 lbl,
@@ -1682,6 +1768,18 @@ function PlannerApp() {
                         panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: startPlacing, pending: pendingTodo, onImportTodoist: importTodoist })),
                         panel === "projekte" && (React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing })),
                         panel === "vorlage" && (React.createElement(TemplatePanel, { template: state.template || [], onApply: applyTemplate, onSaveWeek: saveWeekAsTemplate, onRemove: removeTemplateEntry, onToggleAuto: toggleTemplateAuto })))))),
+            view === "training" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
+                React.createElement(TrainingView, {
+                    training: trainingNow, heuteKey: todayKey,
+                    onLog: logSession, onRemoveSession: removeSession, onEditSession: editSession,
+                    onCheck: setCheck, onTypeField: setTypeField, onAddType: addTrainingType,
+                    onRemoveType: removeTrainingType, onGoalField: setGoalField,
+                    onPlan: (ty) => startPlacing({
+                        title: ty.name,
+                        cat: Object.keys(CATS).find((k) => CATS[k].label === "Training") || "training",
+                        est: ty.name.toLowerCase().indexOf("boulder") === 0 ? 120 : 60,
+                    }),
+                }))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan }))),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
@@ -1695,6 +1793,10 @@ function PlannerApp() {
                         weekLabel),
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, 7)), className: "pl-btn p-2 rounded", "aria-label": "Woche vor" },
                         React.createElement(ChevronRight, { size: 16 }))),
+                React.createElement(TrainingSummary, {
+                    training: trainingNow, heuteKey: todayKey,
+                    onOpen: () => goView("training"),
+                }),
                 React.createElement(ReviewPanel, { stats: weekStats, routines: state.routines, yearGrid: yearGrid, onPickWeek: (d) => setWeekStart(mondayOf(d)), onDemo: loadDemo, onReset: resetAll, onConfetti: testConfetti, onStatus: setBlockStatus, onOpen: (id) => setDetailId(id) }),
                 React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing }),
                 React.createElement(CatPanel, { cats: catsNow, onField: setCatField, onAdd: addCat, onRemove: removeCat }),
@@ -3043,6 +3145,279 @@ function Confetti({ trigger }) {
             "--dx": p.dx, "--rot": p.rot,
         } })))));
 }
+"use strict";
+/* ════════════════ Training ════════════════ */
+const TRAINING_VERSION = 1;
+function initTraining() {
+    return {
+        v: TRAINING_VERSION,
+        types: [
+            { id: "tt1", name: "Bouldern", color: "#1E6E5A", target: 2, routine: "Bouldern" },
+            { id: "tt2", name: "Krafttraining", color: "#8A4E1C", target: 1, routine: "Krafttraining" },
+        ],
+        goal: { windowDays: 10, idealDays: 7 },
+        sessions: [],
+        checks: {},
+    };
+}
+/* Körperwerte: 0 ist gut, 3 ist schlecht */
+const CHECK_FIELDS = [
+    { k: "sore", label: "Muskelkater", stufen: ["keiner", "leicht", "deutlich", "stark"] },
+    { k: "finger", label: "Finger & Sehnen", stufen: ["frei", "leicht spürbar", "gereizt", "schmerzhaft"] },
+    { k: "haut", label: "Haut", stufen: ["gut", "dünn", "wund", "offen"] },
+    { k: "schlaf", label: "Schlaf", stufen: ["erholt", "ok", "wenig", "kaum"] },
+];
+const CHECK_COLORS = ["#1E6E5A", "#7FA894", "#8A4E1C", "#A03A5E"];
+function tagAbstand(a, b) {
+    return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+}
+/* Kennzahlen für das rollende Fenster */
+function trainingStats(training, heuteKey) {
+    const t = training || initTraining();
+    const win = (t.goal && t.goal.windowDays) || 10;
+    const ideal = (t.goal && t.goal.idealDays) || 7;
+    const sess = [...(t.sessions || [])].sort((a, b) => (a.date < b.date ? 1 : -1));
+    const imFenster = sess.filter((s) => tagAbstand(s.date, heuteKey) < win);
+    const imIdeal = sess.filter((s) => tagAbstand(s.date, heuteKey) < ideal);
+    const proTyp = {};
+    for (const ty of t.types || []) {
+        const n = imFenster.filter((s) => s.typeId === ty.id).length;
+        proTyp[ty.id] = { n: n, target: ty.target || 0, erfuellt: n >= (ty.target || 0) };
+    }
+    const soll = (t.types || []).reduce((a, ty) => a + (ty.target || 0), 0);
+    const komplett = (t.types || []).length > 0 && (t.types || []).every((ty) => proTyp[ty.id].erfuellt);
+    const letzte = sess[0] || null;
+    const tageSeit = letzte ? tagAbstand(letzte.date, heuteKey) : null;
+    /* Belastung: Dauer × Anstrengung, letzte 7 Tage gegen den Schnitt der letzten 28 */
+    const last = (n) => sess.filter((s) => tagAbstand(s.date, heuteKey) < n);
+    const last7 = last(7).reduce((a, s) => a + (s.dur || 60) * (s.rpe || 3), 0);
+    const last28 = last(28).reduce((a, s) => a + (s.dur || 60) * (s.rpe || 3), 0);
+    const schnitt7 = last28 / 4;
+    const sprung = schnitt7 > 0 ? last7 / schnitt7 : null;
+    const heuteCheck = (t.checks || {})[heuteKey] || null;
+    return {
+        win: win, ideal: ideal, sess: sess, imFenster: imFenster, imIdeal: imIdeal,
+        proTyp: proTyp, soll: soll, ist: imFenster.length, komplett: komplett,
+        letzte: letzte, tageSeit: tageSeit, sprung: sprung, heuteCheck: heuteCheck,
+    };
+}
+/* Empfehlung aus Körperwerten und Abstand */
+function bereitschaft(st) {
+    const c = st.heuteCheck;
+    const finger = c ? c.finger || 0 : 0;
+    const sore = c ? c.sore || 0 : 0;
+    const haut = c ? c.haut || 0 : 0;
+    if (finger >= 3)
+        return { stufe: "stop", farbe: "#A03A5E", text: "Finger schmerzhaft — heute nicht klettern" };
+    if (finger === 2)
+        return { stufe: "vorsicht", farbe: "#8A4E1C", text: "Finger gereizt — offenhändig, keine Crimps" };
+    if (haut >= 3)
+        return { stufe: "vorsicht", farbe: "#8A4E1C", text: "Haut offen — heute eher Kraft statt Bouldern" };
+    if (sore >= 3)
+        return { stufe: "vorsicht", farbe: "#8A4E1C", text: "Starker Muskelkater — locker oder Pause" };
+    if (st.sprung && st.sprung > 1.5)
+        return { stufe: "vorsicht", farbe: "#8A4E1C", text: "Belastung stark gestiegen — eine Einheit ruhiger" };
+    if (st.tageSeit !== null && st.tageSeit === 0)
+        return { stufe: "ok", farbe: "#6F7A72", text: "Heute schon trainiert" };
+    if (st.tageSeit !== null && st.tageSeit >= st.win)
+        return { stufe: "los", farbe: "#2B4B8F", text: "Über " + st.win + " Tage Pause — Zeit für eine Einheit" };
+    return { stufe: "los", farbe: "#1E6E5A", text: "Bereit — nichts spricht dagegen" };
+}
+function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSession, onCheck, onTypeField, onAddType, onRemoveType, onGoalField, onPlan }) {
+    const [edit, setEdit] = useState(false);
+    const [offen, setOffen] = useState(null);
+    const t = training || initTraining();
+    const st = trainingStats(t, heuteKey);
+    const ber = bereitschaft(st);
+    const quote = st.soll > 0 ? Math.min(1, st.ist / st.soll) : 0;
+    const R = 52, U = 2 * Math.PI * R;
+    const letzte14 = Array.from({ length: 14 }, (_, i) => {
+        const d = addDays(new Date(heuteKey + "T00:00:00"), i - 13);
+        const k = dayKey(d);
+        return {
+            key: k,
+            sess: (t.sessions || []).filter((s) => s.date === k),
+            check: (t.checks || {})[k] || null,
+        };
+    });
+    return (React.createElement("div", { className: "flex flex-col gap-3" },
+        React.createElement("div", { className: "pl-card rounded p-4" },
+            React.createElement("div", { className: "flex items-center gap-4" },
+                React.createElement("div", { className: "relative shrink-0", style: { width: 124, height: 124 } },
+                    React.createElement("svg", { width: "124", height: "124", viewBox: "0 0 124 124" },
+                        React.createElement("circle", { cx: "62", cy: "62", r: R, fill: "none", stroke: "var(--line)", strokeWidth: "10" }),
+                        React.createElement("circle", { cx: "62", cy: "62", r: R, fill: "none", stroke: st.komplett ? "#1E6E5A" : "#2B4B8F", strokeWidth: "10", strokeLinecap: "round", strokeDasharray: U, strokeDashoffset: U * (1 - quote), transform: "rotate(-90 62 62)", style: { transition: "stroke-dashoffset .6s cubic-bezier(.2,.8,.2,1)" } })),
+                    React.createElement("div", { className: "absolute inset-0 flex flex-col items-center justify-center" },
+                        React.createElement("span", { className: "mono text-3xl font-semibold", style: { color: st.komplett ? "#1E6E5A" : "#2B4B8F" } },
+                            st.ist,
+                            React.createElement("span", { className: "pl-muted" },
+                                "/",
+                                st.soll)),
+                        React.createElement("span", { className: "mono text-xs pl-muted" },
+                            "in ",
+                            st.win,
+                            " Tagen"))),
+                React.createElement("div", { className: "flex-1 min-w-0" },
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, "Zyklus"),
+                    React.createElement("div", { className: "text-lg font-medium leading-tight" }, st.komplett ? "Zyklus komplett" : `noch ${Math.max(0, st.soll - st.ist)} Einheiten`),
+                    React.createElement("div", { className: "mono text-xs pl-muted mt-1" },
+                        st.imIdeal.length,
+                        " davon in ",
+                        st.ideal,
+                        " Tagen"),
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, st.tageSeit === null ? "noch keine Einheit"
+                        : st.tageSeit === 0 ? "heute trainiert"
+                            : `letzte vor ${st.tageSeit} ${st.tageSeit === 1 ? "Tag" : "Tagen"}`),
+                    React.createElement("div", { className: "mt-2 flex flex-col gap-1" }, (t.types || []).map((ty) => {
+                        const p = st.proTyp[ty.id] || { n: 0, target: 0 };
+                        return (React.createElement("div", { key: ty.id, className: "flex items-center gap-1.5" },
+                            React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: ty.color } }),
+                            React.createElement("span", { className: "text-sm truncate flex-1" }, ty.name),
+                            React.createElement("span", { className: "mono text-xs", style: { color: p.erfuellt ? ty.color : "var(--muted)" } },
+                                p.n,
+                                "/",
+                                p.target)));
+                    })))),
+            React.createElement("div", { className: "mt-3 pt-3 border-t pl-hair flex items-center gap-2" },
+                React.createElement("span", { className: "w-2 h-2 rounded-full shrink-0", style: { background: ber.farbe } }),
+                React.createElement("span", { className: "text-sm flex-1", style: { color: ber.farbe } }, ber.text))),
+        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Einheit eintragen"),
+            React.createElement("div", { className: "flex flex-wrap gap-1.5" }, (t.types || []).map((ty) => (React.createElement("button", { key: ty.id, onClick: () => onLog(ty.id, heuteKey), className: "px-3 py-2.5 rounded flex items-center gap-1.5 text-sm", style: { background: ty.color, color: "#FFF" } },
+                React.createElement(Plus, { size: 13 }),
+                " ",
+                ty.name)))),
+            React.createElement("div", { className: "flex flex-wrap gap-1.5 mt-2" }, (t.types || []).map((ty) => (React.createElement("button", { key: ty.id, onClick: () => onPlan(ty), className: "pl-btn px-2.5 py-1 rounded mono text-xs" },
+                ty.name,
+                " einplanen"))))),
+        React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted" }, "Wie geht es dir heute?"),
+            CHECK_FIELDS.map((f) => {
+                const wert = st.heuteCheck ? st.heuteCheck[f.k] || 0 : 0;
+                const gesetzt = st.heuteCheck && st.heuteCheck[f.k] !== undefined;
+                return (React.createElement("div", { key: f.k },
+                    React.createElement("div", { className: "flex items-baseline justify-between mb-1" },
+                        React.createElement("span", { className: "text-sm" }, f.label),
+                        React.createElement("span", { className: "mono text-xs", style: { color: gesetzt ? CHECK_COLORS[wert] : "var(--muted)" } }, gesetzt ? f.stufen[wert] : "—")),
+                    React.createElement("div", { className: "flex gap-1" }, f.stufen.map((s, i) => (React.createElement("button", { key: i, onClick: () => onCheck(heuteKey, f.k, i), className: `flex-1 rounded-sm ${gesetzt && wert === i ? "pl-pop" : ""}`, style: {
+                            height: 26,
+                            background: gesetzt && wert === i ? CHECK_COLORS[i] : "transparent",
+                            border: `1px solid ${gesetzt && wert === i ? CHECK_COLORS[i] : "var(--line)"}`,
+                        }, "aria-label": f.label + ": " + s }))))));
+            })),
+        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Letzte 14 Tage"),
+            React.createElement("div", { className: "flex gap-1" }, letzte14.map((d) => {
+                const hat = d.sess.length > 0;
+                const farbe = hat
+                    ? ((t.types || []).find((x) => x.id === d.sess[0].typeId) || {}).color || "#6F7A72"
+                    : "transparent";
+                const fing = d.check && d.check.finger !== undefined ? d.check.finger : null;
+                return (React.createElement("div", { key: d.key, className: "flex-1 flex flex-col items-center gap-1" },
+                    React.createElement("div", { className: "w-full rounded-sm", title: d.key + (hat ? " · " + d.sess.length + " Einheit(en)" : ""), style: {
+                            height: 26,
+                            background: hat ? farbe : "var(--line-soft)",
+                            border: d.key === heuteKey ? "1.5px solid var(--ink)" : "1px solid transparent",
+                        } }),
+                    React.createElement("span", { className: "rounded-full", style: {
+                            width: 5, height: 5,
+                            background: fing === null ? "var(--line)" : CHECK_COLORS[fing],
+                        } })));
+            })),
+            React.createElement("div", { className: "flex items-center justify-between mt-2 mono text-xs pl-muted" },
+                React.createElement("span", null, "Balken: Einheit \u00B7 Punkt: Finger"),
+                st.sprung !== null && (React.createElement("span", { style: { color: st.sprung > 1.5 ? "#A03A5E" : "var(--muted)" } },
+                    "Belastung ",
+                    Math.round(st.sprung * 100),
+                    " % vom Schnitt")))),
+        React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" },
+                "Einheiten (",
+                st.sess.length,
+                ")"),
+            st.sess.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-1" }, "Noch nichts eingetragen. Oben eine Einheit anlegen.")) : (React.createElement("div", { className: "flex flex-col" }, st.sess.slice(0, 20).map((s) => {
+                const ty = (t.types || []).find((x) => x.id === s.typeId) || { name: "?", color: "#6F7A72" };
+                const auf = offen === s.id;
+                return (React.createElement("div", { key: s.id, className: "border-b pl-hair last:border-0" },
+                    React.createElement("button", { onClick: () => setOffen(auf ? null : s.id), className: "w-full flex items-center gap-2 py-2 text-left" },
+                        React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: ty.color } }),
+                        React.createElement("span", { className: "mono text-xs pl-muted shrink-0", style: { width: 52 } },
+                            s.date.slice(8),
+                            ".",
+                            s.date.slice(5, 7),
+                            "."),
+                        React.createElement("span", { className: "text-sm flex-1 truncate" }, ty.name),
+                        React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(s.dur || 60)),
+                        React.createElement("span", { className: "mono text-xs", style: { color: ty.color } },
+                            "RPE ",
+                            s.rpe || 3)),
+                    auf && (React.createElement("div", { className: "pl-rise pb-3 flex flex-col gap-2" },
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("span", { className: "mono text-xs pl-muted", style: { width: 52 } }, "Dauer"),
+                            React.createElement("button", { onClick: () => onEditSession(s.id, { dur: Math.max(15, (s.dur || 60) - 15) }), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+                            React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 56, textAlign: "center" } }, durLabel(s.dur || 60)),
+                            React.createElement("button", { onClick: () => onEditSession(s.id, { dur: Math.min(300, (s.dur || 60) + 15) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
+                            React.createElement("button", { onClick: () => onRemoveSession(s.id), className: "pl-btn ml-auto px-2 py-1 rounded", style: { color: "#A03A5E", borderColor: "#A03A5E" }, "aria-label": "L\u00F6schen" },
+                                React.createElement(Trash2, { size: 12 }))),
+                        React.createElement("div", { className: "flex items-center gap-2" },
+                            React.createElement("span", { className: "mono text-xs pl-muted", style: { width: 52 } }, "Wie hart"),
+                            React.createElement("div", { className: "flex gap-1 flex-1" }, [1, 2, 3, 4, 5].map((r) => (React.createElement("button", { key: r, onClick: () => onEditSession(s.id, { rpe: r }), className: "pl-btn flex-1 py-1 rounded mono text-xs", style: (s.rpe || 3) === r ? { background: ty.color, color: "#FFF", borderColor: ty.color } : {} }, r))))),
+                        React.createElement("input", { value: s.note || "", placeholder: "Notiz \u2014 Projekte, S\u00E4tze, Gef\u00FChl", onChange: (e) => onEditSession(s.id, { note: e.target.value }), className: "pl-input px-2 py-1.5 rounded text-sm" })))));
+            })))),
+        React.createElement("button", { onClick: () => setEdit(!edit), className: "pl-btn px-3 py-2 rounded mono text-xs" }, edit ? "Einstellungen schließen" : "Trainingsarten & Ziel"),
+        edit && (React.createElement("div", { className: "pl-card pl-rise rounded p-3 flex flex-col gap-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted" }, "Zielfenster"),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted flex-1" }, "sp\u00E4testens in"),
+                React.createElement("button", { onClick: () => onGoalField("windowDays", Math.max(3, (t.goal.windowDays || 10) - 1)), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+                React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 54, textAlign: "center" } },
+                    t.goal.windowDays || 10,
+                    " Tagen"),
+                React.createElement("button", { onClick: () => onGoalField("windowDays", Math.min(21, (t.goal.windowDays || 10) + 1)), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+")),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted flex-1" }, "am besten in"),
+                React.createElement("button", { onClick: () => onGoalField("idealDays", Math.max(3, (t.goal.idealDays || 7) - 1)), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+                React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 54, textAlign: "center" } },
+                    t.goal.idealDays || 7,
+                    " Tagen"),
+                React.createElement("button", { onClick: () => onGoalField("idealDays", Math.min(21, (t.goal.idealDays || 7) + 1)), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+")),
+            React.createElement("div", { className: "border-t pl-hair pt-3 mono text-xs pl-muted" }, "Trainingsarten"),
+            (t.types || []).map((ty) => (React.createElement("div", { key: ty.id, className: "flex flex-col gap-1.5" },
+                React.createElement("div", { className: "flex items-center gap-2" },
+                    React.createElement("span", { className: "w-6 h-6 rounded-sm shrink-0", style: { background: ty.color } }),
+                    React.createElement("input", { value: ty.name, onChange: (e) => onTypeField(ty.id, "name", e.target.value), className: "pl-input px-2 py-1 rounded text-sm flex-1" }),
+                    React.createElement("button", { onClick: () => onTypeField(ty.id, "target", Math.max(0, (ty.target || 0) - 1)), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+                    React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 26, textAlign: "center" } }, ty.target || 0),
+                    React.createElement("button", { onClick: () => onTypeField(ty.id, "target", Math.min(7, (ty.target || 0) + 1)), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
+                    (t.types || []).length > 1 && (React.createElement("button", { onClick: () => onRemoveType(ty.id), className: "pl-muted px-1", "aria-label": "L\u00F6schen" },
+                        React.createElement(Trash2, { size: 13 })))),
+                React.createElement("div", { className: "grid gap-1 pl-8", style: { gridTemplateColumns: "repeat(12,1fr)" } }, PALETTE.map((c) => (React.createElement("button", { key: c, onClick: () => onTypeField(ty.id, "color", c), className: "rounded-sm", style: {
+                        height: 14, background: c,
+                        border: ty.color === c ? "2px solid var(--ink)" : "1px solid rgba(0,0,0,.12)",
+                    }, "aria-label": c }))))))),
+            React.createElement("button", { onClick: onAddType, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-start" }, "+ Trainingsart"),
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Tr\u00E4gt eine Trainingsart denselben Namen wie eine Routine, wird die Routine beim Eintragen einer Einheit automatisch mit abgehakt.")))));
+}
+/* Kompakte Übersicht für die Bilanz */
+function TrainingSummary({ training, heuteKey, onOpen }) {
+    const t = training || initTraining();
+    const st = trainingStats(t, heuteKey);
+    return (React.createElement("button", { onClick: onOpen, className: "pl-card rounded p-3 flex items-center gap-3 text-left w-full" },
+        React.createElement("div", { className: "flex flex-col flex-1 min-w-0" },
+            React.createElement("span", { className: "mono text-xs pl-muted" },
+                "Training \u00B7 letzte ",
+                st.win,
+                " Tage"),
+            React.createElement("span", { className: "text-sm" }, (t.types || []).map((ty) => {
+                const p = st.proTyp[ty.id] || { n: 0, target: 0 };
+                return ty.name + " " + p.n + "/" + p.target;
+            }).join(" · "))),
+        React.createElement("span", { className: "mono text-2xl font-medium", style: { color: st.komplett ? "#1E6E5A" : st.ist === 0 ? "#A03A5E" : "#8A4E1C" } },
+            st.ist,
+            "/",
+            st.soll)));
+}
+
 /* ════════════════ Fehlerabfangung ════════════════ */
 class ErrorBoundary extends React.Component {
     constructor(props) {
