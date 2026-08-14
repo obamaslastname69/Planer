@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14g · Training";
+const APP_VERSION = "2026-08-14h · Trainingsplan";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -1452,7 +1452,7 @@ function PlannerApp() {
             const tr = prev.training || initTraining();
             const neu = {
                 id: uid(), date: datum, typeId: typeId,
-                dur: ty && ty.name.toLowerCase().indexOf("boulder") === 0 ? 120 : 60,
+                dur: ty && /boulder|limit|flow|capacity/i.test(ty.name) ? 120 : 75,
                 rpe: 3, note: "",
             };
             /* Passende Routine gleich mit abhaken */
@@ -1497,6 +1497,59 @@ function PlannerApp() {
 
     const removeTrainingType = (id) =>
         saveTraining((tr) => ({ ...tr, types: (tr.types || []).filter((x) => x.id !== id) }));
+
+    const toggleExercise = (sessionId, exId) => {
+        buzz(10);
+        saveTraining((tr) => ({
+            ...tr,
+            sessions: (tr.sessions || []).map((x) => {
+                if (x.id !== sessionId) return x;
+                const done = x.done || [];
+                return { ...x, done: done.includes(exId) ? done.filter((e) => e !== exId) : [...done, exId] };
+            }),
+        }));
+    };
+
+    const setExField = (typeId, exId, feld, wert) =>
+        saveTraining((tr) => ({
+            ...tr,
+            types: (tr.types || []).map((ty) => ty.id !== typeId ? ty : {
+                ...ty,
+                exercises: (ty.exercises || []).map((e) => (e.id === exId ? { ...e, [feld]: wert } : e)),
+            }),
+        }));
+
+    const addExercise = (typeId) =>
+        saveTraining((tr) => ({
+            ...tr,
+            types: (tr.types || []).map((ty) => ty.id !== typeId ? ty : {
+                ...ty,
+                exercises: [...(ty.exercises || []), { id: uid(), name: "Neue Übung", note: "" }],
+            }),
+        }));
+
+    const removeExercise = (typeId, exId) =>
+        saveTraining((tr) => ({
+            ...tr,
+            types: (tr.types || []).map((ty) => ty.id !== typeId ? ty : {
+                ...ty,
+                exercises: (ty.exercises || []).filter((e) => e.id !== exId),
+            }),
+        }));
+
+    const setMilestone = (id, patch) => {
+        const m = (trainingNow.milestones || []).find((x) => x.id === id);
+        if (m && patch.erreicht && !m.erreicht) {
+            setCelebration({ id: uid(), title: m.name, sub: "Ziel erreicht", color: "#1E6E5A" });
+            buzz([18, 60, 25]);
+        }
+        saveTraining((tr) => ({
+            ...tr,
+            milestones: (tr.milestones || []).map((x) => (x.id === id ? { ...x, ...patch } : x)),
+        }));
+    };
+
+    const setHinweis = (text) => saveTraining((tr) => ({ ...tr, hinweis: text }));
 
     const setGoalField = (feld, wert) =>
         saveTraining((tr) => ({ ...tr, goal: { ...(tr.goal || {}), [feld]: wert } }));
@@ -1774,10 +1827,13 @@ function PlannerApp() {
                     onLog: logSession, onRemoveSession: removeSession, onEditSession: editSession,
                     onCheck: setCheck, onTypeField: setTypeField, onAddType: addTrainingType,
                     onRemoveType: removeTrainingType, onGoalField: setGoalField,
+                    onToggleEx: toggleExercise, onExField: setExField,
+                    onAddEx: addExercise, onRemoveEx: removeExercise,
+                    onMilestone: setMilestone, onHinweis: setHinweis,
                     onPlan: (ty) => startPlacing({
                         title: ty.name,
                         cat: Object.keys(CATS).find((k) => CATS[k].label === "Training") || "training",
-                        est: ty.name.toLowerCase().indexOf("boulder") === 0 ? 120 : 60,
+                        est: /boulder|limit|flow|capacity/i.test(ty.name) ? 120 : 75,
                     }),
                 }))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
@@ -3146,16 +3202,49 @@ function Confetti({ trigger }) {
         } })))));
 }
 "use strict";
+"use strict";
 /* ════════════════ Training ════════════════ */
-const TRAINING_VERSION = 1;
+const TRAINING_VERSION = 2;
 function initTraining() {
     return {
         v: TRAINING_VERSION,
+        hinweis: "Crimp-Sperre: keine kleinen Leisten aufstellen. Nur Open-Hand, Sloper oder Henkel. Bei Schmerz sofort abbrechen.",
         types: [
-            { id: "tt1", name: "Bouldern", color: "#1E6E5A", target: 2, routine: "Bouldern" },
-            { id: "tt2", name: "Krafttraining", color: "#8A4E1C", target: 1, routine: "Krafttraining" },
+            {
+                id: "d1", name: "Tag 1 · Kraft & Limit", color: "#A03A5E", target: 1, routine: "Bouldern",
+                exercises: [
+                    { id: "d1e1", name: "Limit-Bouldern (7a-Bereich)", note: "volle Pausen zwischen den Versuchen" },
+                    { id: "d1e2", name: "Weighted Pull-ups", note: "Finisher · saubere Form, kein Crimp" },
+                ],
+            },
+            {
+                id: "d2", name: "Tag 2 · OAP & Beine", color: "#2B4B8F", target: 1, routine: "Krafttraining",
+                exercises: [
+                    { id: "d2e1", name: "Sub-Limit-Bouldern", note: "Flow & Präzision" },
+                    { id: "d2e2", name: "Scapula-Shrugs", note: "" },
+                    { id: "d2e3", name: "Archer Pull-ups", note: "" },
+                    { id: "d2e4", name: "Lock-offs", note: "" },
+                    { id: "d2e5", name: "Pistol Squats", note: "Progression" },
+                ],
+            },
+            {
+                id: "d3", name: "Tag 3 · Capacity & Flow", color: "#1E6E5A", target: 1, routine: "Bouldern",
+                exercises: [
+                    { id: "d3e1", name: "Perfect 4×4", note: "4 Boulder, 4× wiederholen" },
+                    { id: "d3e2", name: "Silent Feet", note: "kein Nachgreifen, Fußpräzision" },
+                    { id: "d3e3", name: "Front Lever Progression", note: "Holy Trinity" },
+                    { id: "d3e4", name: "Back Lever Progression", note: "Holy Trinity" },
+                    { id: "d3e5", name: "Windshield Wipers", note: "Holy Trinity · Rotationsstabilität" },
+                ],
+            },
         ],
         goal: { windowDays: 10, idealDays: 7 },
+        milestones: [
+            { id: "m1", name: "One-Arm Pull-up", ziel: "saubere volle Ausführung", wert: 0, einheit: "", erreicht: false },
+            { id: "m2", name: "Front Lever", ziel: "5 s waagerecht halten", wert: 0, einheit: "s", erreicht: false },
+            { id: "m3", name: "Back Lever", ziel: "kontrolliert waagerecht", wert: 0, einheit: "s", erreicht: false },
+            { id: "m4", name: "Weighted Pull-up 1RM", ziel: "Kraftbasis ausbauen", wert: 40, einheit: "kg", erreicht: false },
+        ],
         sessions: [],
         checks: {},
     };
@@ -3163,7 +3252,7 @@ function initTraining() {
 /* Körperwerte: 0 ist gut, 3 ist schlecht */
 const CHECK_FIELDS = [
     { k: "sore", label: "Muskelkater", stufen: ["keiner", "leicht", "deutlich", "stark"] },
-    { k: "finger", label: "Finger & Sehnen", stufen: ["frei", "leicht spürbar", "gereizt", "schmerzhaft"] },
+    { k: "finger", label: "Finger & Ringband", stufen: ["frei", "leicht spürbar", "gereizt", "schmerzhaft"] },
     { k: "haut", label: "Haut", stufen: ["gut", "dünn", "wund", "offen"] },
     { k: "schlaf", label: "Schlaf", stufen: ["erholt", "ok", "wenig", "kaum"] },
 ];
@@ -3171,7 +3260,6 @@ const CHECK_COLORS = ["#1E6E5A", "#7FA894", "#8A4E1C", "#A03A5E"];
 function tagAbstand(a, b) {
     return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
 }
-/* Kennzahlen für das rollende Fenster */
 function trainingStats(training, heuteKey) {
     const t = training || initTraining();
     const win = (t.goal && t.goal.windowDays) || 10;
@@ -3188,7 +3276,16 @@ function trainingStats(training, heuteKey) {
     const komplett = (t.types || []).length > 0 && (t.types || []).every((ty) => proTyp[ty.id].erfuellt);
     const letzte = sess[0] || null;
     const tageSeit = letzte ? tagAbstand(letzte.date, heuteKey) : null;
-    /* Belastung: Dauer × Anstrengung, letzte 7 Tage gegen den Schnitt der letzten 28 */
+    /* Nächster Tag: der, der am längsten nicht dran war */
+    let naechster = null;
+    for (const ty of t.types || []) {
+        if (proTyp[ty.id].erfuellt)
+            continue;
+        const zuletzt = sess.find((s) => s.typeId === ty.id);
+        const alter = zuletzt ? tagAbstand(zuletzt.date, heuteKey) : 999;
+        if (!naechster || alter > naechster.alter)
+            naechster = { ty: ty, alter: alter };
+    }
     const last = (n) => sess.filter((s) => tagAbstand(s.date, heuteKey) < n);
     const last7 = last(7).reduce((a, s) => a + (s.dur || 60) * (s.rpe || 3), 0);
     const last28 = last(28).reduce((a, s) => a + (s.dur || 60) * (s.rpe || 3), 0);
@@ -3198,32 +3295,32 @@ function trainingStats(training, heuteKey) {
     return {
         win: win, ideal: ideal, sess: sess, imFenster: imFenster, imIdeal: imIdeal,
         proTyp: proTyp, soll: soll, ist: imFenster.length, komplett: komplett,
-        letzte: letzte, tageSeit: tageSeit, sprung: sprung, heuteCheck: heuteCheck,
+        letzte: letzte, tageSeit: tageSeit, naechster: naechster,
+        sprung: sprung, heuteCheck: heuteCheck,
     };
 }
-/* Empfehlung aus Körperwerten und Abstand */
 function bereitschaft(st) {
     const c = st.heuteCheck;
-    const finger = c ? c.finger || 0 : 0;
-    const sore = c ? c.sore || 0 : 0;
-    const haut = c ? c.haut || 0 : 0;
+    const finger = c && c.finger !== undefined ? c.finger : 0;
+    const sore = c && c.sore !== undefined ? c.sore : 0;
+    const haut = c && c.haut !== undefined ? c.haut : 0;
     if (finger >= 3)
-        return { stufe: "stop", farbe: "#A03A5E", text: "Finger schmerzhaft — heute nicht klettern" };
+        return { farbe: "#A03A5E", text: "Finger schmerzhaft — heute nicht klettern" };
     if (finger === 2)
-        return { stufe: "vorsicht", farbe: "#8A4E1C", text: "Finger gereizt — offenhändig, keine Crimps" };
+        return { farbe: "#8A4E1C", text: "Finger gereizt — nur Open-Hand und Sloper" };
     if (haut >= 3)
-        return { stufe: "vorsicht", farbe: "#8A4E1C", text: "Haut offen — heute eher Kraft statt Bouldern" };
+        return { farbe: "#8A4E1C", text: "Haut offen — heute Tag 2 statt Boulderlimit" };
     if (sore >= 3)
-        return { stufe: "vorsicht", farbe: "#8A4E1C", text: "Starker Muskelkater — locker oder Pause" };
+        return { farbe: "#8A4E1C", text: "Starker Muskelkater — locker oder Pause" };
     if (st.sprung && st.sprung > 1.5)
-        return { stufe: "vorsicht", farbe: "#8A4E1C", text: "Belastung stark gestiegen — eine Einheit ruhiger" };
-    if (st.tageSeit !== null && st.tageSeit === 0)
-        return { stufe: "ok", farbe: "#6F7A72", text: "Heute schon trainiert" };
+        return { farbe: "#8A4E1C", text: "Belastung stark gestiegen — eine Einheit ruhiger" };
+    if (st.tageSeit === 0)
+        return { farbe: "#6F7A72", text: "Heute schon trainiert" };
     if (st.tageSeit !== null && st.tageSeit >= st.win)
-        return { stufe: "los", farbe: "#2B4B8F", text: "Über " + st.win + " Tage Pause — Zeit für eine Einheit" };
-    return { stufe: "los", farbe: "#1E6E5A", text: "Bereit — nichts spricht dagegen" };
+        return { farbe: "#2B4B8F", text: "Über " + st.win + " Tage Pause — Zeit für eine Einheit" };
+    return { farbe: "#1E6E5A", text: "Bereit — nichts spricht dagegen" };
 }
-function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSession, onCheck, onTypeField, onAddType, onRemoveType, onGoalField, onPlan }) {
+function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSession, onToggleEx, onCheck, onTypeField, onAddType, onRemoveType, onGoalField, onExField, onAddEx, onRemoveEx, onMilestone, onHinweis, onPlan }) {
     const [edit, setEdit] = useState(false);
     const [offen, setOffen] = useState(null);
     const t = training || initTraining();
@@ -3234,13 +3331,29 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
     const letzte14 = Array.from({ length: 14 }, (_, i) => {
         const d = addDays(new Date(heuteKey + "T00:00:00"), i - 13);
         const k = dayKey(d);
-        return {
-            key: k,
-            sess: (t.sessions || []).filter((s) => s.date === k),
-            check: (t.checks || {})[k] || null,
-        };
+        return { key: k, sess: (t.sessions || []).filter((s) => s.date === k), check: (t.checks || {})[k] || null };
     });
     return (React.createElement("div", { className: "flex flex-col gap-3" },
+        React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2" },
+            React.createElement("div", { className: "mono text-xs pl-muted" }, "Ziele"),
+            (t.milestones || []).map((m) => (React.createElement("div", { key: m.id, className: "flex items-center gap-2" },
+                React.createElement("button", { onClick: () => onMilestone(m.id, { erreicht: !m.erreicht }), className: `w-5 h-5 rounded-sm shrink-0 flex items-center justify-center ${m.erreicht ? "pl-pop" : ""}`, style: {
+                        background: m.erreicht ? "#1E6E5A" : "transparent",
+                        border: `1.5px solid ${m.erreicht ? "#1E6E5A" : "var(--line)"}`,
+                    }, "aria-label": "Ziel erreicht" }, m.erreicht && React.createElement(Check, { size: 13, color: "#FFF" })),
+                React.createElement("div", { className: "flex-1 min-w-0" },
+                    React.createElement("div", { className: "text-sm leading-tight", style: { textDecoration: m.erreicht ? "line-through" : "none", opacity: m.erreicht ? 0.6 : 1 } }, m.name),
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, m.ziel)),
+                m.einheit ? (React.createElement("div", { className: "flex items-center shrink-0" },
+                    React.createElement("button", { onClick: () => onMilestone(m.id, { wert: Math.max(0, (m.wert || 0) - (m.einheit === "kg" ? 2.5 : 1)) }), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+                    React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 52, textAlign: "center" } },
+                        m.wert || 0,
+                        " ",
+                        m.einheit),
+                    React.createElement("button", { onClick: () => onMilestone(m.id, { wert: (m.wert || 0) + (m.einheit === "kg" ? 2.5 : 1) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"))) : null)))),
+        t.hinweis ? (React.createElement("div", { className: "rounded p-3 flex items-start gap-2", style: { background: hexA("#A03A5E", 0.1), border: "1px solid " + hexA("#A03A5E", 0.35) } },
+            React.createElement(AlertCircle, { size: 15, style: { color: "#A03A5E", marginTop: 1, flexShrink: 0 } }),
+            React.createElement("input", { value: t.hinweis, onChange: (e) => onHinweis(e.target.value), className: "text-sm flex-1", style: { background: "transparent", border: "none", outline: "none", color: "#A03A5E" } }))) : null,
         React.createElement("div", { className: "pl-card rounded p-4" },
             React.createElement("div", { className: "flex items-center gap-4" },
                 React.createElement("div", { className: "relative shrink-0", style: { width: 124, height: 124 } },
@@ -3259,7 +3372,7 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                             " Tagen"))),
                 React.createElement("div", { className: "flex-1 min-w-0" },
                     React.createElement("div", { className: "mono text-xs pl-muted" }, "Zyklus"),
-                    React.createElement("div", { className: "text-lg font-medium leading-tight" }, st.komplett ? "Zyklus komplett" : `noch ${Math.max(0, st.soll - st.ist)} Einheiten`),
+                    React.createElement("div", { className: "text-lg font-medium leading-tight" }, st.komplett ? "Zyklus komplett" : st.naechster ? "als Nächstes " + st.naechster.ty.name.split(" · ")[0] : "alles offen"),
                     React.createElement("div", { className: "mono text-xs pl-muted mt-1" },
                         st.imIdeal.length,
                         " davon in ",
@@ -3272,7 +3385,7 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                         const p = st.proTyp[ty.id] || { n: 0, target: 0 };
                         return (React.createElement("div", { key: ty.id, className: "flex items-center gap-1.5" },
                             React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: ty.color } }),
-                            React.createElement("span", { className: "text-sm truncate flex-1" }, ty.name),
+                            React.createElement("span", { className: "text-sm truncate flex-1" }, ty.name.split(" · ")[0]),
                             React.createElement("span", { className: "mono text-xs", style: { color: p.erfuellt ? ty.color : "var(--muted)" } },
                                 p.n,
                                 "/",
@@ -3281,29 +3394,39 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
             React.createElement("div", { className: "mt-3 pt-3 border-t pl-hair flex items-center gap-2" },
                 React.createElement("span", { className: "w-2 h-2 rounded-full shrink-0", style: { background: ber.farbe } }),
                 React.createElement("span", { className: "text-sm flex-1", style: { color: ber.farbe } }, ber.text))),
-        React.createElement("div", { className: "pl-card rounded p-3" },
-            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Einheit eintragen"),
-            React.createElement("div", { className: "flex flex-wrap gap-1.5" }, (t.types || []).map((ty) => (React.createElement("button", { key: ty.id, onClick: () => onLog(ty.id, heuteKey), className: "px-3 py-2.5 rounded flex items-center gap-1.5 text-sm", style: { background: ty.color, color: "#FFF" } },
-                React.createElement(Plus, { size: 13 }),
-                " ",
-                ty.name)))),
-            React.createElement("div", { className: "flex flex-wrap gap-1.5 mt-2" }, (t.types || []).map((ty) => (React.createElement("button", { key: ty.id, onClick: () => onPlan(ty), className: "pl-btn px-2.5 py-1 rounded mono text-xs" },
-                ty.name,
-                " einplanen"))))),
+        (t.types || []).map((ty) => {
+            const p = st.proTyp[ty.id] || { n: 0, target: 0, erfuellt: false };
+            return (React.createElement("div", { key: ty.id, className: "pl-card rounded p-3", style: { borderLeft: `3px solid ${ty.color}` } },
+                React.createElement("div", { className: "flex items-center gap-2 mb-2" },
+                    React.createElement("span", { className: "text-sm font-medium flex-1", style: { color: ty.color } }, ty.name),
+                    React.createElement("span", { className: "mono text-xs", style: { color: p.erfuellt ? ty.color : "var(--muted)" } },
+                        p.n,
+                        "/",
+                        p.target)),
+                React.createElement("div", { className: "flex flex-col gap-0.5 mb-3" }, (ty.exercises || []).map((ex) => (React.createElement("div", { key: ex.id, className: "flex items-baseline gap-2" },
+                    React.createElement("span", { className: "pl-muted shrink-0", style: { fontSize: 11 } }, "\u00B7"),
+                    React.createElement("span", { className: "text-sm flex-1" }, ex.name),
+                    ex.note ? React.createElement("span", { className: "mono text-xs pl-muted truncate", style: { maxWidth: "45%" } }, ex.note) : null)))),
+                React.createElement("div", { className: "flex gap-1.5" },
+                    React.createElement("button", { onClick: () => onLog(ty.id, heuteKey), className: "flex-1 px-3 py-2 rounded flex items-center justify-center gap-1.5 mono text-xs", style: { background: ty.color, color: "#FFF" } },
+                        React.createElement(Plus, { size: 13 }),
+                        " heute gemacht"),
+                    React.createElement("button", { onClick: () => onPlan(ty), className: "pl-btn px-3 py-2 rounded mono text-xs" }, "einplanen"))));
+        }),
         React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
             React.createElement("div", { className: "mono text-xs pl-muted" }, "Wie geht es dir heute?"),
             CHECK_FIELDS.map((f) => {
-                const wert = st.heuteCheck ? st.heuteCheck[f.k] || 0 : 0;
                 const gesetzt = st.heuteCheck && st.heuteCheck[f.k] !== undefined;
+                const wert = gesetzt ? st.heuteCheck[f.k] : -1;
                 return (React.createElement("div", { key: f.k },
                     React.createElement("div", { className: "flex items-baseline justify-between mb-1" },
                         React.createElement("span", { className: "text-sm" }, f.label),
                         React.createElement("span", { className: "mono text-xs", style: { color: gesetzt ? CHECK_COLORS[wert] : "var(--muted)" } }, gesetzt ? f.stufen[wert] : "—")),
-                    React.createElement("div", { className: "flex gap-1" }, f.stufen.map((s, i) => (React.createElement("button", { key: i, onClick: () => onCheck(heuteKey, f.k, i), className: `flex-1 rounded-sm ${gesetzt && wert === i ? "pl-pop" : ""}`, style: {
+                    React.createElement("div", { className: "flex gap-1" }, f.stufen.map((sName, i) => (React.createElement("button", { key: i, onClick: () => onCheck(heuteKey, f.k, i), className: `flex-1 rounded-sm ${wert === i ? "pl-pop" : ""}`, style: {
                             height: 26,
-                            background: gesetzt && wert === i ? CHECK_COLORS[i] : "transparent",
-                            border: `1px solid ${gesetzt && wert === i ? CHECK_COLORS[i] : "var(--line)"}`,
-                        }, "aria-label": f.label + ": " + s }))))));
+                            background: wert === i ? CHECK_COLORS[i] : "transparent",
+                            border: `1px solid ${wert === i ? CHECK_COLORS[i] : "var(--line)"}`,
+                        }, "aria-label": f.label + ": " + sName }))))));
             })),
         React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Letzte 14 Tage"),
@@ -3314,91 +3437,102 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                     : "transparent";
                 const fing = d.check && d.check.finger !== undefined ? d.check.finger : null;
                 return (React.createElement("div", { key: d.key, className: "flex-1 flex flex-col items-center gap-1" },
-                    React.createElement("div", { className: "w-full rounded-sm", title: d.key + (hat ? " · " + d.sess.length + " Einheit(en)" : ""), style: {
+                    React.createElement("div", { className: "w-full rounded-sm", title: d.key + (hat ? " · Einheit" : ""), style: {
                             height: 26,
                             background: hat ? farbe : "var(--line-soft)",
                             border: d.key === heuteKey ? "1.5px solid var(--ink)" : "1px solid transparent",
                         } }),
-                    React.createElement("span", { className: "rounded-full", style: {
-                            width: 5, height: 5,
-                            background: fing === null ? "var(--line)" : CHECK_COLORS[fing],
-                        } })));
+                    React.createElement("span", { className: "rounded-full", style: { width: 5, height: 5, background: fing === null ? "var(--line)" : CHECK_COLORS[fing] } })));
             })),
             React.createElement("div", { className: "flex items-center justify-between mt-2 mono text-xs pl-muted" },
                 React.createElement("span", null, "Balken: Einheit \u00B7 Punkt: Finger"),
                 st.sprung !== null && (React.createElement("span", { style: { color: st.sprung > 1.5 ? "#A03A5E" : "var(--muted)" } },
                     "Belastung ",
                     Math.round(st.sprung * 100),
-                    " % vom Schnitt")))),
+                    " %")))),
         React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" },
                 "Einheiten (",
                 st.sess.length,
                 ")"),
-            st.sess.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-1" }, "Noch nichts eingetragen. Oben eine Einheit anlegen.")) : (React.createElement("div", { className: "flex flex-col" }, st.sess.slice(0, 20).map((s) => {
-                const ty = (t.types || []).find((x) => x.id === s.typeId) || { name: "?", color: "#6F7A72" };
+            st.sess.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-1" }, "Noch nichts eingetragen.")) : (React.createElement("div", { className: "flex flex-col" }, st.sess.slice(0, 20).map((s) => {
+                const ty = (t.types || []).find((x) => x.id === s.typeId) || { name: "?", color: "#6F7A72", exercises: [] };
                 const auf = offen === s.id;
+                const fertig = (s.done || []).length;
+                const gesamt = (ty.exercises || []).length;
                 return (React.createElement("div", { key: s.id, className: "border-b pl-hair last:border-0" },
                     React.createElement("button", { onClick: () => setOffen(auf ? null : s.id), className: "w-full flex items-center gap-2 py-2 text-left" },
                         React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: ty.color } }),
-                        React.createElement("span", { className: "mono text-xs pl-muted shrink-0", style: { width: 52 } },
+                        React.createElement("span", { className: "mono text-xs pl-muted shrink-0", style: { width: 46 } },
                             s.date.slice(8),
                             ".",
                             s.date.slice(5, 7),
                             "."),
-                        React.createElement("span", { className: "text-sm flex-1 truncate" }, ty.name),
+                        React.createElement("span", { className: "text-sm flex-1 truncate" }, ty.name.split(" · ")[0]),
+                        gesamt > 0 && (React.createElement("span", { className: "mono text-xs pl-muted" },
+                            fertig,
+                            "/",
+                            gesamt)),
                         React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(s.dur || 60)),
                         React.createElement("span", { className: "mono text-xs", style: { color: ty.color } },
                             "RPE ",
                             s.rpe || 3)),
                     auf && (React.createElement("div", { className: "pl-rise pb-3 flex flex-col gap-2" },
-                        React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("span", { className: "mono text-xs pl-muted", style: { width: 52 } }, "Dauer"),
+                        (ty.exercises || []).map((ex) => {
+                            const an = (s.done || []).includes(ex.id);
+                            return (React.createElement("button", { key: ex.id, onClick: () => onToggleEx(s.id, ex.id), className: "flex items-center gap-2 text-left" },
+                                React.createElement("span", { className: `w-4 h-4 rounded-sm shrink-0 flex items-center justify-center ${an ? "pl-pop" : ""}`, style: {
+                                        background: an ? ty.color : "transparent",
+                                        border: `1.5px solid ${an ? ty.color : "var(--line)"}`,
+                                    } }, an && React.createElement(Check, { size: 11, color: "#FFF" })),
+                                React.createElement("span", { className: "text-sm flex-1", style: { textDecoration: an ? "line-through" : "none", opacity: an ? 0.6 : 1 } }, ex.name)));
+                        }),
+                        React.createElement("div", { className: "flex items-center gap-2 pt-1" },
+                            React.createElement("span", { className: "mono text-xs pl-muted", style: { width: 46 } }, "Dauer"),
                             React.createElement("button", { onClick: () => onEditSession(s.id, { dur: Math.max(15, (s.dur || 60) - 15) }), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
                             React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 56, textAlign: "center" } }, durLabel(s.dur || 60)),
                             React.createElement("button", { onClick: () => onEditSession(s.id, { dur: Math.min(300, (s.dur || 60) + 15) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
                             React.createElement("button", { onClick: () => onRemoveSession(s.id), className: "pl-btn ml-auto px-2 py-1 rounded", style: { color: "#A03A5E", borderColor: "#A03A5E" }, "aria-label": "L\u00F6schen" },
                                 React.createElement(Trash2, { size: 12 }))),
                         React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("span", { className: "mono text-xs pl-muted", style: { width: 52 } }, "Wie hart"),
+                            React.createElement("span", { className: "mono text-xs pl-muted", style: { width: 46 } }, "Wie hart"),
                             React.createElement("div", { className: "flex gap-1 flex-1" }, [1, 2, 3, 4, 5].map((r) => (React.createElement("button", { key: r, onClick: () => onEditSession(s.id, { rpe: r }), className: "pl-btn flex-1 py-1 rounded mono text-xs", style: (s.rpe || 3) === r ? { background: ty.color, color: "#FFF", borderColor: ty.color } : {} }, r))))),
-                        React.createElement("input", { value: s.note || "", placeholder: "Notiz \u2014 Projekte, S\u00E4tze, Gef\u00FChl", onChange: (e) => onEditSession(s.id, { note: e.target.value }), className: "pl-input px-2 py-1.5 rounded text-sm" })))));
+                        React.createElement("input", { value: s.note || "", placeholder: "Notiz \u2014 Projekte, S\u00E4tze, Finger", onChange: (e) => onEditSession(s.id, { note: e.target.value }), className: "pl-input px-2 py-1.5 rounded text-sm" })))));
             })))),
-        React.createElement("button", { onClick: () => setEdit(!edit), className: "pl-btn px-3 py-2 rounded mono text-xs" }, edit ? "Einstellungen schließen" : "Trainingsarten & Ziel"),
+        React.createElement("button", { onClick: () => setEdit(!edit), className: "pl-btn px-3 py-2 rounded mono text-xs" }, edit ? "Einstellungen schließen" : "Tage, Übungen & Ziel bearbeiten"),
         edit && (React.createElement("div", { className: "pl-card pl-rise rounded p-3 flex flex-col gap-3" },
             React.createElement("div", { className: "mono text-xs pl-muted" }, "Zielfenster"),
-            React.createElement("div", { className: "flex items-center gap-2" },
-                React.createElement("span", { className: "mono text-xs pl-muted flex-1" }, "sp\u00E4testens in"),
-                React.createElement("button", { onClick: () => onGoalField("windowDays", Math.max(3, (t.goal.windowDays || 10) - 1)), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+            [["windowDays", "spätestens in", 10], ["idealDays", "am besten in", 7]].map(([k, lbl, dflt]) => (React.createElement("div", { key: k, className: "flex items-center gap-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted flex-1" }, lbl),
+                React.createElement("button", { onClick: () => onGoalField(k, Math.max(3, (t.goal[k] || dflt) - 1)), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
                 React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 54, textAlign: "center" } },
-                    t.goal.windowDays || 10,
+                    t.goal[k] || dflt,
                     " Tagen"),
-                React.createElement("button", { onClick: () => onGoalField("windowDays", Math.min(21, (t.goal.windowDays || 10) + 1)), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+")),
-            React.createElement("div", { className: "flex items-center gap-2" },
-                React.createElement("span", { className: "mono text-xs pl-muted flex-1" }, "am besten in"),
-                React.createElement("button", { onClick: () => onGoalField("idealDays", Math.max(3, (t.goal.idealDays || 7) - 1)), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
-                React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 54, textAlign: "center" } },
-                    t.goal.idealDays || 7,
-                    " Tagen"),
-                React.createElement("button", { onClick: () => onGoalField("idealDays", Math.min(21, (t.goal.idealDays || 7) + 1)), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+")),
-            React.createElement("div", { className: "border-t pl-hair pt-3 mono text-xs pl-muted" }, "Trainingsarten"),
-            (t.types || []).map((ty) => (React.createElement("div", { key: ty.id, className: "flex flex-col gap-1.5" },
+                React.createElement("button", { onClick: () => onGoalField(k, Math.min(21, (t.goal[k] || dflt) + 1)), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+")))),
+            React.createElement("div", { className: "border-t pl-hair pt-3 mono text-xs pl-muted" }, "Trainingstage"),
+            (t.types || []).map((ty) => (React.createElement("div", { key: ty.id, className: "flex flex-col gap-1.5 pb-2 border-b pl-hair last:border-0" },
                 React.createElement("div", { className: "flex items-center gap-2" },
                     React.createElement("span", { className: "w-6 h-6 rounded-sm shrink-0", style: { background: ty.color } }),
                     React.createElement("input", { value: ty.name, onChange: (e) => onTypeField(ty.id, "name", e.target.value), className: "pl-input px-2 py-1 rounded text-sm flex-1" }),
                     React.createElement("button", { onClick: () => onTypeField(ty.id, "target", Math.max(0, (ty.target || 0) - 1)), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
-                    React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 26, textAlign: "center" } }, ty.target || 0),
+                    React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 24, textAlign: "center" } }, ty.target || 0),
                     React.createElement("button", { onClick: () => onTypeField(ty.id, "target", Math.min(7, (ty.target || 0) + 1)), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
                     (t.types || []).length > 1 && (React.createElement("button", { onClick: () => onRemoveType(ty.id), className: "pl-muted px-1", "aria-label": "L\u00F6schen" },
                         React.createElement(Trash2, { size: 13 })))),
                 React.createElement("div", { className: "grid gap-1 pl-8", style: { gridTemplateColumns: "repeat(12,1fr)" } }, PALETTE.map((c) => (React.createElement("button", { key: c, onClick: () => onTypeField(ty.id, "color", c), className: "rounded-sm", style: {
                         height: 14, background: c,
                         border: ty.color === c ? "2px solid var(--ink)" : "1px solid rgba(0,0,0,.12)",
-                    }, "aria-label": c }))))))),
-            React.createElement("button", { onClick: onAddType, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-start" }, "+ Trainingsart"),
-            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Tr\u00E4gt eine Trainingsart denselben Namen wie eine Routine, wird die Routine beim Eintragen einer Einheit automatisch mit abgehakt.")))));
+                    }, "aria-label": c })))),
+                React.createElement("div", { className: "pl-8 flex flex-col gap-1" },
+                    (ty.exercises || []).map((ex) => (React.createElement("div", { key: ex.id, className: "flex items-center gap-1" },
+                        React.createElement("input", { value: ex.name, onChange: (e) => onExField(ty.id, ex.id, "name", e.target.value), className: "pl-input px-2 py-1 rounded text-sm flex-1" }),
+                        React.createElement("input", { value: ex.note || "", placeholder: "Notiz", onChange: (e) => onExField(ty.id, ex.id, "note", e.target.value), className: "pl-input px-2 py-1 rounded mono text-xs", style: { width: 96 } }),
+                        React.createElement("button", { onClick: () => onRemoveEx(ty.id, ex.id), className: "pl-muted px-1", "aria-label": "L\u00F6schen" },
+                            React.createElement(Trash2, { size: 12 }))))),
+                    React.createElement("button", { onClick: () => onAddEx(ty.id), className: "pl-btn px-2 py-1 rounded mono text-xs self-start" }, "+ \u00DCbung"))))),
+            React.createElement("button", { onClick: onAddType, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-start" }, "+ Trainingstag"),
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Tr\u00E4gt ein Trainingstag im Feld \u201ERoutine\" denselben Namen wie eine deiner Routinen, wird sie beim Eintragen automatisch mit abgehakt.")))));
 }
-/* Kompakte Übersicht für die Bilanz */
 function TrainingSummary({ training, heuteKey, onOpen }) {
     const t = training || initTraining();
     const st = trainingStats(t, heuteKey);
@@ -3408,10 +3542,9 @@ function TrainingSummary({ training, heuteKey, onOpen }) {
                 "Training \u00B7 letzte ",
                 st.win,
                 " Tage"),
-            React.createElement("span", { className: "text-sm" }, (t.types || []).map((ty) => {
-                const p = st.proTyp[ty.id] || { n: 0, target: 0 };
-                return ty.name + " " + p.n + "/" + p.target;
-            }).join(" · "))),
+            React.createElement("span", { className: "text-sm truncate" }, st.komplett ? "Zyklus komplett"
+                : st.naechster ? "als Nächstes " + st.naechster.ty.name.split(" · ")[0]
+                    : "nichts offen")),
         React.createElement("span", { className: "mono text-2xl font-medium", style: { color: st.komplett ? "#1E6E5A" : st.ist === 0 ? "#A03A5E" : "#8A4E1C" } },
             st.ist,
             "/",
