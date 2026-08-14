@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14j · Coach-Bericht";
+const APP_VERSION = "2026-08-14k · Zusatzgewicht";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -1449,11 +1449,18 @@ function PlannerApp() {
         const ty = (trainingNow.types || []).find((x) => x.id === typeId);
         buzz(14);
         persist((prev) => {
-            const tr = prev.training || initTraining();
+            const tr0 = prev.training || initTraining();
+            const tr = tr0;
+            const vorher = {};
+            for (const ex of (ty && ty.exercises) || []) {
+                if (!ex.kg) continue;
+                const w = letztesGewicht(tr0, ex.id);
+                if (w !== null) vorher[ex.id] = w;
+            }
             const neu = {
                 id: uid(), date: datum, typeId: typeId,
                 dur: ty && /boulder|limit|flow|capacity/i.test(ty.name) ? 120 : 75,
-                rpe: 3, note: "",
+                rpe: 3, note: "", done: [], kg: vorher,
             };
             /* Passende Routine gleich mit abhaken */
             let checks = prev.checks;
@@ -1507,6 +1514,16 @@ function PlannerApp() {
                 const done = x.done || [];
                 return { ...x, done: done.includes(exId) ? done.filter((e) => e !== exId) : [...done, exId] };
             }),
+        }));
+    };
+
+    const setWeight = (sessionId, exId, wert) => {
+        buzz(6);
+        saveTraining((tr) => ({
+            ...tr,
+            sessions: (tr.sessions || []).map((x) => (x.id === sessionId
+                ? { ...x, kg: { ...(x.kg || {}), [exId]: wert } }
+                : x)),
         }));
     };
 
@@ -1836,7 +1853,7 @@ function PlannerApp() {
                     onLog: logSession, onRemoveSession: removeSession, onEditSession: editSession,
                     onCheck: setCheck, onTypeField: setTypeField, onAddType: addTrainingType,
                     onRemoveType: removeTrainingType, onGoalField: setGoalField,
-                    onToggleEx: toggleExercise, onExField: setExField,
+                    onToggleEx: toggleExercise, onWeight: setWeight, onExField: setExField,
                     onAddEx: addExercise, onRemoveEx: removeExercise,
                     onMilestone: setMilestone, onAddMilestone: addMilestone, onRemoveMilestone: removeMilestone, onHinweis: setHinweis,
                     onPlan: (ty) => startPlacing({
@@ -3214,6 +3231,7 @@ function Confetti({ trigger }) {
 "use strict";
 "use strict";
 "use strict";
+"use strict";
 /* ════════════════ Training ════════════════ */
 const TRAINING_VERSION = 2;
 function initTraining() {
@@ -3225,7 +3243,8 @@ function initTraining() {
                 id: "d1", name: "Tag 1 · Kraft & Limit", color: "#A03A5E", target: 1, routine: "Bouldern",
                 exercises: [
                     { id: "d1e1", name: "Limit-Bouldern (7a-Bereich)", note: "volle Pausen zwischen den Versuchen" },
-                    { id: "d1e2", name: "Weighted Pull-ups", note: "Finisher · saubere Form, kein Crimp" },
+                    { id: "d1e2", name: "Weighted Pull-ups", note: "Finisher · saubere Form, kein Crimp", kg: true },
+                    { id: "d1e3", name: "Weighted Dips", note: "Finisher · Gegenspieler zum Ziehen", kg: true },
                 ],
             },
             {
@@ -3270,6 +3289,16 @@ const CHECK_FIELDS = [
 const CHECK_COLORS = ["#1E6E5A", "#7FA894", "#8A4E1C", "#A03A5E"];
 function tagAbstand(a, b) {
     return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+}
+/* Zuletzt verwendetes Gewicht einer Übung */
+function letztesGewicht(t, exId) {
+    const sess = [...(t.sessions || [])].sort((a, b) => (a.date < b.date ? 1 : -1));
+    for (const s of sess) {
+        const w = (s.kg || {})[exId];
+        if (w !== undefined && w !== null)
+            return w;
+    }
+    return null;
 }
 function trainingStats(training, heuteKey) {
     const t = training || initTraining();
@@ -3361,6 +3390,11 @@ function coachBericht(t, heuteKey, tage) {
         L.push(dt(s.date) + " " + ty.name + " · " + (s.dur || 60) + " min · RPE " + (s.rpe || 3));
         const done = (ty.exercises || []).filter((e) => (s.done || []).includes(e.id)).map((e) => e.name);
         const offen = (ty.exercises || []).filter((e) => !(s.done || []).includes(e.id)).map((e) => e.name);
+        const mitKg = (ty.exercises || [])
+            .filter((e) => e.kg && (s.kg || {})[e.id] !== undefined)
+            .map((e) => e.name + " " + s.kg[e.id] + " kg");
+        if (mitKg.length)
+            L.push("  Gewicht: " + mitKg.join(", "));
         if (done.length)
             L.push("  erledigt: " + done.join(", "));
         if (offen.length)
@@ -3399,7 +3433,7 @@ function coachBericht(t, heuteKey, tage) {
     L.push("Was soll ich in den nächsten " + st.win + " Tagen anpassen?");
     return L.join("\n");
 }
-function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSession, onToggleEx, onCheck, onTypeField, onAddType, onRemoveType, onGoalField, onExField, onAddEx, onRemoveEx, onMilestone, onAddMilestone, onRemoveMilestone, onHinweis, onPlan }) {
+function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSession, onToggleEx, onWeight, onCheck, onTypeField, onAddType, onRemoveType, onGoalField, onExField, onAddEx, onRemoveEx, onMilestone, onAddMilestone, onRemoveMilestone, onHinweis, onPlan }) {
     const [edit, setEdit] = useState(false);
     const [offen, setOffen] = useState(null);
     const [spanne, setSpanne] = useState(10);
@@ -3488,7 +3522,7 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                 React.createElement("div", { className: "flex flex-col gap-0.5 mb-3" }, (ty.exercises || []).map((ex) => (React.createElement("div", { key: ex.id, className: "flex items-baseline gap-2" },
                     React.createElement("span", { className: "pl-muted shrink-0", style: { fontSize: 11 } }, "\u00B7"),
                     React.createElement("span", { className: "text-sm flex-1" }, ex.name),
-                    ex.note ? React.createElement("span", { className: "mono text-xs pl-muted truncate", style: { maxWidth: "45%" } }, ex.note) : null)))),
+                    ex.kg ? (React.createElement("span", { className: "mono text-xs", style: { color: ty.color } }, letztesGewicht(t, ex.id) !== null ? letztesGewicht(t, ex.id) + " kg" : "— kg")) : ex.note ? (React.createElement("span", { className: "mono text-xs pl-muted truncate", style: { maxWidth: "45%" } }, ex.note)) : null)))),
                 React.createElement("div", { className: "flex gap-1.5" },
                     React.createElement("button", { onClick: () => onLog(ty.id, heuteKey), className: "flex-1 px-3 py-2 rounded flex items-center justify-center gap-1.5 mono text-xs", style: { background: ty.color, color: "#FFF" } },
                         React.createElement(Plus, { size: 13 }),
@@ -3562,12 +3596,24 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                     auf && (React.createElement("div", { className: "pl-rise pb-3 flex flex-col gap-2" },
                         (ty.exercises || []).map((ex) => {
                             const an = (s.done || []).includes(ex.id);
-                            return (React.createElement("button", { key: ex.id, onClick: () => onToggleEx(s.id, ex.id), className: "flex items-center gap-2 text-left" },
-                                React.createElement("span", { className: `w-4 h-4 rounded-sm shrink-0 flex items-center justify-center ${an ? "pl-pop" : ""}`, style: {
-                                        background: an ? ty.color : "transparent",
-                                        border: `1.5px solid ${an ? ty.color : "var(--line)"}`,
-                                    } }, an && React.createElement(Check, { size: 11, color: "#FFF" })),
-                                React.createElement("span", { className: "text-sm flex-1", style: { textDecoration: an ? "line-through" : "none", opacity: an ? 0.6 : 1 } }, ex.name)));
+                            const w = (s.kg || {})[ex.id];
+                            const wert = w !== undefined && w !== null ? w : (letztesGewicht(t, ex.id) || 0);
+                            return (React.createElement("div", { key: ex.id, className: "flex items-center gap-2" },
+                                React.createElement("button", { onClick: () => onToggleEx(s.id, ex.id), className: "flex items-center gap-2 flex-1 min-w-0 text-left" },
+                                    React.createElement("span", { className: `w-4 h-4 rounded-sm shrink-0 flex items-center justify-center ${an ? "pl-pop" : ""}`, style: {
+                                            background: an ? ty.color : "transparent",
+                                            border: `1.5px solid ${an ? ty.color : "var(--line)"}`,
+                                        } }, an && React.createElement(Check, { size: 11, color: "#FFF" })),
+                                    React.createElement("span", { className: "text-sm flex-1 truncate", style: { textDecoration: an ? "line-through" : "none", opacity: an ? 0.6 : 1 } }, ex.name)),
+                                ex.kg ? (React.createElement("div", { className: "flex items-center shrink-0" },
+                                    React.createElement("button", { onClick: () => onWeight(s.id, ex.id, Math.max(-30, wert - 2.5)), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
+                                    React.createElement("span", { className: "mono text-xs px-1.5 py-1 border-t border-b", style: {
+                                            borderColor: "var(--line)", minWidth: 54, textAlign: "center",
+                                            color: w === undefined ? "var(--muted)" : ty.color,
+                                        } },
+                                        wert,
+                                        " kg"),
+                                    React.createElement("button", { onClick: () => onWeight(s.id, ex.id, Math.min(100, wert + 2.5)), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"))) : null));
                         }),
                         React.createElement("div", { className: "flex items-center gap-2 pt-1" },
                             React.createElement("span", { className: "mono text-xs pl-muted", style: { width: 46 } }, "Dauer"),
@@ -3625,6 +3671,7 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                     (ty.exercises || []).map((ex) => (React.createElement("div", { key: ex.id, className: "flex items-center gap-1" },
                         React.createElement("input", { value: ex.name, onChange: (e) => onExField(ty.id, ex.id, "name", e.target.value), className: "pl-input px-2 py-1 rounded text-sm flex-1" }),
                         React.createElement("input", { value: ex.note || "", placeholder: "Notiz", onChange: (e) => onExField(ty.id, ex.id, "note", e.target.value), className: "pl-input px-2 py-1 rounded mono text-xs", style: { width: 96 } }),
+                        React.createElement("button", { onClick: () => onExField(ty.id, ex.id, "kg", !ex.kg), className: "pl-btn px-1.5 py-1 rounded mono text-xs", style: ex.kg ? { background: ty.color, color: "#FFF", borderColor: ty.color } : {}, title: "Gewicht mitf\u00FChren" }, "kg"),
                         React.createElement("button", { onClick: () => onRemoveEx(ty.id, ex.id), className: "pl-muted px-1", "aria-label": "L\u00F6schen" },
                             React.createElement(Trash2, { size: 12 }))))),
                     React.createElement("button", { onClick: () => onAddEx(ty.id), className: "pl-btn px-2 py-1 rounded mono text-xs self-start" }, "+ \u00DCbung"))))),
