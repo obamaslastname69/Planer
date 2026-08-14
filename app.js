@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14c · 4 Prüfungen bis Oktober";
+const APP_VERSION = "2026-08-14d · Plan wird automatisch aktualisiert";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -630,8 +630,12 @@ const STUDY_WEEKS = [
         ],
         extra: [] },
 ];
+/* Hochzählen, sobald sich Prüfungen oder Wochen im Programm ändern.
+   Beim Laden wird ein älterer gespeicherter Plan dann automatisch ersetzt. */
+const STUDY_PLAN_VERSION = 3;
 function initStudy() {
     return {
+        v: STUDY_PLAN_VERSION,
         exams: STUDY_EXAMS.map((e) => ({ ...e })),
         weeks: STUDY_WEEKS.map((w) => ({
             n: w.n, from: w.from, to: w.to, title: w.title,
@@ -729,12 +733,16 @@ function PlannerApp() {
     /* Laden */
     useEffect(() => {
         (async () => {
+            let planErneuert = false;
             try {
                 const r = await window.storage.get(STORE_KEY);
                 if (r === null || r === void 0 ? void 0 : r.value) {
                     const loaded = { ...DEFAULT_STATE, ...JSON.parse(r.value) };
-                    if (!loaded.study)
+                    if (!loaded.study || loaded.study.v !== STUDY_PLAN_VERSION) {
                         loaded.study = initStudy();
+                        loaded.studyDone = {};
+                        planErneuert = true;
+                    }
                     applyCats(loaded.cats);
                     setState(loaded);
                 }
@@ -744,6 +752,9 @@ function PlannerApp() {
             }
             catch {
                 setState({ ...DEFAULT_STATE, study: initStudy() });
+            }
+            if (planErneuert) {
+                setSync({ status: "ok", msg: "Lernplan auf den neuen Stand gebracht" });
             }
             setLoaded(true);
         })();
