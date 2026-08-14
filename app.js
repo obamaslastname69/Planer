@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14h · Trainingsplan";
+const APP_VERSION = "2026-08-14j · Coach-Bericht";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -1549,6 +1549,15 @@ function PlannerApp() {
         }));
     };
 
+    const addMilestone = () =>
+        saveTraining((tr) => ({
+            ...tr,
+            milestones: [...(tr.milestones || []), { id: uid(), name: "Neues Ziel", ziel: "", wert: 0, einheit: "", erreicht: false }],
+        }));
+
+    const removeMilestone = (id) =>
+        saveTraining((tr) => ({ ...tr, milestones: (tr.milestones || []).filter((x) => x.id !== id) }));
+
     const setHinweis = (text) => saveTraining((tr) => ({ ...tr, hinweis: text }));
 
     const setGoalField = (feld, wert) =>
@@ -1829,7 +1838,7 @@ function PlannerApp() {
                     onRemoveType: removeTrainingType, onGoalField: setGoalField,
                     onToggleEx: toggleExercise, onExField: setExField,
                     onAddEx: addExercise, onRemoveEx: removeExercise,
-                    onMilestone: setMilestone, onHinweis: setHinweis,
+                    onMilestone: setMilestone, onAddMilestone: addMilestone, onRemoveMilestone: removeMilestone, onHinweis: setHinweis,
                     onPlan: (ty) => startPlacing({
                         title: ty.name,
                         cat: Object.keys(CATS).find((k) => CATS[k].label === "Training") || "training",
@@ -3203,6 +3212,8 @@ function Confetti({ trigger }) {
 }
 "use strict";
 "use strict";
+"use strict";
+"use strict";
 /* ════════════════ Training ════════════════ */
 const TRAINING_VERSION = 2;
 function initTraining() {
@@ -3320,9 +3331,80 @@ function bereitschaft(st) {
         return { farbe: "#2B4B8F", text: "Über " + st.win + " Tage Pause — Zeit für eine Einheit" };
     return { farbe: "#1E6E5A", text: "Bereit — nichts spricht dagegen" };
 }
-function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSession, onToggleEx, onCheck, onTypeField, onAddType, onRemoveType, onGoalField, onExField, onAddEx, onRemoveEx, onMilestone, onHinweis, onPlan }) {
+/* Wochenbericht für den Coach — reiner Text zum Einfügen */
+function coachBericht(t, heuteKey, tage) {
+    const st = trainingStats(t, heuteKey);
+    const dt = (k) => k.slice(8) + "." + k.slice(5, 7) + ".";
+    const L = [];
+    L.push("TRAININGSBERICHT " + dt(heuteKey) + " (letzte " + tage + " Tage)");
+    L.push("");
+    L.push("ZYKLUS");
+    L.push("Ziel: " + st.soll + " Einheiten in " + st.win + " Tagen, am besten in " + st.ideal);
+    L.push("Stand: " + st.ist + "/" + st.soll
+        + " — " + (t.types || []).map((ty) => {
+        const p = st.proTyp[ty.id] || { n: 0, target: 0 };
+        return ty.name.split(" · ")[0] + " " + p.n + "/" + p.target;
+    }).join(", "));
+    L.push("Letzte Einheit: " + (st.tageSeit === null ? "keine"
+        : st.tageSeit === 0 ? "heute" : "vor " + st.tageSeit + " Tagen"));
+    if (st.sprung !== null) {
+        L.push("Belastung letzte 7 Tage: " + Math.round(st.sprung * 100) + " % vom 4-Wochen-Schnitt");
+    }
+    L.push("");
+    const sess = (t.sessions || []).filter((x) => tagAbstand(x.date, heuteKey) < tage)
+        .sort((a, b) => (a.date < b.date ? 1 : -1));
+    L.push("EINHEITEN (" + sess.length + ")");
+    if (sess.length === 0)
+        L.push("keine");
+    for (const s of sess) {
+        const ty = (t.types || []).find((x) => x.id === s.typeId) || { name: "?", exercises: [] };
+        L.push(dt(s.date) + " " + ty.name + " · " + (s.dur || 60) + " min · RPE " + (s.rpe || 3));
+        const done = (ty.exercises || []).filter((e) => (s.done || []).includes(e.id)).map((e) => e.name);
+        const offen = (ty.exercises || []).filter((e) => !(s.done || []).includes(e.id)).map((e) => e.name);
+        if (done.length)
+            L.push("  erledigt: " + done.join(", "));
+        if (offen.length)
+            L.push("  offen: " + offen.join(", "));
+        if (s.note)
+            L.push("  Notiz: " + s.note);
+    }
+    L.push("");
+    L.push("KÖRPER (0 = gut, 3 = schlecht)");
+    const ck = Object.keys(t.checks || {})
+        .filter((k) => tagAbstand(k, heuteKey) < tage && tagAbstand(k, heuteKey) >= 0)
+        .sort().reverse();
+    if (ck.length === 0)
+        L.push("nichts erfasst");
+    for (const k of ck) {
+        const c = t.checks[k];
+        L.push(dt(k) + " " + CHECK_FIELDS
+            .filter((f) => c[f.k] !== undefined)
+            .map((f) => f.label + " " + c[f.k])
+            .join(" · "));
+    }
+    L.push("");
+    L.push("ZIELE");
+    for (const m of t.milestones || []) {
+        L.push((m.erreicht ? "[x] " : "[ ] ") + m.name
+            + (m.ziel ? " — " + m.ziel : "")
+            + (m.einheit ? " — aktuell " + (m.wert || 0) + " " + m.einheit : ""));
+    }
+    if (t.hinweis) {
+        L.push("");
+        L.push("EINSCHRÄNKUNG");
+        L.push(t.hinweis);
+    }
+    L.push("");
+    L.push("FRAGE");
+    L.push("Was soll ich in den nächsten " + st.win + " Tagen anpassen?");
+    return L.join("\n");
+}
+function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSession, onToggleEx, onCheck, onTypeField, onAddType, onRemoveType, onGoalField, onExField, onAddEx, onRemoveEx, onMilestone, onAddMilestone, onRemoveMilestone, onHinweis, onPlan }) {
     const [edit, setEdit] = useState(false);
     const [offen, setOffen] = useState(null);
+    const [spanne, setSpanne] = useState(10);
+    const [bericht, setBericht] = useState("");
+    const [kopiert, setKopiert] = useState(false);
     const t = training || initTraining();
     const st = trainingStats(t, heuteKey);
     const ber = bereitschaft(st);
@@ -3499,6 +3581,22 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                             React.createElement("div", { className: "flex gap-1 flex-1" }, [1, 2, 3, 4, 5].map((r) => (React.createElement("button", { key: r, onClick: () => onEditSession(s.id, { rpe: r }), className: "pl-btn flex-1 py-1 rounded mono text-xs", style: (s.rpe || 3) === r ? { background: ty.color, color: "#FFF", borderColor: ty.color } : {} }, r))))),
                         React.createElement("input", { value: s.note || "", placeholder: "Notiz \u2014 Projekte, S\u00E4tze, Finger", onChange: (e) => onEditSession(s.id, { note: e.target.value }), className: "pl-input px-2 py-1.5 rounded text-sm" })))));
             })))),
+        React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2" },
+            React.createElement("div", { className: "flex items-center gap-1" },
+                React.createElement("span", { className: "mono text-xs pl-muted flex-1" }, "Bericht f\u00FCr den Coach"),
+                [7, 10, 14].map((n) => (React.createElement("button", { key: n, onClick: () => { setSpanne(n); setBericht(""); }, className: "pl-btn px-2 py-1 rounded mono text-xs", style: spanne === n ? { background: "var(--ink)", color: "var(--paper)", borderColor: "var(--ink)" } : {} },
+                    n,
+                    " T")))),
+            React.createElement("button", { onClick: () => {
+                    const txt = coachBericht(t, heuteKey, spanne);
+                    setBericht(txt);
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(txt)
+                            .then(() => { setKopiert(true); buzz(12); setTimeout(() => setKopiert(false), 2500); })
+                            .catch(() => { });
+                    }
+                }, className: "px-3 py-2.5 rounded mono text-xs", style: { background: kopiert ? "#1E6E5A" : "var(--ink)", color: "var(--paper)" } }, kopiert ? "kopiert — im Coach einfügen" : "Bericht erzeugen & kopieren"),
+            bericht ? (React.createElement("textarea", { readOnly: true, value: bericht, onFocus: (e) => e.target.select(), className: "pl-input px-2 py-2 rounded mono", style: { fontSize: 11, lineHeight: "15px", height: 190, resize: "vertical" } })) : (React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Erzeugt einen kurzen Stand: Zyklus, Einheiten mit \u00DCbungen, K\u00F6rperwerte, Ziele und deine Einschr\u00E4nkung. Einmal die Woche in den Coach einf\u00FCgen, dann ist er auf Stand."))),
         React.createElement("button", { onClick: () => setEdit(!edit), className: "pl-btn px-3 py-2 rounded mono text-xs" }, edit ? "Einstellungen schließen" : "Tage, Übungen & Ziel bearbeiten"),
         edit && (React.createElement("div", { className: "pl-card pl-rise rounded p-3 flex flex-col gap-3" },
             React.createElement("div", { className: "mono text-xs pl-muted" }, "Zielfenster"),
@@ -3531,7 +3629,16 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                             React.createElement(Trash2, { size: 12 }))))),
                     React.createElement("button", { onClick: () => onAddEx(ty.id), className: "pl-btn px-2 py-1 rounded mono text-xs self-start" }, "+ \u00DCbung"))))),
             React.createElement("button", { onClick: onAddType, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-start" }, "+ Trainingstag"),
-            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Tr\u00E4gt ein Trainingstag im Feld \u201ERoutine\" denselben Namen wie eine deiner Routinen, wird sie beim Eintragen automatisch mit abgehakt.")))));
+            React.createElement("div", { className: "border-t pl-hair pt-3 mono text-xs pl-muted" }, "Ziele"),
+            (t.milestones || []).map((m) => (React.createElement("div", { key: m.id, className: "flex flex-col gap-1 pb-2 border-b pl-hair last:border-0" },
+                React.createElement("div", { className: "flex items-center gap-1" },
+                    React.createElement("input", { value: m.name, onChange: (e) => onMilestone(m.id, { name: e.target.value }), placeholder: "Ziel", className: "pl-input px-2 py-1 rounded text-sm flex-1" }),
+                    React.createElement("input", { value: m.einheit || "", placeholder: "kg", onChange: (e) => onMilestone(m.id, { einheit: e.target.value }), className: "pl-input px-2 py-1 rounded mono text-xs", style: { width: 48 } }),
+                    React.createElement("button", { onClick: () => onRemoveMilestone(m.id), className: "pl-muted px-1", "aria-label": "Ziel l\u00F6schen" },
+                        React.createElement(Trash2, { size: 12 }))),
+                React.createElement("input", { value: m.ziel || "", placeholder: "Woran erkennst du, dass es erreicht ist?", onChange: (e) => onMilestone(m.id, { ziel: e.target.value }), className: "pl-input px-2 py-1 rounded mono text-xs" })))),
+            React.createElement("button", { onClick: onAddMilestone, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-start" }, "+ Ziel"),
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Ein Ziel mit Einheit (kg, s, Wdh.) bekommt oben Plus- und Minuskn\u00F6pfe zum Mitz\u00E4hlen. Ohne Einheit ist es nur abhakbar. Tr\u00E4gt ein Trainingstag denselben Namen wie eine Routine, wird sie beim Eintragen automatisch mit abgehakt.")))));
 }
 function TrainingSummary({ training, heuteKey, onOpen }) {
     const t = training || initTraining();
