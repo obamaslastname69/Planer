@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14d · Plan wird automatisch aktualisiert";
+const APP_VERSION = "2026-08-14f · Bilanz komplett bearbeitbar";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -1134,7 +1134,8 @@ function PlannerApp() {
         for (const r of state.routines) {
             routineCount[r.id] = weekKeys.filter((k) => (state.checks[k] || []).includes(r.id)).length;
         }
-        return { planned, done, skipped, moved, byCat, pending, routineCount };
+        const alle = [...mine].sort((a, b) => a.day === b.day ? a.start - b.start : (a.day < b.day ? -1 : 1));
+        return { planned, done, skipped, moved, byCat, pending, alle, routineCount };
     }, [state.blocks, state.routines, state.checks, weekKeys, now]);
     /* Blöcke pro Tag */
     /* Google-IDs, die zu eigenen Blöcken gehören - die dürfen nicht doppelt erscheinen */
@@ -1694,7 +1695,7 @@ function PlannerApp() {
                         weekLabel),
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, 7)), className: "pl-btn p-2 rounded", "aria-label": "Woche vor" },
                         React.createElement(ChevronRight, { size: 16 }))),
-                React.createElement(ReviewPanel, { stats: weekStats, routines: state.routines, yearGrid: yearGrid, onPickWeek: (d) => setWeekStart(mondayOf(d)), onDemo: loadDemo, onReset: resetAll, onConfetti: testConfetti, onStatus: setBlockStatus }),
+                React.createElement(ReviewPanel, { stats: weekStats, routines: state.routines, yearGrid: yearGrid, onPickWeek: (d) => setWeekStart(mondayOf(d)), onDemo: loadDemo, onReset: resetAll, onConfetti: testConfetti, onStatus: setBlockStatus, onOpen: (id) => setDetailId(id) }),
                 React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing }),
                 React.createElement(CatPanel, { cats: catsNow, onField: setCatField, onAdd: addCat, onRemove: removeCat }),
                 React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
@@ -2001,6 +2002,19 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
     if (!wk)
         return React.createElement("p", { className: "mono text-xs pl-muted" }, "Kein Lernplan vorhanden.");
     const exams = [...(examsRaw || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+    /* Alle Fächer mit Beschreibung, Reihenfolge nach Prüfungsdatum */
+    const fachListe = useMemo(() => {
+        const reihen = {};
+        exams.forEach((e, i) => {
+            const k = Object.keys(SUBJECTS).find((id) => SUBJECTS[id].title === e.title || e.title.indexOf(SUBJECTS[id].title) === 0
+                || SUBJECTS[id].title.indexOf(e.title) === 0);
+            if (k && reihen[k] === undefined)
+                reihen[k] = i;
+        });
+        return Object.keys(SUBJECTS)
+            .filter((id) => SUBJECTS[id].note)
+            .sort((a, b) => { var _a, _b; return ((_a = reihen[a]) !== null && _a !== void 0 ? _a : 99) - ((_b = reihen[b]) !== null && _b !== void 0 ? _b : 99); });
+    }, [exams]);
     const mustDone = wk.must.filter((t) => done[t.id]).length;
     const mustMin = wk.must.reduce((s, t) => s + t.m, 0);
     const doneMin = wk.must.reduce((s, t) => s + (done[t.id] ? t.m : 0), 0);
@@ -2090,7 +2104,7 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
                 " Aufgabe")))),
         !edit && (React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "F\u00E4cher"),
-            React.createElement("div", { className: "flex flex-col" }, ["molbio", "thermo", "prozess", "allergien"].map((id) => {
+            React.createElement("div", { className: "flex flex-col" }, fachListe.map((id) => {
                 const sub = SUBJECTS[id];
                 const open = openSubject === id;
                 return (React.createElement("div", { key: id, className: "border-b pl-hair last:border-0" },
@@ -2427,29 +2441,41 @@ function Metric({ label, value, color }) {
         React.createElement("div", { className: "mono text-xs pl-muted" }, label),
         React.createElement("div", { className: "mono text-sm font-medium", style: color ? { color } : {} }, value)));
 }
-function ReviewPanel({ stats, routines, yearGrid = [], onPickWeek, onStatus, onDemo, onReset, onConfetti }) {
+function ReviewPanel({ stats, routines, yearGrid = [], onPickWeek, onStatus, onOpen, onDemo, onReset, onConfetti }) {
     const [confirm, setConfirm] = useState(null);
-    const { planned, done, skipped, byCat, pending, routineCount } = stats;
+    const [zeige, setZeige] = useState("offen");
+    const { planned, done, skipped, byCat, pending, alle, routineCount } = stats;
+    const liste = zeige === "offen" ? pending : (alle || []);
     const quote = planned ? Math.round((done / planned) * 100) : 0;
     const cats = Object.keys(byCat).sort((a, b) => byCat[b].planned - byCat[a].planned);
     return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-4" },
-        pending.length > 0 && (React.createElement("div", null,
-            React.createElement("div", { className: "mono text-xs pl-muted mb-2" },
-                "Warten auf R\u00FCckmeldung (",
-                pending.length,
-                ")"),
-            React.createElement("div", { className: "flex flex-col gap-1.5" }, pending.slice(0, 8).map((b) => {
-                var _a;
-                return (React.createElement("div", { key: b.id, className: "flex items-center gap-2" },
-                    React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: (_a = CATS[b.cat]) === null || _a === void 0 ? void 0 : _a.color } }),
-                    React.createElement("span", { className: "mono text-xs pl-muted shrink-0" },
-                        DAY_NAMES[(new Date(b.day + "T00:00:00").getDay() + 6) % 7],
-                        " ",
-                        minsToLabel(b.start)),
-                    React.createElement("span", { className: "text-sm truncate flex-1" }, b.title),
-                    React.createElement(StatusButtons, { current: b.status, onPick: (s) => onStatus(b.id, s) })));
-            })))),
-        React.createElement("div", { className: pending.length > 0 ? "border-t pl-hair pt-3" : "" },
+        React.createElement("div", null,
+            React.createElement("div", { className: "flex items-center gap-1 mb-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted flex-1" },
+                    zeige === "offen" ? "Offen (" + pending.length + ")" : "Alle Bl\u00F6cke (" + liste.length + ")"),
+                [["offen", "offen"], ["alle", "alle"]].map(([k, lbl]) => (React.createElement("button", {
+                    key: k, onClick: () => setZeige(k),
+                    className: "pl-btn px-2 py-1 rounded mono text-xs",
+                    style: zeige === k ? { background: "var(--ink)", color: "var(--paper)", borderColor: "var(--ink)" } : {}
+                }, lbl)))),
+            liste.length === 0
+                ? React.createElement("p", { className: "mono text-xs pl-muted py-1" },
+                    zeige === "offen"
+                        ? "Nichts offen \u2014 alles bewertet."
+                        : "Diese Woche stehen keine eigenen Bl\u00F6cke im Plan.")
+                : React.createElement("div", { className: "flex flex-col gap-1.5" }, liste.map((b) => (React.createElement("div", { key: b.id, className: "flex items-center gap-2" },
+                    React.createElement("button", { onClick: () => onOpen && onOpen(b.id), className: "flex items-center gap-2 flex-1 min-w-0 text-left" },
+                        React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: blockColor(b) } }),
+                        React.createElement("span", { className: "mono text-xs pl-muted shrink-0" },
+                            DAY_NAMES[(new Date(b.day + "T00:00:00").getDay() + 6) % 7],
+                            " ",
+                            minsToLabel(b.start)),
+                        React.createElement("span", {
+                            className: "text-sm truncate flex-1",
+                            style: { textDecoration: b.status === "skipped" ? "line-through" : "none", opacity: b.status ? 0.7 : 1 }
+                        }, b.title || "Ohne Titel")),
+                    React.createElement(StatusButtons, { current: b.status, onPick: (st) => onStatus(b.id, st) })))))),
+        React.createElement("div", { className: "border-t pl-hair pt-3" },
             React.createElement("div", { className: "flex items-baseline justify-between mb-2" },
                 React.createElement("span", { className: "mono text-xs pl-muted" }, "Diese Woche"),
                 React.createElement("span", { className: "mono text-2xl font-medium", style: { color: quote >= 70 ? "#1E6E5A" : quote >= 40 ? "#8A4E1C" : "#A03A5E" } },
