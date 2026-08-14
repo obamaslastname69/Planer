@@ -63,7 +63,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14k · Zusatzgewicht";
+const APP_VERSION = "2026-08-14l · Dips, Gewicht, Migration";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -735,12 +735,14 @@ function PlannerApp() {
     useEffect(() => {
         (async () => {
             let planErneuert = false;
+            let trainErneuert = false;
             try {
                 const r = await window.storage.get(STORE_KEY);
                 if (r === null || r === void 0 ? void 0 : r.value) {
                     const loaded = { ...DEFAULT_STATE, ...JSON.parse(r.value) };
                     if (!loaded.training || loaded.training.v !== TRAINING_VERSION) {
-                        loaded.training = initTraining();
+                        loaded.training = migrateTraining(loaded.training);
+                        trainErneuert = true;
                     }
                     if (!loaded.study || loaded.study.v !== STUDY_PLAN_VERSION) {
                         loaded.study = initStudy();
@@ -759,6 +761,9 @@ function PlannerApp() {
             }
             if (planErneuert) {
                 setSync({ status: "ok", msg: "Lernplan auf den neuen Stand gebracht" });
+                }
+                if (trainErneuert) {
+                    setSync({ status: "ok", msg: "Trainingsplan erweitert — Einheiten bleiben erhalten" });
             }
             setLoaded(true);
         })();
@@ -3232,8 +3237,9 @@ function Confetti({ trigger }) {
 "use strict";
 "use strict";
 "use strict";
+"use strict";
 /* ════════════════ Training ════════════════ */
-const TRAINING_VERSION = 2;
+const TRAINING_VERSION = 3;
 function initTraining() {
     return {
         v: TRAINING_VERSION,
@@ -3277,6 +3283,46 @@ function initTraining() {
         ],
         sessions: [],
         checks: {},
+    };
+}
+/* Sanfte Umstellung: eigene Einheiten und Änderungen bleiben,
+   neue Standard-Übungen und Merkmale werden nachgetragen. */
+function migrateTraining(alt) {
+    if (!alt)
+        return initTraining();
+    const std = initTraining();
+    const typen = [...(alt.types || [])];
+    for (const sTy of std.types) {
+        const vorhanden = typen.find((x) => x.id === sTy.id);
+        if (!vorhanden) {
+            typen.push({ ...sTy });
+            continue;
+        }
+        const ex = [...(vorhanden.exercises || [])];
+        for (const sEx of sTy.exercises || []) {
+            const da = ex.find((x) => x.id === sEx.id);
+            if (!da)
+                ex.push({ ...sEx });
+            else if (sEx.kg && !da.kg)
+                da.kg = true;
+        }
+        vorhanden.exercises = ex;
+    }
+    const ziele = [...(alt.milestones || [])];
+    for (const sM of std.milestones) {
+        if (!ziele.find((x) => x.id === sM.id))
+            ziele.push({ ...sM });
+    }
+    return {
+        ...std,
+        ...alt,
+        v: TRAINING_VERSION,
+        types: typen,
+        milestones: ziele,
+        goal: { ...std.goal, ...(alt.goal || {}) },
+        sessions: alt.sessions || [],
+        checks: alt.checks || {},
+        hinweis: alt.hinweis !== undefined ? alt.hinweis : std.hinweis,
     };
 }
 /* Körperwerte: 0 ist gut, 3 ist schlecht */
