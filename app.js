@@ -1,6 +1,28 @@
 "use strict";
+/* ── Erscheinungsbild ──────────────────────────────────────
+   Farben sind für helles Papier gewählt. Auf dunklem Grund
+   werden sie aufgehellt, sonst sind sie als Text unlesbar. */
+let DARK = true;
+
+function lift(hex) {
+    if (!DARK || typeof hex !== "string" || hex.charAt(0) !== "#" || hex.length < 7) return hex;
+    const n = parseInt(hex.slice(1), 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    if (lum > 0.62) return hex;
+    const f = 0.42;
+    r = Math.round(r + (255 - r) * f);
+    g = Math.round(g + (255 - g) * f);
+    b = Math.round(b + (255 - b) * f);
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+/* Flächen: heller Grund braucht andere Grautöne als dunkler */
+function surf(hell, dunkel) { return DARK ? dunkel : hell; }
+
+
 /* ── Icons: lucide-Pfade, lokal eingebettet ── */
-const ICONS = { "ChevronLeft": "<path d=\"m15 18-6-6 6-6\"/>", "ChevronRight": "<path d=\"m9 18 6-6-6-6\"/>", "Plus": "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>", "Check": "<path d=\"M20 6 9 17l-5-5\"/>", "X": "<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>", "ArrowRight": "<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>", "Trash2": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><path d=\"M10 11v6\"/><path d=\"M14 11v6\"/>", "RefreshCw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>", "Calendar": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/><path d=\"M16 2v4\"/><path d=\"M8 2v4\"/><path d=\"M3 10h18\"/>", "List": "<path d=\"M8 6h13\"/><path d=\"M8 12h13\"/><path d=\"M8 18h13\"/><path d=\"M3 6h.01\"/><path d=\"M3 12h.01\"/><path d=\"M3 18h.01\"/>", "Repeat": "<path d=\"m17 2 4 4-4 4\"/><path d=\"M3 11v-1a4 4 0 0 1 4-4h14\"/><path d=\"m7 22-4-4 4-4\"/><path d=\"M21 13v1a4 4 0 0 1-4 4H3\"/>", "UploadCloud": "<path d=\"M12 13v8\"/><path d=\"M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24\"/><path d=\"m8 17 4-4 4 4\"/>", "AlertCircle": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4\"/><path d=\"M12 16h.01\"/>", "LayoutGrid": "<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>", "Target": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>", "Undo2": "<path d=\"M9 14 4 9l5-5\"/><path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\"/>", "Timer": "<circle cx=\"12\" cy=\"13\" r=\"8\"/><path d=\"M12 9v4l2 2\"/><path d=\"M9 2h6\"/>", "Flame": "<path d=\"M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z\"/>" };
+const ICONS = { "ChevronLeft": "<path d=\"m15 18-6-6 6-6\"/>", "ChevronRight": "<path d=\"m9 18 6-6-6-6\"/>", "Plus": "<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>", "Check": "<path d=\"M20 6 9 17l-5-5\"/>", "X": "<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>", "ArrowRight": "<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>", "Trash2": "<path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/><path d=\"M10 11v6\"/><path d=\"M14 11v6\"/>", "RefreshCw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>", "Calendar": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/><path d=\"M16 2v4\"/><path d=\"M8 2v4\"/><path d=\"M3 10h18\"/>", "List": "<path d=\"M8 6h13\"/><path d=\"M8 12h13\"/><path d=\"M8 18h13\"/><path d=\"M3 6h.01\"/><path d=\"M3 12h.01\"/><path d=\"M3 18h.01\"/>", "Repeat": "<path d=\"m17 2 4 4-4 4\"/><path d=\"M3 11v-1a4 4 0 0 1 4-4h14\"/><path d=\"m7 22-4-4 4-4\"/><path d=\"M21 13v1a4 4 0 0 1-4 4H3\"/>", "UploadCloud": "<path d=\"M12 13v8\"/><path d=\"M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24\"/><path d=\"m8 17 4-4 4 4\"/>", "AlertCircle": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4\"/><path d=\"M12 16h.01\"/>", "LayoutGrid": "<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>", "Target": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"6\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/>", "Undo2": "<path d=\"M9 14 4 9l5-5\"/><path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\"/>", "Moon": "<path d=\"M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z\"/>", "Sun": "<circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4\"/>", "Timer": "<circle cx=\"12\" cy=\"13\" r=\"8\"/><path d=\"M12 9v4l2 2\"/><path d=\"M9 2h6\"/>", "Flame": "<path d=\"M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z\"/>" };
 function mkIcon(name) {
     return function Icon(props) {
         const p = props || {};
@@ -31,6 +53,8 @@ const Target = mkIcon("Target");
 const Flame = mkIcon("Flame");
 const Undo2 = mkIcon("Undo2");
 const Timer = mkIcon("Timer");
+const Moon = mkIcon("Moon");
+const Sun = mkIcon("Sun");
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 /* ────────────────────────────────────────────────────────────
    Design-Tokens
@@ -39,12 +63,12 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
    Logik), Titel in Space Grotesk.
 ──────────────────────────────────────────────────────────── */
 const DEFAULT_CATS = {
-    uni: { label: "Uni", color: "#2B4B8F" },
-    fokus: { label: "Lernen", color: "#5B3FA0" },
-    arbeit: { label: "Arbeit", color: "#8A4E1C" },
-    training: { label: "Training", color: "#1E6E5A" },
-    privat: { label: "Privat", color: "#A03A5E" },
-    glaube: { label: "Glauben", color: "#12657F" },
+    uni: { label: "Uni", color: lift("#2B4B8F") },
+    fokus: { label: "Lernen", color: lift("#5B3FA0") },
+    arbeit: { label: "Arbeit", color: lift("#8A4E1C") },
+    training: { label: "Training", color: lift("#1E6E5A") },
+    privat: { label: "Privat", color: lift("#A03A5E") },
+    glaube: { label: "Glauben", color: lift("#12657F") },
 };
 /* Wird beim Laden aus den gespeicherten Daten befüllt */
 let CATS = { ...DEFAULT_CATS };
@@ -63,7 +87,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14l · Dips, Gewicht, Migration";
+const APP_VERSION = "2026-08-14m · Dunkles Erscheinungsbild";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -223,17 +247,33 @@ function gcAuth(silent) {
             return resolve(gcToken);
         if (!(window.google && window.google.accounts && window.google.accounts.oauth2))
             return reject(new Error("Google-Bibliothek nicht geladen"));
+        let fertig = false;
+        const wecker = setTimeout(() => {
+            if (!fertig) {
+                fertig = true;
+                reject(new Error("Anmeldung ohne Antwort — Fenster geschlossen oder Popup blockiert?"));
+            }
+        }, 90000);
         const client = window.google.accounts.oauth2.initTokenClient({
             client_id: GOOGLE_CLIENT_ID,
             scope: GC_SCOPE,
             prompt: "",
             callback: (res) => {
-                if (res.error)
-                    return reject(new Error(res.error));
+                if (fertig) return;
+                fertig = true; clearTimeout(wecker);
+                if (res.error) return reject(new Error(res.error));
                 gcStoreToken(res.access_token, res.expires_in);
                 resolve(gcToken);
             },
-            error_callback: (e) => reject(new Error((e && e.type) || "Anmeldung abgebrochen")),
+            error_callback: (e) => {
+                if (fertig) return;
+                fertig = true; clearTimeout(wecker);
+                const typ = (e && e.type) || "";
+                reject(new Error(
+                    typ === "popup_closed" ? "Fenster geschlossen"
+                    : typ === "popup_failed_to_open" ? "Popup blockiert — für diese Seite erlauben"
+                    : typ || "Anmeldung abgebrochen"));
+            },
         });
         client.requestAccessToken();
     });
@@ -750,6 +790,7 @@ function PlannerApp() {
                         planErneuert = true;
                     }
                     applyCats(loaded.cats);
+                    DARK = (loaded.theme || "dark") === "dark";
                     setState(loaded);
                 }
                 else {
@@ -1020,7 +1061,7 @@ function PlannerApp() {
                 id: uid(),
                 title: trainStats.ist + " Einheiten",
                 sub: "Zyklus komplett in " + trainStats.win + " Tagen",
-                color: "#1E6E5A",
+                color: lift("#1E6E5A"),
             });
             buzz([18, 60, 25]);
         }
@@ -1396,6 +1437,38 @@ function PlannerApp() {
         cat: "uni", est: task.m, studyKey: task.id,
     });
     /* Abgleich mit Google Drive: der neuere Stand gewinnt */
+    /* Enthält dieser Stand überhaupt eigene Eingaben? */
+    const inhaltLeer = (d) => !d || (
+        (d.blocks || []).length === 0 &&
+        (d.todos || []).length === 0 &&
+        (d.projects || []).length === 0 &&
+        Object.keys(d.checks || {}).length === 0 &&
+        ((d.training || {}).sessions || []).length === 0
+    );
+
+    /* Ausdrücklich in eine Richtung, wenn der Vergleich danebenliegt */
+    const cloudLaden = async () => {
+        setCloud({ state: "busy", msg: "wird geladen…" });
+        try {
+            const remote = await driveLoad();
+            if (!remote) { setCloud({ state: "error", msg: "Keine Daten im Konto gefunden" }); return; }
+            persistLocal({ ...DEFAULT_STATE, ...remote });
+            cloudRef.current.armed = true;
+            setCloud({ state: "ok", msg: "Cloud-Stand übernommen" });
+            buzz(10);
+        } catch (e) { setCloud({ state: "error", msg: e.message }); }
+    };
+
+    const cloudSpeichern = async () => {
+        setCloud({ state: "busy", msg: "wird hochgeladen…" });
+        try {
+            await driveSave({ ...state, updatedAt: Date.now() });
+            cloudRef.current.armed = true;
+            setCloud({ state: "ok", msg: "dieses Gerät hochgeladen" });
+            buzz(10);
+        } catch (e) { setCloud({ state: "error", msg: e.message }); }
+    };
+
     const syncCloud = useCallback(async (silent) => {
         if (!gcConfigured()) {
             if (!silent)
@@ -1407,16 +1480,40 @@ function PlannerApp() {
             const remote = await driveLoad();
             const localAt = state.updatedAt || 0;
             const remoteAt = (remote && remote.updatedAt) || 0;
-            if (remote && remoteAt > localAt) {
+            const zeit = (ms) => ms ? new Date(ms).toLocaleString("de-AT",
+                { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+
+            if (!remote) {
+                /* Noch keine Datei im Konto — hier liegt der häufigste Stolperstein:
+                   ein anderes Google-Konto sieht einen leeren Ablageordner. */
+                if (inhaltLeer(state)) {
+                    setCloud({ state: "error", msg: "Nichts gefunden — anderes Google-Konto?" });
+                    return;
+                }
+                await driveSave({ ...state, updatedAt: localAt || Date.now() });
+                setCloud({ state: "ok", msg: "erstmals hochgeladen" });
+                cloudRef.current.armed = true;
+                return;
+            }
+
+            /* Ist hier praktisch nichts eingetragen, gewinnt immer die Cloud */
+            if (inhaltLeer(state) && !inhaltLeer(remote)) {
                 persistLocal({ ...DEFAULT_STATE, ...remote });
-                setCloud({ state: "ok", msg: "neuerer Stand geladen" });
+                setCloud({ state: "ok", msg: "Stand vom " + zeit(remoteAt) + " geladen" });
+                cloudRef.current.armed = true;
+                return;
+            }
+
+            if (remoteAt > localAt) {
+                persistLocal({ ...DEFAULT_STATE, ...remote });
+                setCloud({ state: "ok", msg: "geladen — Stand " + zeit(remoteAt) });
             }
             else if (localAt > remoteAt) {
                 await driveSave({ ...state, updatedAt: localAt });
-                setCloud({ state: "ok", msg: "hochgeladen" });
+                setCloud({ state: "ok", msg: "hochgeladen — Cloud war " + zeit(remoteAt) });
             }
             else {
-                setCloud({ state: "ok", msg: "alles auf demselben Stand" });
+                setCloud({ state: "ok", msg: "gleicher Stand" });
             }
             cloudRef.current.armed = true;
         }
@@ -1562,7 +1659,7 @@ function PlannerApp() {
     const setMilestone = (id, patch) => {
         const m = (trainingNow.milestones || []).find((x) => x.id === id);
         if (m && patch.erreicht && !m.erreicht) {
-            setCelebration({ id: uid(), title: m.name, sub: "Ziel erreicht", color: "#1E6E5A" });
+            setCelebration({ id: uid(), title: m.name, sub: "Ziel erreicht", color: lift("#1E6E5A") });
             buzz([18, 60, 25]);
         }
         saveTraining((tr) => ({
@@ -1665,6 +1762,14 @@ function PlannerApp() {
     const removeTodo = (id) => persist({ ...state, todos: state.todos.filter((t) => t.id !== id) });
     /* Routinen */
     const addRoutine = (title, cat) => persist({ ...state, routines: [...state.routines, { id: uid(), title, cat }] });
+    const dark = (state.theme || "dark") === "dark";
+    DARK = dark;
+    const toggleTheme = () => {
+        DARK = !dark;
+        persist((prev) => ({ ...prev, theme: dark ? "light" : "dark" }));
+        buzz(8);
+    };
+
     const catsNow = state.cats || DEFAULT_CATS;
     const saveCats = (next) => {
         applyCats(next);
@@ -1695,12 +1800,13 @@ function PlannerApp() {
         return (React.createElement("div", { className: "pl-root flex items-center justify-center", style: { minHeight: "100vh" } },
             React.createElement("span", { className: "mono text-sm pl-muted" }, "Plan wird geladen\u2026")));
     }
-    return (React.createElement("div", { className: "pl-root" },
+    return (React.createElement("div", { className: "pl-root" + (dark ? " pl-dark" : "") },
         React.createElement("style", null, `
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
         .pl-root{
           --paper:#E4E6E1; --card:#FAFAF8; --ink:#191D1A; --muted:#6F7A72;
           --line:#CBD0C9; --line-soft:#DDE0DA;
+          --hover:#F0F1EE; --stripe:rgba(255,255,255,.5);
           background:var(--paper); color:var(--ink); min-height:100vh;
           font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
           -webkit-font-smoothing:antialiased;
@@ -1712,7 +1818,16 @@ function PlannerApp() {
         .pl-hair{border-color:var(--line-soft);}
         .pl-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);
           transition:background .12s ease,border-color .12s ease;}
-        .pl-btn:hover{background:#F0F1EE;border-color:var(--muted);}
+        .pl-btn:hover{background:var(--hover);border-color:var(--muted);}
+        .pl-dark{
+          --paper:#15181A; --card:#1E2225; --ink:#E7EAE5; --muted:#939C95;
+          --line:#353C3D; --line-soft:#272C2E;
+          --hover:#282E30; --stripe:rgba(255,255,255,.09);
+          color-scheme:dark;
+        }
+        .pl-dark .pl-sheet{box-shadow:0 18px 40px -12px rgba(0,0,0,.6);}
+        .pl-dark input,.pl-dark textarea{color:var(--ink);}
+        .pl-dark input::placeholder,.pl-dark textarea::placeholder{color:var(--muted);}
         .pl-btn:focus-visible,.pl-tap:focus-visible{outline:2px solid #2B4B8F;outline-offset:2px;}
         .pl-slot{transition:background .1s ease;}
         .pl-slot:hover{background:rgba(43,75,143,.07);}
@@ -1720,7 +1835,7 @@ function PlannerApp() {
         .pl-block{border-radius:3px;overflow:hidden;text-align:left;width:100%;
           transition:filter .12s ease;}
         .pl-block:hover{filter:brightness(.96);}
-        .pl-ext{background-image:repeating-linear-gradient(135deg,transparent 0 5px,rgba(255,255,255,.5) 5px 6px);}
+        .pl-ext{background-image:repeating-linear-gradient(135deg,transparent 0 5px,var(--stripe) 5px 6px);}
         .pl-scroll{scrollbar-width:thin;}
         .pl-input{background:var(--card);border:1px solid var(--line);color:var(--ink);width:100%;}
         .pl-input:focus{outline:2px solid #2B4B8F;outline-offset:-1px;}
@@ -1772,6 +1887,11 @@ function PlannerApp() {
                 canUndo && (React.createElement("button", { onClick: undo, className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
                     React.createElement(Undo2, { size: 12 }),
                     " R\u00FCckg\u00E4ngig")),
+                React.createElement("button", {
+                    onClick: toggleTheme,
+                    className: "pl-btn px-2 py-1 rounded flex items-center",
+                    title: dark ? "Helles Erscheinungsbild" : "Dunkles Erscheinungsbild"
+                }, React.createElement(dark ? Sun : Moon, { size: 13 })),
                 React.createElement("button", { onClick: () => syncCloud(false), disabled: cloud.state === "busy", className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
                     React.createElement(RefreshCw, { size: 12, className: cloud.state === "busy" ? "animate-spin" : "" }),
                     "Ger\u00E4te abgleichen"),
@@ -1893,7 +2013,7 @@ function PlannerApp() {
         celebration && (React.createElement("button", { onClick: () => setCelebration(null), className: "fixed inset-0 z-50 flex items-center justify-center p-6", style: { background: "rgba(25,29,26,.28)" } },
             React.createElement("div", { className: "pl-sheet pl-rise rounded-lg px-8 py-6 text-center" },
                 React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest mb-1" }, "geschafft"),
-                React.createElement("div", { className: "text-4xl font-semibold", style: { color: celebration.color } }, celebration.title),
+                React.createElement("div", { className: "text-4xl font-semibold", style: { color: lift(celebration.color) } }, celebration.title),
                 React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
         detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onDelete: () => { removeBlockAndCalendar(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
         editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor({ ...editor, ...patch }); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
@@ -1980,7 +2100,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                     const c = blockColor(b);
                     return (React.createElement("button", { key: b.id, onClick: () => onBlock(b), className: "pl-block pl-ext rounded-sm text-left truncate", style: {
                             background: hexA(c, 0.16), borderLeft: `2px solid ${c}`,
-                            padding: "1px 3px", fontSize: compact ? 9 : 10, lineHeight: "13px", color: c,
+                            padding: "1px 3px", fontSize: compact ? 9 : 10, lineHeight: "13px", color: lift(c),
                         } }, b.title));
                 })));
             }))),
@@ -2038,7 +2158,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                                         React.createElement("div", { className: "font-medium truncate", style: {
                                                 fontSize: fs,
                                                 lineHeight: flat ? fs + 1 + "px" : fs + 3 + "px",
-                                                color: c,
+                                                color: lift(c),
                                                 textDecoration: b.status === "skipped" ? "line-through" : "none",
                                             } },
                                             b.cont ? "▸" : "",
@@ -2136,9 +2256,9 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                             durLabel(b.dur),
                             b.external ? " · Kalender" : "",
                             isRunning ? " · läuft" : "")),
-                    b.status === "done" && React.createElement(Check, { size: 14, style: { color: "#1E6E5A" } }),
-                    b.status === "moved" && React.createElement(ArrowRight, { size: 14, style: { color: "#8A4E1C" } }),
-                    b.status === "skipped" && React.createElement(X, { size: 14, style: { color: "#A03A5E" } })));
+                    b.status === "done" && React.createElement(Check, { size: 14, style: { color: lift("#1E6E5A") } }),
+                    b.status === "moved" && React.createElement(ArrowRight, { size: 14, style: { color: lift("#8A4E1C") } }),
+                    b.status === "skipped" && React.createElement(X, { size: 14, style: { color: lift("#A03A5E") } })));
             })))),
         routines.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Routinen"),
@@ -2168,7 +2288,7 @@ function StudyRow({ task, kind, done, edit, weekIdx, onEditTask, onDeleteTask, o
                     React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 58, textAlign: "center" } }, durLabel(task.m)),
                     React.createElement("button", { onClick: () => onEditTask(weekIdx, kind, task.id, { m: Math.min(360, task.m + 15) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
                     React.createElement("select", { value: task.s, onChange: (e) => onEditTask(weekIdx, kind, task.id, { s: e.target.value }), className: "pl-input px-1 py-1 rounded mono text-xs", style: { width: "auto" } }, Object.keys(SUBJECTS).map((k) => (React.createElement("option", { key: k, value: k }, SUBJECTS[k].short)))),
-                    React.createElement("button", { onClick: () => onDeleteTask(weekIdx, kind, task.id), className: "pl-btn px-2 py-1 rounded ml-auto", style: { color: "#A03A5E" }, "aria-label": "L\u00F6schen" },
+                    React.createElement("button", { onClick: () => onDeleteTask(weekIdx, kind, task.id), className: "pl-btn px-2 py-1 rounded ml-auto", style: { color: lift("#A03A5E") }, "aria-label": "L\u00F6schen" },
                         React.createElement(Trash2, { size: 12 }))))));
     }
     return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
@@ -2223,7 +2343,7 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
                                 React.createElement("input", { value: ex.title, onChange: (e) => onExamField(ex.id, "title", e.target.value), className: "pl-input px-2 py-1 rounded text-sm", placeholder: "Fach" }),
                                 React.createElement("div", { className: "flex gap-2" },
                                     React.createElement("input", { type: "date", value: ex.date, onChange: (e) => onExamField(ex.id, "date", e.target.value), className: "pl-input px-2 py-1 rounded mono text-xs flex-1" }),
-                                    React.createElement("button", { onClick: () => onDeleteExam(ex.id), className: "pl-btn px-2 rounded", style: { color: "#A03A5E", borderColor: "#A03A5E" }, "aria-label": "Pr\u00FCfung l\u00F6schen" },
+                                    React.createElement("button", { onClick: () => onDeleteExam(ex.id), className: "pl-btn px-2 rounded", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" }, "aria-label": "Pr\u00FCfung l\u00F6schen" },
                                         React.createElement(Trash2, { size: 13 }))))) : (React.createElement(React.Fragment, null,
                                 React.createElement("div", { className: naechste ? "text-lg font-semibold leading-tight" : "text-sm font-medium leading-tight" }, ex.title),
                                 React.createElement("div", { className: "mono text-xs pl-muted mt-0.5" }, d.toLocaleDateString("de-AT", { weekday: "short", day: "numeric", month: "long" }))))),
@@ -2242,7 +2362,7 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
                 else
                     setConfirmReset(true); }, className: "pl-btn px-3 py-1.5 rounded mono text-xs ml-auto", style: confirmReset
                     ? { background: "#A03A5E", color: "#FFF", borderColor: "#A03A5E" }
-                    : { color: "#A03A5E", borderColor: "#A03A5E" } }, confirmReset ? "wirklich? alles zurück" : "Ursprungsplan"))),
+                    : { color: lift("#A03A5E"), borderColor: "#A03A5E" } }, confirmReset ? "wirklich? alles zurück" : "Ursprungsplan"))),
         React.createElement("div", { className: "flex items-center gap-2" },
             React.createElement("button", { onClick: () => setWeekIdx(Math.max(0, weekIdx - 1)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
                 React.createElement(ChevronLeft, { size: 16 })),
@@ -2280,7 +2400,7 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
             React.createElement("div", { className: "h-2 rounded-full overflow-hidden", style: { background: hexA("#2B4B8F", 0.15) } },
                 React.createElement("div", { className: "h-2 rounded-full pl-bar", style: { width: `${pct}%`, background: "#2B4B8F" } })))),
         React.createElement("div", { className: "pl-card rounded p-3" },
-            React.createElement("div", { className: "mono text-xs mb-1", style: { color: "#2B4B8F" } }, "Muss \u2014 auch in einer schlechten Woche"),
+            React.createElement("div", { className: "mono text-xs mb-1", style: { color: lift("#2B4B8F") } }, "Muss \u2014 auch in einer schlechten Woche"),
             React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.must.map((t) => React.createElement(StudyRow, { key: t.id, task: t, kind: "must", done: done, edit: edit, weekIdx: weekIdx, onEditTask: onEditTask, onDeleteTask: onDeleteTask, onToggleTask: onToggleTask, onPlanTask: onPlanTask }))),
             edit && (React.createElement("button", { onClick: () => onAddTask(weekIdx, "must"), className: "pl-btn mt-2 px-2 py-1 rounded mono text-xs flex items-center gap-1" },
                 React.createElement(Plus, { size: 12 }),
@@ -2311,7 +2431,7 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
                     React.createElement("span", { className: "mono text-xs pl-muted shrink-0" }, i + 1),
                     r))))),
             React.createElement("div", { className: "border-t pl-hair pt-3" },
-                React.createElement("div", { className: "mono text-xs mb-1.5", style: { color: "#A03A5E" } }, "FH-Pr\u00FCfungsordnung"),
+                React.createElement("div", { className: "mono text-xs mb-1.5", style: { color: lift("#A03A5E") } }, "FH-Pr\u00FCfungsordnung"),
                 React.createElement("ul", { className: "flex flex-col gap-1.5" }, STUDY_NOTES.map((r, i) => (React.createElement("li", { key: i, className: "text-sm flex gap-2" },
                     React.createElement("span", { className: "pl-muted shrink-0" }, "\u00B7"),
                     r)))))))));
@@ -2387,7 +2507,7 @@ function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending, onImport
             }),
             done.length > 0 && (React.createElement("div", { className: "mt-1 pt-2 border-t pl-hair flex flex-col gap-1" }, done.map((t) => (React.createElement("div", { key: t.id, className: "flex items-center gap-2 group" },
                 React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0 flex items-center justify-center", style: { background: "var(--muted)" }, "aria-label": "Wieder \u00F6ffnen" },
-                    React.createElement(Check, { size: 11, color: "#FAFAF8" })),
+                    React.createElement(Check, { size: 11, color: lift("#FAFAF8") })),
                 React.createElement("span", { className: "text-sm truncate flex-1 line-through pl-muted" }, t.title),
                 React.createElement("button", { onClick: () => onRemove(t.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "L\u00F6schen" },
                     React.createElement(Trash2, { size: 13 }))))))))));
@@ -2431,7 +2551,7 @@ function RoutinePanel({ routines, checks, days, weekStart, today, onAdd, onRemov
                     React.createElement("div", { className: "flex items-center gap-1.5 mb-1" },
                         React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: c } }),
                         React.createElement("span", { className: "text-sm truncate flex-1" }, r.title),
-                        React.createElement("span", { className: "mono text-xs", style: reached ? { color: c } : { color: "var(--muted)" } },
+                        React.createElement("span", { className: "mono text-xs", style: reached ? { color: lift(c) } : { color: "var(--muted)" } },
                             hits,
                             "/",
                             target),
@@ -2451,7 +2571,7 @@ function RoutinePanel({ routines, checks, days, weekStart, today, onAdd, onRemov
                             }, "aria-label": `${r.title} abhaken` }, on && React.createElement(Check, { size: 12, color: "#FFF" })));
                     })),
                     React.createElement("div", { className: "flex items-center gap-3 mono text-xs pl-muted" },
-                        React.createElement("span", { className: "flex items-center gap-1", style: ws.weeks > 0 ? { color: c } : {} },
+                        React.createElement("span", { className: "flex items-center gap-1", style: ws.weeks > 0 ? { color: lift(c) } : {} },
                             React.createElement(Flame, { size: 11 }),
                             " ",
                             ws.weeks,
@@ -2545,16 +2665,16 @@ function ProjectPanel({ projects, stats, onAdd, onRemove, onTarget, onPlan }) {
 function YearGrid({ weeks, onPick }) {
     const shade = (q) => {
         if (q === null)
-            return "#DCE0DA";
+            return surf("#DCE0DA", "#2A2F30");
         if (q >= 0.85)
             return "#1E6E5A";
         if (q >= 0.6)
             return "#3F8A6E";
         if (q >= 0.35)
-            return "#7FA894";
+            return surf("#7FA894", "#4E6B5D");
         if (q > 0)
-            return "#B6C7BC";
-        return "#DCE0DA";
+            return surf("#B6C7BC", "#3A4A42");
+        return surf("#DCE0DA", "#2A2F30");
     };
     const rows = [0, 1, 2, 3].map((r) => weeks.slice(r * 13, r * 13 + 13));
     return (React.createElement("div", null,
@@ -2607,9 +2727,9 @@ function CatPanel({ cats, onField, onAdd, onRemove }) {
 }
 function StatusButtons({ onPick, current, size = "sm" }) {
     const opts = [
-        { k: "done", icon: Check, color: "#1E6E5A", label: "gemacht" },
-        { k: "moved", icon: ArrowRight, color: "#8A4E1C", label: "verschoben" },
-        { k: "skipped", icon: X, color: "#A03A5E", label: "ausgefallen" },
+        { k: "done", icon: Check, color: lift("#1E6E5A"), label: "gemacht" },
+        { k: "moved", icon: ArrowRight, color: lift("#8A4E1C"), label: "verschoben" },
+        { k: "skipped", icon: X, color: lift("#A03A5E"), label: "ausgefallen" },
     ];
     const pick = (k) => {
         if (k === "done")
@@ -2620,7 +2740,7 @@ function StatusButtons({ onPick, current, size = "sm" }) {
     };
     return (React.createElement("div", { className: "flex gap-1" }, opts.map((o) => {
         const on = current === o.k;
-        return (React.createElement("button", { key: o.k, onClick: () => pick(on ? null : o.k), className: `pl-btn rounded flex items-center justify-center gap-1 mono text-xs ${size === "sm" ? "px-1.5 py-1" : "px-2.5 py-1.5 flex-1"} ${on && o.k === "done" ? "pl-glow" : ""}`, style: on ? { background: o.color, color: "#FFF", borderColor: o.color } : { color: o.color, borderColor: "var(--line)" }, "aria-label": o.label },
+        return (React.createElement("button", { key: o.k, onClick: () => pick(on ? null : o.k), className: `pl-btn rounded flex items-center justify-center gap-1 mono text-xs ${size === "sm" ? "px-1.5 py-1" : "px-2.5 py-1.5 flex-1"} ${on && o.k === "done" ? "pl-glow" : ""}`, style: on ? { background: o.color, color: "#FFF", borderColor: o.color } : { color: lift(o.color), borderColor: "var(--line)" }, "aria-label": o.label },
             React.createElement(o.icon, { size: 13 }),
             size === "lg" && o.label));
     })));
@@ -2672,8 +2792,8 @@ function ReviewPanel({ stats, routines, yearGrid = [], onPickWeek, onStatus, onO
                     "%")),
             React.createElement("div", { className: "grid grid-cols-3 gap-2 mb-3" },
                 React.createElement(Metric, { label: "geplant", value: durLabel(planned) }),
-                React.createElement(Metric, { label: "gemacht", value: durLabel(done), color: "#1E6E5A" }),
-                React.createElement(Metric, { label: "ausgefallen", value: durLabel(skipped), color: "#A03A5E" })),
+                React.createElement(Metric, { label: "gemacht", value: durLabel(done), color: lift("#1E6E5A") }),
+                React.createElement(Metric, { label: "ausgefallen", value: durLabel(skipped), color: lift("#A03A5E") })),
             cats.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted" }, "Noch nichts geplant. Sobald Bl\u00F6cke im Raster stehen, siehst du hier, wie viel davon wirklich passiert ist.")) : (React.createElement("div", { className: "flex flex-col gap-2" }, cats.map((c) => {
                 var _a, _b, _c;
                 const p = byCat[c].planned, d = byCat[c].done;
@@ -2711,9 +2831,9 @@ function ReviewPanel({ stats, routines, yearGrid = [], onPickWeek, onStatus, onO
             React.createElement("div", { className: "flex flex-wrap gap-1" },
                 React.createElement("button", { onClick: onConfetti, className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Konfetti"),
                 React.createElement("button", { onClick: () => setConfirm(confirm === "demo" ? null : "demo"), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Beispieldaten"),
-                React.createElement("button", { onClick: () => setConfirm(confirm === "reset" ? null : "reset"), className: "pl-btn px-2 py-1 rounded mono text-xs", style: { color: "#A03A5E" } }, "Zur\u00FCcksetzen")),
+                React.createElement("button", { onClick: () => setConfirm(confirm === "reset" ? null : "reset"), className: "pl-btn px-2 py-1 rounded mono text-xs", style: { color: lift("#A03A5E") } }, "Zur\u00FCcksetzen")),
             confirm && (React.createElement("div", { className: "pl-rise mt-2 flex items-center gap-2" },
-                React.createElement("span", { className: "mono text-xs flex-1", style: { color: "#A03A5E" } }, confirm === "demo"
+                React.createElement("span", { className: "mono text-xs flex-1", style: { color: lift("#A03A5E") } }, confirm === "demo"
                     ? "Ersetzt alles, was du bisher eingetragen hast."
                     : "Löscht alle Blöcke, Projekte, Routinen und Vorlagen."),
                 React.createElement("button", { onClick: () => { if (confirm === "demo") {
@@ -2773,7 +2893,7 @@ function ScheduleSheet({ item, weekStart: initialWeek, todayKey, gapsFor, blocks
                 React.createElement("div", { className: "flex items-start justify-between gap-2" },
                     React.createElement("div", { className: "min-w-0" },
                         React.createElement("div", { className: "mono text-xs pl-muted" }, "Einplanen"),
-                        React.createElement("div", { className: "text-lg font-medium truncate", style: { color: c } }, item.title)),
+                        React.createElement("div", { className: "text-lg font-medium truncate", style: { color: lift(c) } }, item.title)),
                     React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schlie\u00DFen" },
                         React.createElement(X, { size: 18 }))),
                 React.createElement("div", { className: "flex items-center gap-2" },
@@ -2824,10 +2944,10 @@ function ScheduleSheet({ item, weekStart: initialWeek, todayKey, gapsFor, blocks
                         " weitere anzeigen"))))),
             React.createElement("div", { className: "shrink-0 p-4 pt-3 border-t pl-hair flex flex-col gap-2" },
                 React.createElement("div", { className: "flex items-center gap-2" },
-                    React.createElement(TimeField, { value: customStart, onChange: setCustom, color: c }),
+                    React.createElement(TimeField, { value: customStart, onChange: setCustom, color: lift(c) }),
                     React.createElement("button", { onClick: () => onConfirm(day, customStart, dur), className: "ml-auto px-4 py-2 rounded mono text-xs", style: { background: c, color: "#FFF" } }, "Setzen")),
                 React.createElement("div", { className: "mono text-xs pl-muted" }, "Zeit antippen und direkt eintippen, z. B. 1430"),
-                conflict && (React.createElement("div", { className: "mono text-xs", style: { color: "#8A4E1C" } }, "\u00DCberschneidet sich mit etwas \u2014 geht trotzdem, liegt dann \u00FCbereinander.")),
+                conflict && (React.createElement("div", { className: "mono text-xs", style: { color: lift("#8A4E1C") } }, "\u00DCberschneidet sich mit etwas \u2014 geht trotzdem, liegt dann \u00FCbereinander.")),
                 React.createElement("button", { onClick: () => onManual(dur), className: "pl-btn w-full px-3 py-2 rounded mono text-xs" }, "Lieber selbst ins Raster tippen")))));
 }
 /* ════════════════ Zeitfeld ════════════════ */
@@ -2939,18 +3059,18 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
             React.createElement("div", { style: { background: hexA(c, 0.14), borderBottom: `2px solid ${c}` }, className: "px-5 pt-4 pb-4" },
                 React.createElement("div", { className: "flex items-start justify-between gap-3" },
                     React.createElement("div", { className: "min-w-0" },
-                        React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, block.external ? "aus Google Kalender" : (_a = CATS[block.cat]) === null || _a === void 0 ? void 0 : _a.label),
+                        React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: lift(c) } }, block.external ? "aus Google Kalender" : (_a = CATS[block.cat]) === null || _a === void 0 ? void 0 : _a.label),
                         React.createElement("h2", { className: "text-2xl font-semibold leading-tight mt-0.5 break-words" }, block.title || "Ohne Titel")),
                     React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schlie\u00DFen" },
                         React.createElement(X, { size: 20 }))),
-                block.external ? (React.createElement("div", { className: "mono text-3xl font-medium mt-3", style: { color: c } }, block.allDay ? "ganztägig"
+                block.external ? (React.createElement("div", { className: "mono text-3xl font-medium mt-3", style: { color: lift(c) } }, block.allDay ? "ganztägig"
                     : React.createElement(React.Fragment, null,
                         minsToLabel(block.start),
                         React.createElement("span", { className: "pl-muted" }, " \u2013 "),
                         minsToLabel(block.start + block.dur)))) : (React.createElement("div", { className: "mt-3 flex flex-wrap items-end gap-3" },
                     React.createElement("div", null,
                         React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Beginn"),
-                        React.createElement(TimeField, { value: block.start, onChange: (v) => onSave({ start: v }), color: c })),
+                        React.createElement(TimeField, { value: block.start, onChange: (v) => onSave({ start: v }), color: lift(c) })),
                     React.createElement("div", null,
                         React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Dauer"),
                         React.createElement("div", { className: "flex items-center" },
@@ -2977,7 +3097,7 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                     block.tplId && (React.createElement("span", { className: "pl-btn px-2 py-1 rounded mono text-xs flex items-center gap-1" },
                         React.createElement(Repeat, { size: 11 }),
                         " jede Woche")),
-                    block.synced && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs flex items-center gap-1", style: { border: "1px solid #1E6E5A", color: "#1E6E5A" } },
+                    block.synced && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs flex items-center gap-1", style: { border: "1px solid #1E6E5A", color: lift("#1E6E5A") } },
                         React.createElement(Check, { size: 11 }),
                         " im Kalender")))),
                 !block.external && (React.createElement(React.Fragment, null,
@@ -2991,7 +3111,7 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                         React.createElement("button", { onClick: onEdit, className: "flex-1 px-3 py-2.5 rounded mono text-xs", style: block.title
                                 ? { background: "var(--ink)", color: "var(--paper)" }
                                 : { background: c, color: "#FFF" } }, block.title ? "Titel & Kategorie" : "Titel eintragen"),
-                        React.createElement("button", { onClick: onSync, disabled: syncing || block.synced, className: "pl-btn px-3 py-2.5 rounded flex items-center gap-1.5 mono text-xs", style: block.synced ? { color: "#1E6E5A", borderColor: "#1E6E5A" } : {} },
+                        React.createElement("button", { onClick: onSync, disabled: syncing || block.synced, className: "pl-btn px-3 py-2.5 rounded flex items-center gap-1.5 mono text-xs", style: block.synced ? { color: lift("#1E6E5A"), borderColor: "#1E6E5A" } : {} },
                             React.createElement(UploadCloud, { size: 13 }),
                             block.synced ? "gesichert" : "Kalender"),
                         React.createElement("button", { onClick: () => { if (confirmDel) {
@@ -3001,7 +3121,7 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                                 setConfirmDel(true);
                             } }, className: "pl-btn px-3 py-2.5 rounded flex items-center gap-1.5 mono text-xs", style: confirmDel
                                 ? { background: "#A03A5E", color: "#FFF", borderColor: "#A03A5E" }
-                                : { color: "#A03A5E", borderColor: "#A03A5E" } },
+                                : { color: lift("#A03A5E"), borderColor: "#A03A5E" } },
                             React.createElement(Trash2, { size: 13 }),
                             confirmDel && "sicher?")))),
                 block.external && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Dieser Termin kommt aus deinem Google Kalender und l\u00E4sst sich hier nicht \u00E4ndern."))))));
@@ -3058,14 +3178,14 @@ function BlockEditor({ block, onClose, onSave, onDelete, onSync, onRepeat, proje
             React.createElement("div", null,
                 React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wie ist es gelaufen?"),
                 React.createElement(StatusButtons, { current: block.status, size: "lg", onPick: (s) => { onSave({ status: s }); } })),
-            React.createElement("button", { onClick: () => onRepeat({ ...block, title: title.trim() || "Ohne Titel", cat, start, dur }), className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs", style: block.tplId ? { color: "#1E6E5A", borderColor: "#1E6E5A" } : {} },
+            React.createElement("button", { onClick: () => onRepeat({ ...block, title: title.trim() || "Ohne Titel", cat, start, dur }), className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs", style: block.tplId ? { color: lift("#1E6E5A"), borderColor: "#1E6E5A" } : {} },
                 React.createElement(Repeat, { size: 13 }),
                 block.tplId ? "Jede Woche — in der Vorlage" : "Jede Woche wiederholen"),
             React.createElement("div", { className: "flex items-center gap-2 pt-1" },
-                React.createElement("button", { onClick: onDelete, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs", style: { color: "#A03A5E", borderColor: "#A03A5E" } },
+                React.createElement("button", { onClick: onDelete, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } },
                     React.createElement(Trash2, { size: 13 }),
                     " L\u00F6schen"),
-                React.createElement("button", { onClick: onSync, disabled: syncing || block.synced, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs ml-auto", style: block.synced ? { color: "#1E6E5A", borderColor: "#1E6E5A" } : {} },
+                React.createElement("button", { onClick: onSync, disabled: syncing || block.synced, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs ml-auto", style: block.synced ? { color: lift("#1E6E5A"), borderColor: "#1E6E5A" } : {} },
                     block.synced ? React.createElement(Check, { size: 13 }) : React.createElement(UploadCloud, { size: 13 }),
                     block.synced ? "Im Kalender" : "In Kalender"),
                 React.createElement("button", { onClick: commit, className: "px-4 py-2 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Fertig")))));
@@ -3081,7 +3201,8 @@ function Stepper({ label, value, onMinus, onPlus }) {
 /* Farbe mit Alpha */
 function hexA(hex, a) {
     const n = parseInt(hex.slice(1), 16);
-    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+    const aa = DARK ? Math.min(0.55, a * 1.7) : a;
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${aa})`;
 }
 /* ── Beispieldaten zum Ausprobieren ────────────────────────── */
 function makeDemoState() {
@@ -3180,7 +3301,7 @@ function FocusTimer({ timer, beat, onPause, onSkip, onStop, onDone }) {
                 React.createElement("div", { className: "relative", style: { width: 140, height: 140 } },
                     React.createElement("svg", { width: "140", height: "140", viewBox: "0 0 140 140" },
                         React.createElement("circle", { cx: "70", cy: "70", r: R, fill: "none", stroke: "var(--line)", strokeWidth: "9" }),
-                        React.createElement("circle", { cx: "70", cy: "70", r: R, fill: "none", stroke: farbe, strokeWidth: "9", strokeLinecap: "round", strokeDasharray: U, strokeDashoffset: U * (1 - anteil), transform: "rotate(-90 70 70)", style: { transition: "stroke-dashoffset .9s linear" } })),
+                        React.createElement("circle", { cx: "70", cy: "70", r: R, fill: "none", stroke: lift(farbe), strokeWidth: "9", strokeLinecap: "round", strokeDasharray: U, strokeDashoffset: U * (1 - anteil), transform: "rotate(-90 70 70)", style: { transition: "stroke-dashoffset .9s linear" } })),
                     React.createElement("div", { className: "absolute inset-0 flex flex-col items-center justify-center" },
                         React.createElement("span", { className: "mono text-3xl font-semibold", style: { color: farbe } }, uhr),
                         React.createElement("span", { className: "mono text-xs pl-muted" },
@@ -3198,7 +3319,7 @@ function FocusTimer({ timer, beat, onPause, onSkip, onStop, onDone }) {
                     React.createElement("button", { onClick: onStop, className: "pl-btn px-3 py-2.5 rounded mono text-xs" }, "Nur schlie\u00DFen"))) : (React.createElement("div", { className: "flex gap-2 w-full" },
                     React.createElement("button", { onClick: onPause, className: "pl-btn flex-1 px-3 py-2.5 rounded mono text-xs" }, timer.paused ? "Weiter" : "Anhalten"),
                     React.createElement("button", { onClick: onSkip, className: "pl-btn px-3 py-2.5 rounded mono text-xs" }, "\u00DCberspringen"),
-                    React.createElement("button", { onClick: onStop, className: "pl-btn px-3 py-2.5 rounded mono text-xs", style: { color: "#A03A5E", borderColor: "#A03A5E" } }, "Beenden"))))))));
+                    React.createElement("button", { onClick: onStop, className: "pl-btn px-3 py-2.5 rounded mono text-xs", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } }, "Beenden"))))))));
 }
 /* ════════════════ Konfetti ════════════════ */
 function Confetti({ trigger }) {
@@ -3246,7 +3367,7 @@ function initTraining() {
         hinweis: "Crimp-Sperre: keine kleinen Leisten aufstellen. Nur Open-Hand, Sloper oder Henkel. Bei Schmerz sofort abbrechen.",
         types: [
             {
-                id: "d1", name: "Tag 1 · Kraft & Limit", color: "#A03A5E", target: 1, routine: "Bouldern",
+                id: "d1", name: "Tag 1 · Kraft & Limit", color: lift("#A03A5E"), target: 1, routine: "Bouldern",
                 exercises: [
                     { id: "d1e1", name: "Limit-Bouldern (7a-Bereich)", note: "volle Pausen zwischen den Versuchen" },
                     { id: "d1e2", name: "Weighted Pull-ups", note: "Finisher · saubere Form, kein Crimp", kg: true },
@@ -3254,7 +3375,7 @@ function initTraining() {
                 ],
             },
             {
-                id: "d2", name: "Tag 2 · OAP & Beine", color: "#2B4B8F", target: 1, routine: "Krafttraining",
+                id: "d2", name: "Tag 2 · OAP & Beine", color: lift("#2B4B8F"), target: 1, routine: "Krafttraining",
                 exercises: [
                     { id: "d2e1", name: "Sub-Limit-Bouldern", note: "Flow & Präzision" },
                     { id: "d2e2", name: "Scapula-Shrugs", note: "" },
@@ -3264,7 +3385,7 @@ function initTraining() {
                 ],
             },
             {
-                id: "d3", name: "Tag 3 · Capacity & Flow", color: "#1E6E5A", target: 1, routine: "Bouldern",
+                id: "d3", name: "Tag 3 · Capacity & Flow", color: lift("#1E6E5A"), target: 1, routine: "Bouldern",
                 exercises: [
                     { id: "d3e1", name: "Perfect 4×4", note: "4 Boulder, 4× wiederholen" },
                     { id: "d3e2", name: "Silent Feet", note: "kein Nachgreifen, Fußpräzision" },
@@ -3332,7 +3453,7 @@ const CHECK_FIELDS = [
     { k: "haut", label: "Haut", stufen: ["gut", "dünn", "wund", "offen"] },
     { k: "schlaf", label: "Schlaf", stufen: ["erholt", "ok", "wenig", "kaum"] },
 ];
-const CHECK_COLORS = ["#1E6E5A", "#7FA894", "#8A4E1C", "#A03A5E"];
+const CHECK_COLORS = ["#1E6E5A", surf("#7FA894", "#4E6B5D"), "#8A4E1C", "#A03A5E"];
 function tagAbstand(a, b) {
     return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
 }
@@ -3514,14 +3635,14 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                         m.einheit),
                     React.createElement("button", { onClick: () => onMilestone(m.id, { wert: (m.wert || 0) + (m.einheit === "kg" ? 2.5 : 1) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"))) : null)))),
         t.hinweis ? (React.createElement("div", { className: "rounded p-3 flex items-start gap-2", style: { background: hexA("#A03A5E", 0.1), border: "1px solid " + hexA("#A03A5E", 0.35) } },
-            React.createElement(AlertCircle, { size: 15, style: { color: "#A03A5E", marginTop: 1, flexShrink: 0 } }),
-            React.createElement("input", { value: t.hinweis, onChange: (e) => onHinweis(e.target.value), className: "text-sm flex-1", style: { background: "transparent", border: "none", outline: "none", color: "#A03A5E" } }))) : null,
+            React.createElement(AlertCircle, { size: 15, style: { color: lift("#A03A5E"), marginTop: 1, flexShrink: 0 } }),
+            React.createElement("input", { value: t.hinweis, onChange: (e) => onHinweis(e.target.value), className: "text-sm flex-1", style: { background: "transparent", border: "none", outline: "none", color: lift("#A03A5E") } }))) : null,
         React.createElement("div", { className: "pl-card rounded p-4" },
             React.createElement("div", { className: "flex items-center gap-4" },
                 React.createElement("div", { className: "relative shrink-0", style: { width: 124, height: 124 } },
                     React.createElement("svg", { width: "124", height: "124", viewBox: "0 0 124 124" },
                         React.createElement("circle", { cx: "62", cy: "62", r: R, fill: "none", stroke: "var(--line)", strokeWidth: "10" }),
-                        React.createElement("circle", { cx: "62", cy: "62", r: R, fill: "none", stroke: st.komplett ? "#1E6E5A" : "#2B4B8F", strokeWidth: "10", strokeLinecap: "round", strokeDasharray: U, strokeDashoffset: U * (1 - quote), transform: "rotate(-90 62 62)", style: { transition: "stroke-dashoffset .6s cubic-bezier(.2,.8,.2,1)" } })),
+                        React.createElement("circle", { cx: "62", cy: "62", r: R, fill: "none", stroke: lift(st.komplett ? "#1E6E5A" : "#2B4B8F"), strokeWidth: "10", strokeLinecap: "round", strokeDasharray: U, strokeDashoffset: U * (1 - quote), transform: "rotate(-90 62 62)", style: { transition: "stroke-dashoffset .6s cubic-bezier(.2,.8,.2,1)" } })),
                     React.createElement("div", { className: "absolute inset-0 flex flex-col items-center justify-center" },
                         React.createElement("span", { className: "mono text-3xl font-semibold", style: { color: st.komplett ? "#1E6E5A" : "#2B4B8F" } },
                             st.ist,
@@ -3555,12 +3676,12 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                     })))),
             React.createElement("div", { className: "mt-3 pt-3 border-t pl-hair flex items-center gap-2" },
                 React.createElement("span", { className: "w-2 h-2 rounded-full shrink-0", style: { background: ber.farbe } }),
-                React.createElement("span", { className: "text-sm flex-1", style: { color: ber.farbe } }, ber.text))),
+                React.createElement("span", { className: "text-sm flex-1", style: { color: lift(ber.farbe) } }, ber.text))),
         (t.types || []).map((ty) => {
             const p = st.proTyp[ty.id] || { n: 0, target: 0, erfuellt: false };
             return (React.createElement("div", { key: ty.id, className: "pl-card rounded p-3", style: { borderLeft: `3px solid ${ty.color}` } },
                 React.createElement("div", { className: "flex items-center gap-2 mb-2" },
-                    React.createElement("span", { className: "text-sm font-medium flex-1", style: { color: ty.color } }, ty.name),
+                    React.createElement("span", { className: "text-sm font-medium flex-1", style: { color: lift(ty.color) } }, ty.name),
                     React.createElement("span", { className: "mono text-xs", style: { color: p.erfuellt ? ty.color : "var(--muted)" } },
                         p.n,
                         "/",
@@ -3568,7 +3689,7 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                 React.createElement("div", { className: "flex flex-col gap-0.5 mb-3" }, (ty.exercises || []).map((ex) => (React.createElement("div", { key: ex.id, className: "flex items-baseline gap-2" },
                     React.createElement("span", { className: "pl-muted shrink-0", style: { fontSize: 11 } }, "\u00B7"),
                     React.createElement("span", { className: "text-sm flex-1" }, ex.name),
-                    ex.kg ? (React.createElement("span", { className: "mono text-xs", style: { color: ty.color } }, letztesGewicht(t, ex.id) !== null ? letztesGewicht(t, ex.id) + " kg" : "— kg")) : ex.note ? (React.createElement("span", { className: "mono text-xs pl-muted truncate", style: { maxWidth: "45%" } }, ex.note)) : null)))),
+                    ex.kg ? (React.createElement("span", { className: "mono text-xs", style: { color: lift(ty.color) } }, letztesGewicht(t, ex.id) !== null ? letztesGewicht(t, ex.id) + " kg" : "— kg")) : ex.note ? (React.createElement("span", { className: "mono text-xs pl-muted truncate", style: { maxWidth: "45%" } }, ex.note)) : null)))),
                 React.createElement("div", { className: "flex gap-1.5" },
                     React.createElement("button", { onClick: () => onLog(ty.id, heuteKey), className: "flex-1 px-3 py-2 rounded flex items-center justify-center gap-1.5 mono text-xs", style: { background: ty.color, color: "#FFF" } },
                         React.createElement(Plus, { size: 13 }),
@@ -3618,7 +3739,7 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                 st.sess.length,
                 ")"),
             st.sess.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-1" }, "Noch nichts eingetragen.")) : (React.createElement("div", { className: "flex flex-col" }, st.sess.slice(0, 20).map((s) => {
-                const ty = (t.types || []).find((x) => x.id === s.typeId) || { name: "?", color: "#6F7A72", exercises: [] };
+                const ty = (t.types || []).find((x) => x.id === s.typeId) || { name: "?", color: lift("#6F7A72"), exercises: [] };
                 const auf = offen === s.id;
                 const fertig = (s.done || []).length;
                 const gesamt = (ty.exercises || []).length;
@@ -3636,7 +3757,7 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                             "/",
                             gesamt)),
                         React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(s.dur || 60)),
-                        React.createElement("span", { className: "mono text-xs", style: { color: ty.color } },
+                        React.createElement("span", { className: "mono text-xs", style: { color: lift(ty.color) } },
                             "RPE ",
                             s.rpe || 3)),
                     auf && (React.createElement("div", { className: "pl-rise pb-3 flex flex-col gap-2" },
@@ -3666,7 +3787,7 @@ function TrainingView({ training, heuteKey, onLog, onRemoveSession, onEditSessio
                             React.createElement("button", { onClick: () => onEditSession(s.id, { dur: Math.max(15, (s.dur || 60) - 15) }), className: "pl-btn px-2 py-1 rounded-l mono text-xs" }, "\u2212"),
                             React.createElement("span", { className: "mono text-xs px-2 py-1 border-t border-b", style: { borderColor: "var(--line)", minWidth: 56, textAlign: "center" } }, durLabel(s.dur || 60)),
                             React.createElement("button", { onClick: () => onEditSession(s.id, { dur: Math.min(300, (s.dur || 60) + 15) }), className: "pl-btn px-2 py-1 rounded-r mono text-xs" }, "+"),
-                            React.createElement("button", { onClick: () => onRemoveSession(s.id), className: "pl-btn ml-auto px-2 py-1 rounded", style: { color: "#A03A5E", borderColor: "#A03A5E" }, "aria-label": "L\u00F6schen" },
+                            React.createElement("button", { onClick: () => onRemoveSession(s.id), className: "pl-btn ml-auto px-2 py-1 rounded", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" }, "aria-label": "L\u00F6schen" },
                                 React.createElement(Trash2, { size: 12 }))),
                         React.createElement("div", { className: "flex items-center gap-2" },
                             React.createElement("span", { className: "mono text-xs pl-muted", style: { width: 46 } }, "Wie hart"),
@@ -3763,20 +3884,20 @@ class ErrorBoundary extends React.Component {
     render() {
         var _a;
         if (this.state.error) {
-            return (React.createElement("div", { style: { minHeight: "100vh", background: "#E4E6E1", color: "#191D1A", padding: 24 } },
+            return (React.createElement("div", { style: { minHeight: "100vh", background: "#E4E6E1", color: lift("#191D1A"), padding: 24 } },
                 React.createElement("div", { style: {
                         maxWidth: 560, margin: "0 auto", background: "#FAFAF8",
                         border: "1px solid #191D1A", borderRadius: 4, padding: 20,
                     } },
                     React.createElement("h2", { style: { fontSize: 18, fontWeight: 600, marginBottom: 8 } }, "Der Planer ist abgest\u00FCrzt"),
-                    React.createElement("p", { style: { fontSize: 14, color: "#6F7A72", marginBottom: 12 } }, "Schick mir den folgenden Text, dann finde ich die Ursache sofort:"),
+                    React.createElement("p", { style: { fontSize: 14, color: lift("#6F7A72"), marginBottom: 12 } }, "Schick mir den folgenden Text, dann finde ich die Ursache sofort:"),
                     React.createElement("pre", { style: {
                             fontFamily: "ui-monospace, monospace", fontSize: 12, whiteSpace: "pre-wrap",
                             background: "#EDEEEA", padding: 12, borderRadius: 3, overflowX: "auto",
                         } }, String(((_a = this.state.error) === null || _a === void 0 ? void 0 : _a.message) || this.state.error)),
                     React.createElement("button", { onClick: () => this.setState({ error: null }), style: {
                             marginTop: 12, padding: "8px 14px", borderRadius: 3,
-                            background: "#191D1A", color: "#E4E6E1", border: "none",
+                            background: "#191D1A", color: lift("#E4E6E1"), border: "none",
                             fontFamily: "ui-monospace, monospace", fontSize: 12, cursor: "pointer",
                         } }, "Nochmal versuchen"))));
         }
