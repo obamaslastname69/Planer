@@ -126,6 +126,29 @@ function addDays(date, n) {
     d.setDate(d.getDate() + n);
     return d;
 }
+/* ── Mehrtägige Einträge (Urlaub, Praktikum, Kur) ───────────
+   Gespeichert wird nur der erste Tag plus die Anzahl der Tage. Beim
+   Anzeigen erscheint der Eintrag an jedem Tag, den er berührt. */
+const MAX_SPAN = 90;
+const spanTage = (b) => (b && b.allDay ? Math.max(1, Math.min(MAX_SPAN, b.days || 1)) : 1);
+/* Erster Tag als Date-Objekt */
+const spanStart = (b) => new Date(b.day + "T00:00:00");
+/* Letzter Tag, den der Eintrag belegt (einschließlich) */
+const spanEnde = (b) => dayKey(addDays(spanStart(b), spanTage(b) - 1));
+/* Berührt der Eintrag diesen Tag? */
+function spanntUeber(b, key) {
+    if (b.day === key)
+        return true;
+    const tage = spanTage(b);
+    if (tage < 2)
+        return false;
+    /* Vergleich über die Kennung, damit Sommerzeit nichts verschiebt */
+    const start = spanStart(b);
+    for (let i = 1; i < tage; i++)
+        if (dayKey(addDays(start, i)) === key)
+            return true;
+    return false;
+}
 function isoWeek(date) {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
     d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
@@ -435,17 +458,30 @@ function sammleTermine(data, cal, praefix, out) {
 }
 async function pushToCalendar(block) {
     const date = new Date(block.day + "T00:00:00");
-    const s = new Date(date);
-    s.setMinutes(block.start);
-    const e = new Date(date);
-    e.setMinutes(block.start + block.dur);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Vienna";
-    const body = JSON.stringify({
-        summary: block.title,
-        start: { dateTime: s.toISOString(), timeZone: tz },
-        end: { dateTime: e.toISOString(), timeZone: tz },
-        reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 15 }] },
-    });
+    let body;
+    if (block.allDay) {
+        /* Ganztägig kennt Google nur als Datum ohne Uhrzeit. "end.date" ist
+           der Tag NACH dem letzten - deshalb die volle Zahl der Tage. */
+        body = JSON.stringify({
+            summary: block.title,
+            start: { date: block.day },
+            end: { date: dayKey(addDays(date, spanTage(block))) },
+            reminders: { useDefault: false },
+        });
+    }
+    else {
+        const s = new Date(date);
+        s.setMinutes(block.start);
+        const e = new Date(date);
+        e.setMinutes(block.start + block.dur);
+        body = JSON.stringify({
+            summary: block.title,
+            start: { dateTime: s.toISOString(), timeZone: tz },
+            end: { dateTime: e.toISOString(), timeZone: tz },
+            reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 15 }] },
+        });
+    }
     /* Schon einmal gesichert? Dann aktualisieren statt neu anlegen. */
     if (block.gcalId) {
         try {
@@ -1300,8 +1336,12 @@ function PlannerApp() {
                 set[b.gcalId] = true;
         return set;
     }, [state.blocks]);
+    /* Mehrtägige Einträge tauchen an jedem Tag auf, den sie berühren.
+       "spanFolge" merkt sich, dass es nicht der erste Tag ist — daran
+       hängt die Optik des durchgehenden Balkens. */
     const blocksFor = useCallback((key) => [
-        ...state.blocks.filter((b) => b.day === key),
+        ...state.blocks.filter((b) => spanntUeber(b, key))
+            .map((b) => (b.day === key ? b : { ...b, spanFolge: true })),
         ...external.filter((b) => b.day === key && !eigeneGcalIds[b.gcalRawId]),
     ].sort((a, b) => a.start - b.start), [state.blocks, external, eigeneGcalIds]);
     const plannedMinutes = useCallback((key) => blocksFor(key).reduce((s, b) => s + b.dur, 0), [blocksFor]);
@@ -1324,6 +1364,8 @@ function PlannerApp() {
         const b = {
             id: uid(), day, start,
             dur: patch.dur || 60,
+            allDay: !!patch.allDay,
+            days: patch.days || 1,
             title: patch.title || "",
             cat: patch.cat || "fokus",
             todoId: patch.todoId || null,
@@ -1335,9 +1377,14 @@ function PlannerApp() {
         persist((prev) => ({ ...prev, blocks: [...prev.blocks, b] }));
         setDetailId(b.id);
     };
+    /* patch darf eine Funktion sein, die den aktuellen Block bekommt. Nur so
+       rechnen schnell aufeinander folgende Klicks (Tage +) korrekt weiter,
+       statt alle vom selben veralteten Stand auszugehen. */
     const updateBlock = (id, patch) => persist((prev) => ({
         ...prev,
-        blocks: prev.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+        blocks: prev.blocks.map((b) => (b.id === id
+            ? { ...b, ...(typeof patch === "function" ? patch(b) : patch) }
+            : b)),
     }));
     const setBlockStatus = (id, status) => persist((prev) => {
         const b = prev.blocks.find((x) => x.id === id);
@@ -2168,7 +2215,7 @@ function PlannerApp() {
                 React.createElement("div", { className: "text-4xl font-semibold", style: { color: lift(celebration.color) } }, celebration.title),
                 React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
         detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onMakeTodo: blockZuTodo, todo: detailBlock && detailBlock.todoId ? state.todos.find((t) => t.id === detailBlock.todoId) : null, onDelete: () => { removeBlockAndCalendar(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
-        editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor({ ...editor, ...patch }); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
+        editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor((e) => ({ ...e, ...(typeof patch === "function" ? patch(e) : patch) })); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
 }
 /* ════════════════ Raster ════════════════ */
 function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, gridRef, ppm, maxH }) {
@@ -2250,10 +2297,29 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                 const items = blocksFor(k).filter((b) => b.allDay);
                 return (React.createElement("div", { key: k, className: "border-l pl-hair p-0.5 flex flex-col gap-0.5", style: { minHeight: allDayRows * 17 + 4 } }, items.map((b) => {
                     const c = blockColor(b);
-                    return (React.createElement("button", { key: b.id, onClick: () => onBlock(b), className: "pl-block pl-ext rounded-sm text-left truncate", style: {
-                            background: hexA(c, 0.16), borderLeft: `2px solid ${c}`,
+                    /* Mehrtägiges läuft als ein Balken durch: Rundung und
+                       Farbkante nur an den Enden, Titel nur am ersten Tag. */
+                    const mehrtaegig = spanTage(b) > 1;
+                    const erster = !b.spanFolge;
+                    const letzter = !mehrtaegig || spanEnde(b) === k;
+                    /* Läuft der Eintrag aus der Vorwoche herein, steht der Titel
+                       am ersten sichtbaren Tag — sonst bliebe der Balken leer. */
+                    const zeigtTitel = erster || k === dayKey(visibleDays[0]);
+                    const r = (an) => (an ? "7px" : "0");
+                    return (React.createElement("button", { key: b.id, onClick: () => onBlock(b),
+                        className: "pl-block text-left truncate" + (b.external ? " pl-ext" : ""),
+                        title: mehrtaegig ? `${b.title} · ${spanTage(b)} Tage` : b.title,
+                        style: {
+                            background: hexA(c, 0.16),
+                            borderLeft: erster ? `2px solid ${c}` : "none",
+                            borderRadius: mehrtaegig
+                                ? `${r(erster)} ${r(letzter)} ${r(letzter)} ${r(erster)}`
+                                : "5px",
+                            /* Balken bis an die Tagesgrenze ziehen, damit er
+                               ohne Lücke weiterläuft */
+                            marginLeft: erster ? 0 : -3, marginRight: letzter ? 0 : -3,
                             padding: "1px 3px", fontSize: compact ? 9 : 10, lineHeight: "13px", color: lift(c),
-                        } }, b.title));
+                        } }, zeigtTitel ? b.title : ""));
                 })));
             }))),
         React.createElement("div", { ref: gridRef, className: "pl-scroll overflow-y-auto", style: { maxHeight: maxH } },
@@ -2400,12 +2466,12 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                 const past = isToday && b.start + b.dur <= nowMin;
                 const isRunning = running && running.id === b.id;
                 return (React.createElement("button", { key: b.id, onClick: () => !b.external && onBlock(b), className: "flex items-center gap-3 py-2 border-b pl-hair text-left", style: { opacity: b.status === "skipped" ? 0.5 : past && !isRunning ? 0.75 : 1 } },
-                    React.createElement("span", { className: "mono text-xs pl-muted w-10 shrink-0" }, minsToLabel(b.start)),
+                    React.createElement("span", { className: "mono text-xs pl-muted w-10 shrink-0" }, b.allDay ? "—" : minsToLabel(b.start)),
                     React.createElement("span", { className: "w-1 self-stretch rounded-full shrink-0", style: { background: c } }),
                     React.createElement("span", { className: "flex-1 min-w-0" },
                         React.createElement("span", { className: "text-sm block truncate", style: { textDecoration: b.status === "skipped" ? "line-through" : "none" } }, b.title || "Ohne Titel"),
                         React.createElement("span", { className: "mono text-xs pl-muted" },
-                            durLabel(b.dur),
+                            b.allDay ? (spanTage(b) > 1 ? "ganztägig · " + spanTage(b) + " Tage" : "ganztägig") : durLabel(b.dur),
                             b.external ? " · " + (b.calLabel || "Kalender") : "",
                             isRunning ? " · läuft" : "")),
                     b.status === "done" && React.createElement(Check, { size: 14, style: { color: lift("#1E6E5A") } }),
@@ -3237,7 +3303,7 @@ function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, on
                         React.createElement("h2", { className: "text-2xl font-semibold leading-tight mt-0.5 break-words" }, block.title || "Ohne Titel")),
                     React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schlie\u00DFen" },
                         React.createElement(X, { size: 20 }))),
-                block.external ? (React.createElement("div", { className: "mono text-3xl font-medium mt-3", style: { color: lift(c) } }, block.allDay ? "ganztägig"
+                block.external || block.allDay ? (React.createElement("div", { className: "mono text-3xl font-medium mt-3", style: { color: lift(c) } }, block.allDay ? (spanTage(block) > 1 ? spanTage(block) + " Tage" : "ganztägig")
                     : React.createElement(React.Fragment, null,
                         minsToLabel(block.start),
                         React.createElement("span", { className: "pl-muted" }, " \u2013 "),
@@ -3258,6 +3324,19 @@ function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, on
                     ". ",
                     MONTHS[d.getMonth()],
                     block.external || block.allDay ? "" : " · endet " + minsToLabel(block.start + block.dur)),
+                /* Über mehrere Tage — direkt hier, nicht erst im Bearbeiten-Sheet */
+                !block.external && (React.createElement("div", { className: "mt-3" }, block.allDay
+                    ? (React.createElement("div", { className: "flex flex-wrap items-end gap-3" },
+                        React.createElement("div", null,
+                            React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wie viele Tage?"),
+                            React.createElement("div", { className: "flex items-center" },
+                                React.createElement("button", { onClick: () => onSave((b) => ({ days: Math.max(1, spanTage(b) - 1), synced: false })), className: "pl-btn px-2.5 py-2 rounded-l", "aria-label": "ein Tag weniger" }, "−"),
+                                React.createElement("span", { className: "mono text-lg border-t border-b flex items-center justify-center", style: { width: 90, padding: "6px 0", background: "var(--card)", borderColor: "var(--line)" } }, spanTage(block) === 1 ? "1 Tag" : spanTage(block) + " Tage"),
+                                React.createElement("button", { onClick: () => onSave((b) => ({ days: Math.min(MAX_SPAN, spanTage(b) + 1), synced: false })), className: "pl-btn px-2.5 py-2 rounded-r", "aria-label": "ein Tag mehr" }, "+"))),
+                        React.createElement("button", { onClick: () => onSave({ allDay: false, days: 1, start: 9 * 60, dur: 60, synced: false }), className: "pl-btn px-3 py-2 rounded mono text-xs" }, "mit Uhrzeit")))
+                    : (React.createElement("button", { onClick: () => onSave({ allDay: true, days: 1, start: 0, dur: 0, synced: false }), className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs" },
+                        React.createElement(Calendar, { size: 13 }),
+                        "Ganztägig / über mehrere Tage")))),
                 React.createElement("div", { className: "mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mono text-xs", style: {
                         background: rel.live ? c : "var(--card)",
                         color: rel.live ? "#FFF" : "var(--muted)",
@@ -3290,7 +3369,7 @@ function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, on
                     },
                         React.createElement(List, { size: 13 }),
                         "To-do")),
-                                        onFocus && (React.createElement("button", { onClick: () => onFocus(block), className: "px-3 py-2.5 rounded mono text-xs flex items-center gap-1.5", style: { background: c, color: "#FFF" } },
+                                        onFocus && !block.allDay && (React.createElement("button", { onClick: () => onFocus(block), className: "px-3 py-2.5 rounded mono text-xs flex items-center gap-1.5", style: { background: c, color: "#FFF" } },
                             React.createElement(Timer, { size: 13 }),
                             " Fokus")),
                         React.createElement("button", { onClick: onEdit, className: "flex-1 px-3 py-2.5 rounded mono text-xs", style: block.title
@@ -3318,12 +3397,42 @@ function BlockEditor({ block, onClose, onSave, onDelete, onSync, onRepeat, proje
     const [cat, setCat] = useState(block.cat || "fokus");
     const [start, setStart] = useState(block.start);
     const [dur, setDur] = useState(block.dur);
+    /* Tage direkt aus dem Block lesen - ein eigener Zustand daneben würde
+       bei schnellen Klicks auseinanderlaufen */
+    const tage = spanTage(block);
+    const ganztags = !!block.allDay;
     /* Alles wird sofort gesichert - Schliessen darf nichts verlieren */
     const saveTitle = () => onSave({ title: title.trim() || "Ohne Titel" });
     const setCatLive = (v) => { setCat(v); onSave({ cat: v }); };
     const setStartLive = (v) => { setStart(v); onSave({ start: v }); };
     const setDurLive = (v) => { setDur(v); onSave({ dur: v }); };
+    /* Ganztägig heißt: keine Uhrzeit, keine Minuten. Damit zählt der
+       Eintrag nicht in die geplante Zeit des Tages hinein. */
+    const setGanztags = (an) => {
+        if (an) {
+            setStart(0);
+            setDur(0);
+            onSave({ allDay: true, days: Math.max(1, tage), start: 0, dur: 0, synced: false });
+        }
+        else {
+            const s = block.start || 9 * 60;
+            const d = block.dur || 60;
+            setStart(s);
+            setDur(d);
+            onSave({ allDay: false, days: 1, start: s, dur: d, synced: false });
+        }
+    };
+    /* richtung ist +1 oder -1 */
+    const setTageLive = (richtung) => onSave((b) => ({
+        days: Math.max(1, Math.min(MAX_SPAN, spanTage(b) + richtung)),
+        synced: false,
+    }));
     const commit = () => { saveTitle(); onClose(); };
+    /* Letzter Tag ausgeschrieben, damit "9 Tage" nicht nachgerechnet werden muss */
+    const bisLabel = () => {
+        const d = addDays(new Date(block.day + "T00:00:00"), tage - 1);
+        return `${DAY_NAMES[(d.getDay() + 6) % 7]} ${d.getDate()}.${pad(d.getMonth() + 1)}.`;
+    };
     useEffect(() => {
         const prev = document.body.style.overflow;
         document.body.style.overflow = "hidden";
@@ -3332,12 +3441,9 @@ function BlockEditor({ block, onClose, onSave, onDelete, onSync, onRepeat, proje
     return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.4)" }, onClick: commit },
         React.createElement("div", { className: "pl-sheet pl-scroll overscroll-contain w-full md:max-w-md rounded-t-lg md:rounded-lg p-4 flex flex-col gap-3 overflow-y-auto", style: { maxHeight: "88vh" }, onClick: (e) => e.stopPropagation() },
             React.createElement("div", { className: "flex items-start justify-between gap-2" },
-                React.createElement("div", { className: "mono text-xs pl-muted" },
-                    block.day,
-                    " \u00B7 ",
-                    minsToLabel(start),
-                    "\u2013",
-                    minsToLabel(start + dur)),
+                React.createElement("div", { className: "mono text-xs pl-muted" }, ganztags
+                    ? (tage > 1 ? `${block.day} bis ${bisLabel()} \u00B7 ${tage} Tage` : `${block.day} \u00B7 ganzt\u00E4gig`)
+                    : `${block.day} \u00B7 ${minsToLabel(start)}\u2013${minsToLabel(start + dur)}`),
                 React.createElement("button", { onClick: commit, className: "pl-muted p-1", "aria-label": "Schlie\u00DFen" },
                     React.createElement(X, { size: 18 }))),
             React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onBlur: saveTitle, onKeyDown: (e) => e.key === "Enter" && commit(), placeholder: "Titel eingeben", className: "pl-input px-2 py-2 rounded text-base" }),
@@ -3353,19 +3459,27 @@ function BlockEditor({ block, onClose, onSave, onDelete, onSync, onRepeat, proje
                             border: `1px solid ${on ? (_b = CATS[p.cat]) === null || _b === void 0 ? void 0 : _b.color : "var(--line)"}`,
                         } }, p.title));
                 })))),
-            React.createElement("div", { className: "flex flex-wrap items-end gap-4" },
-                React.createElement("div", null,
-                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Beginn"),
-                    React.createElement(TimeField, { value: start, onChange: setStartLive, color: (_a = CATS[cat]) === null || _a === void 0 ? void 0 : _a.color })),
-                React.createElement("div", { className: "flex-1 min-w-0" },
-                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Dauer"),
-                    React.createElement(Stepper, { value: durLabel(dur), onMinus: () => setDurLive(Math.max(15, dur - SLOT)), onPlus: () => setDurLive(Math.min(8 * 60, dur + SLOT)) }))),
-            React.createElement("div", null,
+            React.createElement("button", { onClick: () => setGanztags(!ganztags), className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs", style: ganztags ? { color: lift("#2B4B8F"), borderColor: "#2B4B8F" } : {} },
+                React.createElement(Calendar, { size: 13 }),
+                ganztags ? "Ganztägig — über mehrere Tage" : "Ganztägig (Urlaub, Praktikum …)"),
+            ganztags
+                ? (React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wie viele Tage?"),
+                    React.createElement(Stepper, { value: tage === 1 ? "1 Tag" : tage + " Tage", onMinus: () => setTageLive(-1), onPlus: () => setTageLive(+1) }),
+                    React.createElement("div", { className: "mono text-xs pl-muted mt-1" }, tage > 1 ? "läuft bis " + bisLabel() : "nur an diesem Tag")))
+                : (React.createElement("div", { className: "flex flex-wrap items-end gap-4" },
+                    React.createElement("div", null,
+                        React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Beginn"),
+                        React.createElement(TimeField, { value: start, onChange: setStartLive, color: (_a = CATS[cat]) === null || _a === void 0 ? void 0 : _a.color })),
+                    React.createElement("div", { className: "flex-1 min-w-0" },
+                        React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Dauer"),
+                        React.createElement(Stepper, { value: durLabel(dur), onMinus: () => setDurLive(Math.max(15, dur - SLOT)), onPlus: () => setDurLive(Math.min(8 * 60, dur + SLOT)) })))),
+            !ganztags && (React.createElement("div", null,
                 React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wie ist es gelaufen?"),
-                React.createElement(StatusButtons, { current: block.status, size: "lg", onPick: (s) => { onSave({ status: s }); } })),
-            React.createElement("button", { onClick: () => onRepeat({ ...block, title: title.trim() || "Ohne Titel", cat, start, dur }), className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs", style: block.tplId ? { color: lift("#1E6E5A"), borderColor: "#1E6E5A" } : {} },
+                React.createElement(StatusButtons, { current: block.status, size: "lg", onPick: (s) => { onSave({ status: s }); } }))),
+            !ganztags && (React.createElement("button", { onClick: () => onRepeat({ ...block, title: title.trim() || "Ohne Titel", cat, start, dur }), className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs", style: block.tplId ? { color: lift("#1E6E5A"), borderColor: "#1E6E5A" } : {} },
                 React.createElement(Repeat, { size: 13 }),
-                block.tplId ? "Jede Woche — in der Vorlage" : "Jede Woche wiederholen"),
+                block.tplId ? "Jede Woche — in der Vorlage" : "Jede Woche wiederholen")),
             React.createElement("div", { className: "flex items-center gap-2 pt-1" },
                 React.createElement("button", { onClick: onDelete, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } },
                     React.createElement(Trash2, { size: 13 }),
