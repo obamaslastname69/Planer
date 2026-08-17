@@ -100,7 +100,223 @@ const RECIPE_CATS = {
     getraenk: { label: "Getränk", color: "#0B6E8F" },
 };
 const RECIPE_CAT_KEYS = Object.keys(RECIPE_CATS);
-const UNITS = ["g", "kg", "ml", "l", "Stk", "EL", "TL", "Prise", "Bund", "Dose"];
+const UNITS = ["g", "kg", "ml", "l", "Stk", "Scheibe", "EL", "TL", "Prise", "Spritzer", "Bund", "Dose"];
+/* Haushaltsmaße in Gramm. Das sind Näherungen — ein Esslöffel Mehl und
+   einer Honig wiegen nicht gleich. Für Stück und Scheibe steht das Gewicht
+   an der Zutat selbst, weil ein Ei und ein Apfel nichts gemeinsam haben. */
+const EINHEIT_GRAMM = {
+    g: 1, ml: 1, kg: 1000, l: 1000,
+    EL: 12, TL: 4, Prise: 0.5, Spritzer: 2, Bund: 25, Dose: 400,
+};
+/* Nährwerte je 100 g: kcal, Kohlenhydrate, Eiweiß, Fett.
+   "stk" und "scheibe" geben das Gewicht eines Stücks bzw. einer Scheibe. */
+const NAEHRWERTE = {
+    /* Getreide, Beilagen */
+    "haferflocken": { kcal: 372, kh: 59, protein: 13, fett: 7 },
+    "reis": { kcal: 349, kh: 78, protein: 7, fett: 1 },
+    "nudeln": { kcal: 358, kh: 71, protein: 12, fett: 2 },
+    "vollkornnudeln": { kcal: 340, kh: 64, protein: 14, fett: 3 },
+    "mehl": { kcal: 348, kh: 72, protein: 10, fett: 1 },
+    "vollkornmehl": { kcal: 324, kh: 60, protein: 12, fett: 2 },
+    "brot": { kcal: 250, kh: 45, protein: 8, fett: 3, scheibe: 40 },
+    "vollkornbrot": { kcal: 218, kh: 37, protein: 9, fett: 3, scheibe: 45 },
+    "toast": { kcal: 275, kh: 50, protein: 9, fett: 4, scheibe: 25 },
+    "semmel": { kcal: 275, kh: 55, protein: 9, fett: 1, stk: 50 },
+    "kartoffel": { kcal: 77, kh: 17, protein: 2, fett: 0, stk: 120 },
+    "süßkartoffel": { kcal: 86, kh: 20, protein: 2, fett: 0, stk: 200 },
+    "couscous": { kcal: 376, kh: 72, protein: 13, fett: 2 },
+    "bulgur": { kcal: 342, kh: 76, protein: 12, fett: 1 },
+    "quinoa": { kcal: 368, kh: 64, protein: 14, fett: 6 },
+    "polenta": { kcal: 358, kh: 79, protein: 8, fett: 1 },
+    "semmelbrösel": { kcal: 350, kh: 72, protein: 11, fett: 3 },
+    /* Hülsenfrüchte */
+    "rote linsen": { kcal: 347, kh: 52, protein: 24, fett: 1 },
+    "linsen": { kcal: 336, kh: 49, protein: 24, fett: 2 },
+    "kichererbsen": { kcal: 364, kh: 44, protein: 19, fett: 6 },
+    "bohnen": { kcal: 333, kh: 50, protein: 21, fett: 1 },
+    "kidneybohnen": { kcal: 127, kh: 20, protein: 9, fett: 1 },
+    "erbsen": { kcal: 81, kh: 14, protein: 5, fett: 0 },
+    "sojaschnetzel": { kcal: 340, kh: 22, protein: 50, fett: 4 },
+    "tofu": { kcal: 144, kh: 3, protein: 16, fett: 8 },
+    /* Milch und Eier */
+    "milch": { kcal: 64, kh: 5, protein: 3, fett: 4 },
+    "magermilch": { kcal: 35, kh: 5, protein: 3, fett: 0 },
+    "joghurt": { kcal: 61, kh: 5, protein: 4, fett: 3 },
+    "naturjoghurt": { kcal: 61, kh: 5, protein: 4, fett: 3 },
+    "griechischer joghurt": { kcal: 133, kh: 4, protein: 6, fett: 10 },
+    "skyr": { kcal: 63, kh: 4, protein: 11, fett: 0 },
+    "topfen": { kcal: 103, kh: 3, protein: 13, fett: 5 },
+    "quark": { kcal: 103, kh: 3, protein: 13, fett: 5 },
+    "magertopfen": { kcal: 67, kh: 4, protein: 13, fett: 0 },
+    "sahne": { kcal: 292, kh: 3, protein: 2, fett: 30 },
+    "schlagobers": { kcal: 292, kh: 3, protein: 2, fett: 30 },
+    "sauerrahm": { kcal: 162, kh: 3, protein: 3, fett: 15 },
+    "frischkäse": { kcal: 253, kh: 3, protein: 8, fett: 23 },
+    "käse": { kcal: 356, kh: 0, protein: 25, fett: 28, scheibe: 30 },
+    "gouda": { kcal: 356, kh: 0, protein: 25, fett: 28, scheibe: 30 },
+    "mozzarella": { kcal: 254, kh: 1, protein: 18, fett: 20 },
+    "parmesan": { kcal: 402, kh: 0, protein: 36, fett: 29 },
+    "feta": { kcal: 264, kh: 4, protein: 14, fett: 21 },
+    "butter": { kcal: 741, kh: 1, protein: 1, fett: 82 },
+    "ei": { kcal: 137, kh: 1, protein: 12, fett: 10, stk: 58 },
+    "eiweiß": { kcal: 52, kh: 1, protein: 11, fett: 0 },
+    /* Fleisch und Fisch */
+    "hühnerbrust": { kcal: 105, kh: 0, protein: 23, fett: 1 },
+    "hühnerfleisch": { kcal: 144, kh: 0, protein: 20, fett: 7 },
+    "putenbrust": { kcal: 105, kh: 0, protein: 24, fett: 1 },
+    "faschiertes": { kcal: 216, kh: 0, protein: 19, fett: 15 },
+    "rindfleisch": { kcal: 187, kh: 0, protein: 21, fett: 11 },
+    "schweinefleisch": { kcal: 212, kh: 0, protein: 20, fett: 14 },
+    "speck": { kcal: 393, kh: 0, protein: 17, fett: 36 },
+    "schinken": { kcal: 110, kh: 1, protein: 20, fett: 3, scheibe: 25 },
+    "thunfisch": { kcal: 116, kh: 0, protein: 26, fett: 1 },
+    "lachs": { kcal: 202, kh: 0, protein: 20, fett: 13 },
+    "garnelen": { kcal: 99, kh: 0, protein: 24, fett: 0 },
+    /* Gemüse */
+    "zwiebel": { kcal: 40, kh: 9, protein: 1, fett: 0, stk: 110 },
+    "knoblauch": { kcal: 149, kh: 33, protein: 6, fett: 1, stk: 4 },
+    "karotte": { kcal: 41, kh: 10, protein: 1, fett: 0, stk: 80 },
+    "paprika": { kcal: 31, kh: 6, protein: 1, fett: 0, stk: 150 },
+    "tomate": { kcal: 18, kh: 4, protein: 1, fett: 0, stk: 100 },
+    "tomatenpassata": { kcal: 34, kh: 6, protein: 2, fett: 0 },
+    "tomatenmark": { kcal: 82, kh: 15, protein: 4, fett: 1 },
+    "zucchini": { kcal: 17, kh: 3, protein: 1, fett: 0, stk: 250 },
+    "melanzani": { kcal: 25, kh: 6, protein: 1, fett: 0, stk: 300 },
+    "brokkoli": { kcal: 34, kh: 7, protein: 3, fett: 0 },
+    "karfiol": { kcal: 25, kh: 5, protein: 2, fett: 0 },
+    "spinat": { kcal: 23, kh: 4, protein: 3, fett: 0 },
+    "champignons": { kcal: 22, kh: 3, protein: 3, fett: 0 },
+    "gurke": { kcal: 15, kh: 4, protein: 1, fett: 0, stk: 300 },
+    "kraut": { kcal: 25, kh: 6, protein: 1, fett: 0 },
+    "lauch": { kcal: 61, kh: 14, protein: 1, fett: 0, stk: 150 },
+    "sellerie": { kcal: 16, kh: 3, protein: 1, fett: 0 },
+    "mais": { kcal: 86, kh: 19, protein: 3, fett: 1 },
+    "salat": { kcal: 15, kh: 3, protein: 1, fett: 0 },
+    "ingwer": { kcal: 80, kh: 18, protein: 2, fett: 1 },
+    /* Obst */
+    "apfel": { kcal: 52, kh: 14, protein: 0, fett: 0, stk: 150 },
+    "banane": { kcal: 89, kh: 23, protein: 1, fett: 0, stk: 120 },
+    "orange": { kcal: 47, kh: 12, protein: 1, fett: 0, stk: 180 },
+    "zitrone": { kcal: 29, kh: 9, protein: 1, fett: 0, stk: 100 },
+    "beeren": { kcal: 45, kh: 10, protein: 1, fett: 0 },
+    "heidelbeeren": { kcal: 57, kh: 14, protein: 1, fett: 0 },
+    "himbeeren": { kcal: 52, kh: 12, protein: 1, fett: 1 },
+    "erdbeeren": { kcal: 32, kh: 8, protein: 1, fett: 0 },
+    "datteln": { kcal: 282, kh: 75, protein: 2, fett: 0, stk: 8 },
+    "rosinen": { kcal: 299, kh: 79, protein: 3, fett: 0 },
+    "avocado": { kcal: 160, kh: 9, protein: 2, fett: 15, stk: 200 },
+    /* Nüsse, Saaten, Fette */
+    "walnüsse": { kcal: 654, kh: 14, protein: 15, fett: 65 },
+    "mandeln": { kcal: 579, kh: 22, protein: 21, fett: 50 },
+    "haselnüsse": { kcal: 628, kh: 17, protein: 15, fett: 61 },
+    "cashews": { kcal: 553, kh: 30, protein: 18, fett: 44 },
+    "erdnussbutter": { kcal: 588, kh: 20, protein: 25, fett: 50 },
+    "sonnenblumenkerne": { kcal: 584, kh: 20, protein: 21, fett: 51 },
+    "kürbiskerne": { kcal: 559, kh: 11, protein: 30, fett: 49 },
+    "chiasamen": { kcal: 486, kh: 42, protein: 17, fett: 31 },
+    "leinsamen": { kcal: 534, kh: 29, protein: 18, fett: 42 },
+    "olivenöl": { kcal: 884, kh: 0, protein: 0, fett: 100, EL: 10 },
+    "rapsöl": { kcal: 884, kh: 0, protein: 0, fett: 100, EL: 10 },
+    "sonnenblumenöl": { kcal: 884, kh: 0, protein: 0, fett: 100, EL: 10 },
+    "kokosöl": { kcal: 862, kh: 0, protein: 0, fett: 100, EL: 10 },
+    /* Sonstiges */
+    "zucker": { kcal: 387, kh: 100, protein: 0, fett: 0, EL: 12 },
+    "honig": { kcal: 304, kh: 82, protein: 0, fett: 0, EL: 20 },
+    "ahornsirup": { kcal: 260, kh: 67, protein: 0, fett: 0, EL: 20 },
+    "kokosmilch": { kcal: 197, kh: 3, protein: 2, fett: 20 },
+    "sojasauce": { kcal: 53, kh: 5, protein: 8, fett: 0, EL: 15 },
+    "senf": { kcal: 66, kh: 5, protein: 4, fett: 3 },
+    "ketchup": { kcal: 101, kh: 24, protein: 1, fett: 0 },
+    "essig": { kcal: 21, kh: 1, protein: 0, fett: 0 },
+    "kakao": { kcal: 228, kh: 58, protein: 20, fett: 14 },
+    "schokolade": { kcal: 546, kh: 61, protein: 5, fett: 31 },
+    "proteinpulver": { kcal: 380, kh: 8, protein: 78, fett: 5 },
+    "hefe": { kcal: 105, kh: 12, protein: 12, fett: 2 },
+    "backpulver": { kcal: 97, kh: 24, protein: 0, fett: 0 },
+    "salz": { kcal: 0, kh: 0, protein: 0, fett: 0 },
+    "pfeffer": { kcal: 251, kh: 64, protein: 10, fett: 3 },
+    "wasser": { kcal: 0, kh: 0, protein: 0, fett: 0 },
+    "gemüsebrühe": { kcal: 4, kh: 1, protein: 0, fett: 0 },
+};
+/* Namen vergleichbar machen: Kleinschreibung, Umlaute und Füllwörter raus */
+function normName(s) {
+    return String(s || "").toLowerCase().trim()
+        .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+        .replace(/[^a-z0-9 ]/g, " ")
+        .replace(/\b(frisch|frische[rns]?|gehackt|gehackte[rns]?|gekocht|gekochte[rns]?|getrocknet|getrocknete[rns]?|fein|grob|klein|gross|geschnitten|gerieben|geriebene[rns]?|bio|nach belieben|etwas)\b/g, " ")
+        .replace(/\s+/g, " ").trim();
+}
+/* Passenden Tabelleneintrag suchen. Erst genau, dann als Teilwort -
+   "rote linsen" muss vor "linsen" gewinnen, deshalb längster Treffer. */
+const NAEHR_KEYS = Object.keys(NAEHRWERTE).map((k) => ({ key: k, norm: normName(k) }));
+function findeNaehrwerte(name) {
+    const n = normName(name);
+    if (!n)
+        return null;
+    let treffer = NAEHR_KEYS.find((e) => e.norm === n);
+    if (!treffer) {
+        const passend = NAEHR_KEYS.filter((e) => n.includes(e.norm) || e.norm.includes(n));
+        passend.sort((a, b) => b.norm.length - a.norm.length);
+        treffer = passend[0];
+    }
+    return treffer ? { key: treffer.key, werte: NAEHRWERTE[treffer.key] } : null;
+}
+/* Menge einer Zutat in Gramm. Gibt null zurück, wenn sich das nicht
+   sinnvoll umrechnen lässt (etwa "1 Stk" bei unbekannter Zutat). */
+function zutatGramm(zutat, werte) {
+    const menge = Number(String(zutat.amount).replace(",", "."));
+    if (!isFinite(menge) || menge <= 0)
+        return null;
+    const einheit = zutat.unit || "g";
+    if (einheit === "Stk")
+        return werte && werte.stk ? menge * werte.stk : null;
+    if (einheit === "Scheibe")
+        return werte && werte.scheibe ? menge * werte.scheibe : null;
+    /* Manche Zutaten haben ein eigenes Löffelgewicht (Öl, Honig) */
+    if (einheit === "EL" && werte && werte.EL)
+        return menge * werte.EL;
+    const faktor = EINHEIT_GRAMM[einheit];
+    return faktor ? menge * faktor : null;
+}
+/* Makros eines Rezepts aus den Zutaten. Liefert die Summe je Portion und
+   sagt offen, welche Zutaten nicht zugeordnet werden konnten - eine Summe,
+   der stillschweigend die Hälfte fehlt, wäre schlimmer als keine. */
+function rechneMakros(recipe) {
+    const portionen = Math.max(1, Number(recipe.portions) || 1);
+    const summe = { kcal: 0, kh: 0, protein: 0, fett: 0 };
+    const offen = [];
+    let erkannt = 0;
+    for (const z of recipe.ingredients || []) {
+        if (!z.name || !z.name.trim())
+            continue;
+        const fund = findeNaehrwerte(z.name);
+        if (!fund) {
+            offen.push(z.name.trim());
+            continue;
+        }
+        const gramm = zutatGramm(z, fund.werte);
+        if (gramm === null) {
+            offen.push(z.name.trim());
+            continue;
+        }
+        erkannt++;
+        const f = gramm / 100;
+        summe.kcal += (fund.werte.kcal || 0) * f;
+        summe.kh += (fund.werte.kh || 0) * f;
+        summe.protein += (fund.werte.protein || 0) * f;
+        summe.fett += (fund.werte.fett || 0) * f;
+    }
+    return {
+        erkannt: erkannt,
+        offen: offen,
+        jePortion: {
+            kcal: Math.round(summe.kcal / portionen),
+            kh: Math.round(summe.kh / portionen),
+            protein: Math.round(summe.protein / portionen),
+            fett: Math.round(summe.fett / portionen),
+        },
+    };
+}
 /* Menge lesbar machen: keine Nachkommastellen, wo keine nötig sind,
    und höchstens eine - "166.66667 g" hilft beim Kochen niemandem. */
 function mengeLabel(n) {
@@ -1204,7 +1420,8 @@ function PlannerApp() {
             portions: 2, timeMin: 30,
             ingredients: [{ id: uid(), amount: "", unit: "g", name: "" }],
             steps: [""],
-            kcal: "", protein: "",
+            /* leer heißt: aus den Zutaten rechnen */
+            kcal: "", kh: "", protein: "", fett: "",
             createdAt: Date.now(),
         };
         persist((prev) => ({ ...prev, recipes: [r, ...(prev.recipes || [])] }));
@@ -2332,6 +2549,9 @@ function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen }
             const k = RECIPE_CATS[r.cat] || RECIPE_CATS.hauptgericht;
             const c = lift(k.color);
             const zutaten = (r.ingredients || []).filter((z) => z.name.trim()).length;
+            /* Eingetragene kcal, sonst die aus den Zutaten gerechneten */
+            const eigenKcal = String(r.kcal || "").trim();
+            const kcalZeile = eigenKcal || (rechneMakros(r).jePortion.kcal || "");
             return (React.createElement("button", { key: r.id, onClick: () => onOpen(r.id), className: "pl-card rounded p-3 text-left flex items-center gap-3" },
                 React.createElement("span", { className: "w-1 self-stretch rounded-full shrink-0", style: { background: k.color, minHeight: 34 } }),
                 React.createElement("span", { className: "flex-1 min-w-0" },
@@ -2340,7 +2560,7 @@ function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen }
                         k.label,
                         zutaten ? ` · ${zutaten} ${zutaten === 1 ? "Zutat" : "Zutaten"}` : "",
                         r.timeMin ? ` · ${durLabel(Number(r.timeMin))}` : "",
-                        r.kcal ? ` · ${r.kcal} kcal` : "")),
+                        kcalZeile ? ` · ${kcalZeile} kcal` : "")),
                 React.createElement(ChevronRight, { size: 16, style: { color: c, flexShrink: 0 } })));
         })));
 }
@@ -2350,6 +2570,23 @@ function RecipeView({ recipe, onClose, onEdit }) {
     const basis = Math.max(1, Number(recipe.portions) || 1);
     const [ziel, setZiel] = useState(basis);
     const faktor = ziel / basis;
+    /* Eingetragene Werte haben Vorrang, sonst aus den Zutaten gerechnet */
+    const makros = useMemo(() => rechneMakros(recipe), [recipe]);
+    const wert = (feld) => {
+        const eigen = String(recipe[feld] || "").trim();
+        if (eigen)
+            return { zahl: Number(eigen), eigen: true };
+        const z = makros.jePortion[feld];
+        return z > 0 ? { zahl: z, eigen: false } : null;
+    };
+    const kcalWert = wert("kcal");
+    /* Woher die Zahlen kommen. Eine Schätzung soll nicht wie eine Messung
+       aussehen — und eine Mischung nicht wie reine Handarbeit. */
+    const alleWerte = ["kcal", "kh", "protein", "fett"].map(wert).filter(Boolean);
+    const gerechnet = alleWerte.filter((v) => !v.eigen).length;
+    const herkunft = gerechnet === 0 ? ""
+        : gerechnet === alleWerte.length ? " (aus Zutaten)"
+            : " (teils aus Zutaten)";
     const k = RECIPE_CATS[recipe.cat] || RECIPE_CATS.hauptgericht;
     const c = lift(k.color);
     const zutaten = (recipe.ingredients || []).filter((z) => z.name.trim());
@@ -2370,8 +2607,15 @@ function RecipeView({ recipe, onClose, onEdit }) {
                         React.createElement(X, { size: 20 }))),
                 React.createElement("div", { className: "mono text-xs pl-muted mt-2" },
                     recipe.timeMin ? durLabel(Number(recipe.timeMin)) : "ohne Zeitangabe",
-                    recipe.kcal ? ` · ${recipe.kcal} kcal je Portion` : "",
-                    recipe.protein ? ` · ${recipe.protein} g Eiweiß` : "")),
+                    ["kcal", "kh", "protein", "fett"].map((f) => {
+                        const v = wert(f);
+                        if (!v)
+                            return "";
+                        const lbl = f === "kcal" ? "kcal" : f === "kh" ? "g KH" : f === "protein" ? "g Eiweiß" : "g Fett";
+                        return ` · ${v.zahl} ${lbl}`;
+                    }).join(""),
+                    alleWerte.length ? " je Portion" : "",
+                    herkunft)),
             React.createElement("div", { className: "p-4 flex flex-col gap-4" },
                 React.createElement("div", null,
                     React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Für wie viele Portionen?"),
@@ -2396,9 +2640,10 @@ function RecipeView({ recipe, onClose, onEdit }) {
                     React.createElement("ol", { className: "flex flex-col gap-2" }, schritte.map((s, i) => (React.createElement("li", { key: i, className: "flex gap-2.5" },
                         React.createElement("span", { className: "mono text-xs shrink-0 rounded-full flex items-center justify-center", style: { width: 20, height: 20, background: hexA(k.color, 0.18), color: c, marginTop: 1 } }, i + 1),
                         React.createElement("span", { className: "text-sm leading-snug flex-1 min-w-0 break-words" }, s))))))),
-                recipe.kcal && ziel !== basis
-                    ? React.createElement("p", { className: "mono text-xs pl-muted" }, `Gesamt bei ${ziel} ${ziel === 1 ? "Portion" : "Portionen"}: ${Math.round(Number(recipe.kcal) * ziel)} kcal`)
+                kcalWert && ziel !== basis
+                    ? React.createElement("p", { className: "mono text-xs pl-muted" }, `Gesamt bei ${ziel} ${ziel === 1 ? "Portion" : "Portionen"}: ${Math.round(kcalWert.zahl * ziel)} kcal`)
                     : null,
+                makros.offen.length > 0 && !String(recipe.kcal || "").trim() && (React.createElement("p", { className: "mono text-xs", style: { color: lift("#8A4E1C") } }, `Nicht in der Nährwerttabelle: ${makros.offen.join(", ")} — die Werte sind ohne diese Zutaten gerechnet.`)),
                 React.createElement("button", { onClick: onEdit, className: "pl-btn px-3 py-2.5 rounded mono text-xs" }, "Bearbeiten")))));
 }
 /* Rezept bearbeiten. Getippter Text bleibt bis zum Verlassen des Feldes
@@ -2408,12 +2653,17 @@ function RecipeView({ recipe, onClose, onEdit }) {
 function RecipeEditor({ recipe, onClose, onSave, onDelete }) {
     const [title, setTitle] = useState(recipe.title || "");
     const [kcal, setKcal] = useState(recipe.kcal || "");
+    const [kh, setKh] = useState(recipe.kh || "");
     const [protein, setProtein] = useState(recipe.protein || "");
+    const [fett, setFett] = useState(recipe.fett || "");
     const [zutaten, setZutaten] = useState(() => (recipe.ingredients || []).slice());
     const [schritte, setSchritte] = useState(() => (recipe.steps || []).slice());
     const [confirmDel, setConfirmDel] = useState(false);
     const portionen = Math.max(1, Number(recipe.portions) || 1);
     const zeit = Math.max(0, Number(recipe.timeMin) || 0);
+    /* Aus den Zeilen im Sheet rechnen, nicht aus dem gesicherten Stand -
+       so läuft die Summe beim Tippen mit */
+    const makros = useMemo(() => rechneMakros({ ...recipe, ingredients: zutaten }), [recipe.portions, zutaten]);
     const sichereZutaten = (liste) => onSave({ ingredients: liste });
     const sichereSchritte = (liste) => onSave({ steps: liste });
     const setZutat = (i, feld, wert) => setZutaten((alt) => alt.map((z, j) => (j === i ? { ...z, [feld]: wert } : z)));
@@ -2424,7 +2674,7 @@ function RecipeEditor({ recipe, onClose, onSave, onDelete }) {
     const delSchritt = (i) => setSchritte((alt) => { const neu = alt.filter((_, j) => j !== i); sichereSchritte(neu); return neu; });
     /* Beim Schließen alles festschreiben, damit nichts verloren geht */
     const commit = () => {
-        onSave({ title: title.trim() || "Ohne Titel", kcal, protein, ingredients: zutaten, steps: schritte });
+        onSave({ title: title.trim() || "Ohne Titel", kcal, kh, protein, fett, ingredients: zutaten, steps: schritte });
         onClose();
     };
     useEffect(() => {
@@ -2457,12 +2707,17 @@ function RecipeEditor({ recipe, onClose, onSave, onDelete }) {
                     React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Zeit"),
                     React.createElement(Stepper, { value: zeit ? durLabel(zeit) : "—", onMinus: () => onSave((r) => ({ timeMin: Math.max(0, (Number(r.timeMin) || 0) - 5) })), onPlus: () => onSave((r) => ({ timeMin: Math.min(600, (Number(r.timeMin) || 0) + 5) })) }))),
             React.createElement("div", null,
-                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Je Portion"),
-                React.createElement("div", { className: "flex items-center gap-2" },
-                    React.createElement("input", { value: kcal, onChange: (e) => setKcal(e.target.value.replace(/[^\d]/g, "")), onBlur: () => onSave({ kcal }), inputMode: "numeric", placeholder: "kcal", className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 84 } }),
-                    React.createElement("span", { className: "mono text-xs pl-muted" }, "kcal"),
-                    React.createElement("input", { value: protein, onChange: (e) => setProtein(e.target.value.replace(/[^\d]/g, "")), onBlur: () => onSave({ protein }), inputMode: "numeric", placeholder: "Eiweiß", className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 84 } }),
-                    React.createElement("span", { className: "mono text-xs pl-muted" }, "g Eiweiß"))),
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Je Portion — leer lassen, dann wird aus den Zutaten gerechnet"),
+                React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
+                    [["kcal", kcal, setKcal, "kcal"], ["kh", kh, setKh, "g KH"], ["protein", protein, setProtein, "g Eiweiß"], ["fett", fett, setFett, "g Fett"]].map(([feld, wert, setzen, lbl]) => (React.createElement("span", { key: feld, className: "flex items-center gap-1" },
+                        React.createElement("input", { value: wert, onChange: (e) => setzen(e.target.value.replace(/[^\d]/g, "")), onBlur: () => onSave({ [feld]: wert }), inputMode: "numeric", placeholder: String(makros.jePortion[feld]), className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 62 } }),
+                        React.createElement("span", { className: "mono text-xs pl-muted" }, lbl))))),
+                /* Was die Tabelle aus den Zutaten macht - offen dazu, was sie
+                   nicht zuordnen konnte */
+                makros.erkannt > 0 && (React.createElement("div", { className: "mono text-xs pl-muted mt-1.5 leading-relaxed" },
+                    `aus den Zutaten: ${makros.jePortion.kcal} kcal · ${makros.jePortion.kh} g KH · ${makros.jePortion.protein} g Eiweiß · ${makros.jePortion.fett} g Fett`,
+                    makros.offen.length > 0 && React.createElement("span", { style: { color: lift("#8A4E1C") } }, ` — ohne ${makros.offen.join(", ")}`))),
+                makros.erkannt === 0 && (recipe.ingredients || []).some((z) => z.name && z.name.trim()) && (React.createElement("div", { className: "mono text-xs mt-1.5", style: { color: lift("#8A4E1C") } }, "Keine der Zutaten ist in der Nährwerttabelle — bitte selbst eintragen."))),
             React.createElement("div", null,
                 React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Zutaten für " + portionen + (portionen === 1 ? " Portion" : " Portionen")),
                 React.createElement("div", { className: "flex flex-col gap-1.5" }, zutaten.map((z, i) => (React.createElement("div", { key: z.id || i, className: "flex items-center gap-1.5" },
