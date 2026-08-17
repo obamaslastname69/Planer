@@ -68,13 +68,13 @@ h1,h2,h3,p{margin:0;}
 .text-2xl{font-size:24px;line-height:30px;}
 .text-3xl{font-size:30px;line-height:34px;}
 .text-4xl{font-size:36px;line-height:38px;}
-.rounded-sm{border-radius:2px;}
-.rounded{border-radius:4px;}
-.rounded-lg{border-radius:8px;}
+.rounded-sm{border-radius:5px;}
+.rounded{border-radius:10px;}
+.rounded-lg{border-radius:18px;}
 .rounded-full{border-radius:9999px;}
-.rounded-l{border-radius:4px 0 0 4px;}
-.rounded-r{border-radius:0 4px 4px 0;}
-.rounded-t-lg{border-radius:8px 8px 0 0;}
+.rounded-l{border-radius:10px 0 0 10px;}
+.rounded-r{border-radius:0 10px 10px 0;}
+.rounded-t-lg{border-radius:18px 18px 0 0;}
 .border-t{border-top:1px solid var(--line);}
 .border-b{border-bottom:1px solid var(--line);}
 .border-l{border-left:1px solid var(--line);}
@@ -245,7 +245,7 @@ h1,h2,h3,p{margin:0;}
 .md\:mx-auto{margin-left:auto;margin-right:auto;}
 .md\:max-w-md{max-width:448px;}.md\:max-w-2xl{max-width:672px;}
 .md\:p-6{padding:24px;}.md\:px-6{padding-left:24px;padding-right:24px;}
-.md\:rounded-lg{border-radius:8px;}
+.md\:rounded-lg{border-radius:18px;}
 .md\:text-3xl{font-size:30px;line-height:34px;}
 }
 @media (min-width:1024px){.lg\:flex-row{flex-direction:row;}.lg\:w-80{width:320px;}}

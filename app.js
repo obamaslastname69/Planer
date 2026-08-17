@@ -1925,6 +1925,13 @@ function PlannerApp() {
           --paper:#E4E6E1; --card:#FAFAF8; --ink:#191D1A; --muted:#6F7A72;
           --line:#CBD0C9; --line-soft:#DDE0DA;
           --hover:#F0F1EE; --stripe:rgba(255,255,255,.5);
+          /* Weiche Kurve fuer alle Uebergaenge - laesst Bewegung ausrollen
+             statt abrupt zu stoppen */
+          --weich:cubic-bezier(.22,.8,.28,1);
+          /* Tiefe kommt ueber Schatten statt ueber harte Kanten */
+          --schein:0 1px 2px rgba(25,29,26,.04), 0 3px 10px -3px rgba(25,29,26,.07);
+          --schein-hoch:0 2px 4px rgba(25,29,26,.05), 0 8px 20px -6px rgba(25,29,26,.12);
+          --schein-sheet:0 2px 6px rgba(25,29,26,.06), 0 28px 56px -18px rgba(25,29,26,.30);
           background:var(--paper); color:var(--ink); min-height:100vh;
           font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
           -webkit-font-smoothing:antialiased;
@@ -1932,33 +1939,50 @@ function PlannerApp() {
         .pl-root *{box-sizing:border-box;}
         .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
         .pl-muted{color:var(--muted);}
-        .pl-card{background:var(--card);border:1px solid var(--line);}
+        /* Flaechen tragen eine zarte Kante plus weichen Schein - die harte
+           1px-Linie allein wirkte kantig */
+        .pl-card{background:var(--card);border:1px solid var(--line-soft);
+          box-shadow:var(--schein);}
         .pl-hair{border-color:var(--line-soft);}
         .pl-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);
-          transition:background .12s ease,border-color .12s ease;}
-        .pl-btn:hover{background:var(--hover);border-color:var(--muted);}
+          transition:background .2s var(--weich),border-color .2s var(--weich),
+            box-shadow .2s var(--weich),transform .2s var(--weich);}
+        /* Nur mit echter Maus anheben - auf dem Tablet bliebe der Hover
+           nach dem Tippen sonst haengen */
+        @media (hover:hover){
+          .pl-btn:hover{background:var(--hover);border-color:var(--line);
+            box-shadow:var(--schein-hoch);transform:translateY(-1px);}
+        }
+        .pl-btn:active{transform:translateY(0);box-shadow:var(--schein);}
         .pl-dark{
           --paper:#15181A; --card:#1E2225; --ink:#E7EAE5; --muted:#939C95;
           --line:#353C3D; --line-soft:#272C2E;
           --hover:#282E30; --stripe:rgba(255,255,255,.09);
+          --schein:0 1px 2px rgba(0,0,0,.30), 0 3px 10px -3px rgba(0,0,0,.40);
+          --schein-hoch:0 2px 4px rgba(0,0,0,.35), 0 8px 20px -6px rgba(0,0,0,.50);
+          --schein-sheet:0 2px 6px rgba(0,0,0,.40), 0 28px 56px -18px rgba(0,0,0,.65);
           color-scheme:dark;
         }
-        .pl-dark .pl-sheet{box-shadow:0 18px 40px -12px rgba(0,0,0,.6);}
         .pl-dark input,.pl-dark textarea{color:var(--ink);}
         .pl-dark input::placeholder,.pl-dark textarea::placeholder{color:var(--muted);}
         .pl-btn:focus-visible,.pl-tap:focus-visible{outline:2px solid #2B4B8F;outline-offset:2px;}
-        .pl-slot{transition:background .1s ease;}
+        .pl-slot{transition:background .18s var(--weich);}
         .pl-slot:hover{background:rgba(43,75,143,.07);}
         .pl-arm .pl-slot:hover{background:rgba(30,110,90,.14);}
-        .pl-block{border-radius:3px;overflow:hidden;text-align:left;width:100%;
-          transition:filter .12s ease;}
-        .pl-block:hover{filter:brightness(.96);}
+        .pl-block{border-radius:7px;overflow:hidden;text-align:left;width:100%;
+          transition:filter .2s var(--weich),box-shadow .2s var(--weich);}
+        @media (hover:hover){
+          .pl-block:hover{filter:brightness(.97);box-shadow:var(--schein-hoch);}
+        }
         .pl-ext{background-image:repeating-linear-gradient(135deg,transparent 0 5px,var(--stripe) 5px 6px);}
         .pl-scroll{scrollbar-width:thin;}
-        .pl-input{background:var(--card);border:1px solid var(--line);color:var(--ink);width:100%;}
+        .pl-input{background:var(--card);border:1px solid var(--line);color:var(--ink);width:100%;
+          transition:border-color .2s var(--weich),box-shadow .2s var(--weich);}
         .pl-input:focus{outline:2px solid #2B4B8F;outline-offset:-1px;}
-        .pl-sheet{background:var(--card);border:1px solid var(--ink);
-          box-shadow:0 18px 40px -12px rgba(25,29,26,.35);}
+        /* Der Dialog stand vorher in einer harten fast schwarzen Linie -
+           jetzt hebt ihn ein weicher Schatten von der Seite ab */
+        .pl-sheet{background:var(--card);border:1px solid var(--line-soft);
+          box-shadow:var(--schein-sheet);}
         @media (prefers-reduced-motion:reduce){.pl-root *{transition:none!important;animation:none!important;}}
 
         /* Bewegung */
