@@ -203,6 +203,25 @@ function weekHits(routine, checks, weekStartDate) {
 const GOOGLE_CLIENT_ID = (typeof window !== "undefined" && window.PLANER_CLIENT_ID) || "";
 const GC_SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.appdata";
 const GC_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+/* Termin-Adresse eines beliebigen Kalenders — die ID enthält ein @ und muss kodiert werden */
+const gcEventsUrl = (calendarId) => "https://www.googleapis.com/calendar/v3/calendars/"
+    + encodeURIComponent(calendarId || "primary") + "/events";
+/* Gelesen wird der eigene Kalender plus alles, was in config.js steht */
+function gcReadCalendars() {
+    const list = [{ id: "primary", label: "", color: null }];
+    const extra = (typeof window !== "undefined" && window.PLANER_EXTRA_CALENDARS) || [];
+    for (const eintrag of extra) {
+        if (!eintrag)
+            continue;
+        const cal = typeof eintrag === "string" ? { id: eintrag } : eintrag;
+        if (!cal.id || cal.id === "primary")
+            continue;
+        list.push({ id: cal.id, label: cal.label || "", color: cal.color || null });
+    }
+    return list;
+}
+/* Zusatzkalender, die beim letzten Laden nicht erreichbar waren */
+let gcUebersprungen = [];
 const GC_TOKEN_KEY = "planer:gctoken";
 let gcToken = null, gcExpiry = 0;
 const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
@@ -238,9 +257,17 @@ function gcClearToken() {
 }
 /* Gibt es gerade ein gültiges Token? Prüft ohne Anmeldefenster zu öffnen. */
 const gcHasToken = () => !!gcToken && Date.now() < gcExpiry - 120000;
+/* Läuft schon eine Anmeldung? Dann hängen sich weitere Anfragen daran an.
+   Sonst öffnen mehrere gleichzeitige Abfragen (Kalender + Drive) je ein
+   eigenes Google-Fenster — Google lässt nur eines zu, der Rest scheitert. */
+let gcAuthLaufend = null;
 /* silent = true versucht die Verlängerung ohne sichtbares Fenster */
 function gcAuth(silent) {
-    return new Promise((resolve, reject) => {
+    if (gcToken && Date.now() < gcExpiry - 120000)
+        return Promise.resolve(gcToken);
+    if (gcAuthLaufend)
+        return gcAuthLaufend;
+    gcAuthLaufend = new Promise((resolve, reject) => {
         if (!gcConfigured())
             return reject(new Error("keine Client-ID hinterlegt"));
         if (gcToken && Date.now() < gcExpiry - 120000)
@@ -277,14 +304,25 @@ function gcAuth(silent) {
         });
         client.requestAccessToken();
     });
+    /* Egal wie es ausgeht — der nächste Aufruf darf es neu versuchen */
+    const aufraeumen = () => { gcAuthLaufend = null; };
+    gcAuthLaufend.then(aufraeumen, aufraeumen);
+    return gcAuthLaufend;
 }
 async function gcFetch(url, opts, retried) {
     const o = opts || {};
+    /* Zusatzkalender sind Beiwerk: klemmt einer, darf das nicht die
+       Anmeldung für alles andere wegwerfen. */
+    const nebensache = !!o.nebensache;
+    const fetchOpts = Object.assign({}, o);
+    delete fetchOpts.nebensache;
     const token = await gcAuth();
-    const res = await fetch(url, Object.assign({}, o, {
+    const res = await fetch(url, Object.assign({}, fetchOpts, {
         headers: Object.assign({ Authorization: "Bearer " + token, "Content-Type": "application/json" }, o.headers || {}),
     }));
     if (res.status === 401) {
+        if (nebensache)
+            throw new Error("kein Zugriff (401)");
         gcClearToken();
         if (!retried)
             return gcFetch(url, o, true);
@@ -304,23 +342,45 @@ async function loadCalendar(weekStart) {
         timeMin: from.toISOString(), timeMax: to.toISOString(),
         singleEvents: "true", orderBy: "startTime", maxResults: "250",
     });
-    const data = await gcFetch(GC_API + "?" + q);
+    const cals = gcReadCalendars();
+    /* Erst den eigenen Kalender: der holt bei Bedarf die Anmeldung.
+       Danach die Zusatzkalender - die laufen dann mit gültigem Token. */
+    const eigene = await gcFetch(gcEventsUrl(cals[0].id) + "?" + q);
+    const weitere = await Promise.allSettled(cals.slice(1).map((cal) => gcFetch(gcEventsUrl(cal.id) + "?" + q, { nebensache: true })));
     const out = [];
+    gcUebersprungen = [];
+    sammleTermine(eigene, cals[0], "c0", out);
+    weitere.forEach((antwort, i) => {
+        const cal = cals[i + 1];
+        /* Ein Zusatzkalender, der klemmt (gelöscht, kein Zugriff), wird
+           übersprungen statt den ganzen Abgleich scheitern zu lassen. */
+        if (antwort.status === "rejected") {
+            gcUebersprungen.push(cal.label || cal.id);
+            console.warn("Kalender übersprungen: " + cal.id, antwort.reason && antwort.reason.message);
+            return;
+        }
+        sammleTermine(antwort.value, cal, "c" + (i + 1), out);
+    });
+    return out;
+}
+/* Termine eines Kalenders in Tagesblöcke übersetzen und an "out" anhängen */
+function sammleTermine(data, cal, praefix, out) {
     for (const ev of data.items || []) {
-        const color = GC_COLORS[ev.colorId] || null;
+        const color = GC_COLORS[ev.colorId] || cal.color || null;
         const title = ev.summary || "Termin";
-        const base = { title: title, cat: "extern", color: color, external: true, gcalRawId: String(ev.id || "") };
+        const eid = praefix + "-" + (ev.id || uid());
+        const base = { title: title, cat: "extern", color: color, external: true, gcalRawId: String(ev.id || ""), calLabel: cal.label || "" };
         /* Ganztägig: end.date ist der Tag NACH dem letzten Tag */
         if (ev.start && ev.start.date) {
             let d = new Date(ev.start.date + "T00:00:00");
             const last = new Date(((ev.end && ev.end.date) || ev.start.date) + "T00:00:00");
             let guard = 0;
             while (d < last && guard++ < 60) {
-                out.push({ ...base, id: "gc-" + (ev.id || uid()) + "-" + dayKey(d), day: dayKey(d), allDay: true, start: 0, dur: 0 });
+                out.push({ ...base, id: "gc-" + eid + "-" + dayKey(d), day: dayKey(d), allDay: true, start: 0, dur: 0 });
                 d = addDays(d, 1);
             }
             if (guard === 0)
-                out.push({ ...base, id: "gc-" + (ev.id || uid()), day: dayKey(d), allDay: true, start: 0, dur: 0 });
+                out.push({ ...base, id: "gc-" + eid, day: dayKey(d), allDay: true, start: 0, dur: 0 });
             continue;
         }
         /* Mit Uhrzeit: über Mitternacht hinweg in Tagesstücke schneiden */
@@ -340,7 +400,7 @@ async function loadCalendar(weekStart) {
             if (endMin > startMin) {
                 out.push({
                     ...base,
-                    id: "gc-" + (ev.id || uid()) + "-" + dayKey(cur),
+                    id: "gc-" + eid + "-" + dayKey(cur),
                     day: dayKey(cur), start: startMin, dur: endMin - startMin,
                     allDay: false,
                     cont: cur > s0, // läuft von gestern herein
@@ -350,7 +410,6 @@ async function loadCalendar(weekStart) {
             cur = midnight;
         }
     }
-    return out;
 }
 async function pushToCalendar(block) {
     const date = new Date(block.day + "T00:00:00");
@@ -853,8 +912,9 @@ function PlannerApp() {
             const evs = await loadCalendar(weekStart);
             setExternal(evs);
             setSync({
-                status: "ok",
-                msg: evs.length ? `${evs.length} Termine geladen` : "Keine Termine in dieser Woche",
+                status: gcUebersprungen.length ? "error" : "ok",
+                msg: (evs.length ? `${evs.length} Termine geladen` : "Keine Termine in dieser Woche")
+                    + (gcUebersprungen.length ? ` · ${gcUebersprungen.join(", ")} nicht erreichbar` : ""),
             });
             cloudRef.current.armed = true;
         }
@@ -882,7 +942,11 @@ function PlannerApp() {
             if (abgebrochen)
                 return;
             setExternal(evs);
-            setSync({ status: "ok", msg: evs.length ? `${evs.length} Termine` : "keine Termine" });
+            setSync({
+                status: gcUebersprungen.length ? "error" : "ok",
+                msg: (evs.length ? `${evs.length} Termine` : "keine Termine")
+                    + (gcUebersprungen.length ? ` · ${gcUebersprungen.join(", ")} nicht erreichbar` : ""),
+            });
             cloudRef.current.armed = true;
         })
             .catch(() => { if (!abgebrochen)
@@ -2296,7 +2360,7 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                         React.createElement("span", { className: "text-sm block truncate", style: { textDecoration: b.status === "skipped" ? "line-through" : "none" } }, b.title || "Ohne Titel"),
                         React.createElement("span", { className: "mono text-xs pl-muted" },
                             durLabel(b.dur),
-                            b.external ? " · Kalender" : "",
+                            b.external ? " · " + (b.calLabel || "Kalender") : "",
                             isRunning ? " · läuft" : "")),
                     b.status === "done" && React.createElement(Check, { size: 14, style: { color: lift("#1E6E5A") } }),
                     b.status === "moved" && React.createElement(ArrowRight, { size: 14, style: { color: lift("#8A4E1C") } }),
@@ -3123,7 +3187,7 @@ function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, on
             React.createElement("div", { style: { background: hexA(c, 0.14), borderBottom: `2px solid ${c}` }, className: "px-5 pt-4 pb-4" },
                 React.createElement("div", { className: "flex items-start justify-between gap-3" },
                     React.createElement("div", { className: "min-w-0" },
-                        React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: lift(c) } }, block.external ? "aus Google Kalender" : (_a = CATS[block.cat]) === null || _a === void 0 ? void 0 : _a.label),
+                        React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: lift(c) } }, block.external ? (block.calLabel ? "aus " + block.calLabel : "aus Google Kalender") : (_a = CATS[block.cat]) === null || _a === void 0 ? void 0 : _a.label),
                         React.createElement("h2", { className: "text-2xl font-semibold leading-tight mt-0.5 break-words" }, block.title || "Ohne Titel")),
                     React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schlie\u00DFen" },
                         React.createElement(X, { size: 20 }))),
