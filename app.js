@@ -275,26 +275,48 @@ function gcAuth(silent) {
         if (!(window.google && window.google.accounts && window.google.accounts.oauth2))
             return reject(new Error("Google-Bibliothek nicht geladen"));
         let fertig = false;
+        /* Alles wieder abraeumen, damit nichts stehen bleibt */
+        const schliessen = () => {
+            fertig = true;
+            clearTimeout(wecker);
+            document.removeEventListener("visibilitychange", zurueckInDerApp);
+        };
         const wecker = setTimeout(() => {
-            if (!fertig) {
-                fertig = true;
-                reject(new Error("Anmeldung ohne Antwort — Fenster geschlossen oder Popup blockiert?"));
-            }
-        }, 90000);
+            if (fertig) return;
+            schliessen();
+            reject(new Error("Anmeldung ohne Antwort — Fenster geschlossen oder Popup blockiert?"));
+        }, 45000);
+        /* Als App installiert (Android, standalone) meldet Google das Schliessen
+           des Anmeldefensters oft nicht zurueck — dann haengt der Abgleich ewig.
+           Kommt der Nutzer zur App zurueck und ist kurz darauf immer noch kein
+           Token da, brechen wir mit einer klaren Meldung ab statt weiterzuladen.
+           Am Rechner bleibt die Seite waehrend des Popups sichtbar, dort greift
+           das also nicht. */
+        function zurueckInDerApp() {
+            if (fertig || document.visibilityState !== "visible")
+                return;
+            setTimeout(() => {
+                if (fertig || gcHasToken())
+                    return;
+                schliessen();
+                reject(new Error("Anmeldung nicht abgeschlossen — bitte noch einmal versuchen"));
+            }, 3000);
+        }
+        document.addEventListener("visibilitychange", zurueckInDerApp);
         const client = window.google.accounts.oauth2.initTokenClient({
             client_id: GOOGLE_CLIENT_ID,
             scope: GC_SCOPE,
             prompt: "",
             callback: (res) => {
                 if (fertig) return;
-                fertig = true; clearTimeout(wecker);
+                schliessen();
                 if (res.error) return reject(new Error(res.error));
                 gcStoreToken(res.access_token, res.expires_in);
                 resolve(gcToken);
             },
             error_callback: (e) => {
                 if (fertig) return;
-                fertig = true; clearTimeout(wecker);
+                schliessen();
                 const typ = (e && e.type) || "";
                 reject(new Error(
                     typ === "popup_closed" ? "Fenster geschlossen"
