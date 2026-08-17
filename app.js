@@ -87,6 +87,28 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
+/* ── Rezepte ────────────────────────────────────────────────
+   Zutaten liegen zerlegt vor (Menge / Einheit / Name), damit sich die
+   Mengen auf eine andere Portionszahl umrechnen lassen. */
+const RECIPE_CATS = {
+    fruehstueck: { label: "Frühstück", color: "#A8761A" },
+    hauptgericht: { label: "Hauptgericht", color: "#1E6E5A" },
+    beilage: { label: "Beilage", color: "#5E7A1E" },
+    snack: { label: "Snack", color: "#C2410C" },
+    backen: { label: "Backen", color: "#8A4E1C" },
+    mealprep: { label: "Meal Prep", color: "#12657F" },
+    getraenk: { label: "Getränk", color: "#0B6E8F" },
+};
+const RECIPE_CAT_KEYS = Object.keys(RECIPE_CATS);
+const UNITS = ["g", "kg", "ml", "l", "Stk", "EL", "TL", "Prise", "Bund", "Dose"];
+/* Menge lesbar machen: keine Nachkommastellen, wo keine nötig sind,
+   und höchstens eine - "166.66667 g" hilft beim Kochen niemandem. */
+function mengeLabel(n) {
+    if (!isFinite(n) || n <= 0)
+        return "";
+    const gerundet = Math.round(n * 10) / 10;
+    return String(Number.isInteger(gerundet) ? gerundet : gerundet.toFixed(1)).replace(".", ",");
+}
 const APP_VERSION = "2026-08-15b · To-dos und Termine verbunden";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
@@ -817,6 +839,7 @@ const DEFAULT_STATE = {
     studyDone: {},
     study: null,
     training: null,
+    recipes: [],
     updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
@@ -842,6 +865,11 @@ function PlannerApp() {
     const suppressClick = useRef(false);
     const [panel, setPanel] = useState("todos");
     const [editor, setEditor] = useState(null);
+    /* Rezepte: geöffnet zum Lesen bzw. zum Bearbeiten (jeweils die id) */
+    const [recipeOpen, setRecipeOpen] = useState(null);
+    const [recipeEdit, setRecipeEdit] = useState(null);
+    const [recipeFilter, setRecipeFilter] = useState("alle");
+    const [recipeQuery, setRecipeQuery] = useState("");
     const [pendingTodo, setPendingTodo] = useState(null);
     const [celebration, setCelebration] = useState(null);
     const [manualPick, setManualPick] = useState(null);
@@ -1151,6 +1179,33 @@ function PlannerApp() {
     const setProjectTarget = (id, target) => persist((prev) => ({
         ...prev,
         projects: (prev.projects || []).map((p) => (p.id === id ? { ...p, target } : p)),
+    }));
+    /* ── Rezepte ────────────────────────────────────────── */
+    /* Immer frisch aus dem Zustand lesen, damit die Sheets Änderungen sofort zeigen */
+    const offenesRezept = (state.recipes || []).find((r) => r.id === recipeOpen) || null;
+    const bearbeitetesRezept = (state.recipes || []).find((r) => r.id === recipeEdit) || null;
+    const addRecipe = () => {
+        const r = {
+            id: uid(), title: "", cat: "hauptgericht",
+            portions: 2, timeMin: 30,
+            ingredients: [{ id: uid(), amount: "", unit: "g", name: "" }],
+            steps: [""],
+            kcal: "", protein: "",
+            createdAt: Date.now(),
+        };
+        persist((prev) => ({ ...prev, recipes: [r, ...(prev.recipes || [])] }));
+        setRecipeEdit(r.id);
+    };
+    /* patch darf eine Funktion sein - siehe updateBlock */
+    const updateRecipe = (id, patch) => persist((prev) => ({
+        ...prev,
+        recipes: (prev.recipes || []).map((r) => (r.id === id
+            ? { ...r, ...(typeof patch === "function" ? patch(r) : patch) }
+            : r)),
+    }));
+    const removeRecipe = (id) => persist((prev) => ({
+        ...prev,
+        recipes: (prev.recipes || []).filter((r) => r.id !== id),
     }));
     const projectStats = useMemo(() => {
         const map = {};
@@ -1539,7 +1594,7 @@ function PlannerApp() {
         addBlock(day, minutes);
     };
     /* Wischen zwischen den Ansichten */
-    const VIEWS = ["heute", "woche", "training", "lernen", "auswerten"];
+    const VIEWS = ["heute", "woche", "training", "lernen", "auswerten", "rezepte"];
     const goView = (k, dir) => {
         if (k === view)
             return;
@@ -2067,7 +2122,7 @@ function PlannerApp() {
         .pl-roll-down{animation:pl-roll-down .2s cubic-bezier(.2,.9,.3,1);}
       `),
         React.createElement("div", { className: "px-4 pt-4 pb-2 md:px-6" },
-            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["training", "Training"], ["lernen", "Lernen"], ["auswerten", "Bilanz"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
+            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["training", "Training"], ["lernen", "Lernen"], ["auswerten", "Bilanz"], ["rezepte", "Rezepte"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
                     ? { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" }
                     : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
                 lbl,
@@ -2188,6 +2243,7 @@ function PlannerApp() {
                 }))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan }))),
+            view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id) })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -2215,7 +2271,212 @@ function PlannerApp() {
                 React.createElement("div", { className: "text-4xl font-semibold", style: { color: lift(celebration.color) } }, celebration.title),
                 React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
         detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onMakeTodo: blockZuTodo, todo: detailBlock && detailBlock.todoId ? state.todos.find((t) => t.id === detailBlock.todoId) : null, onDelete: () => { removeBlockAndCalendar(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
-        editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor((e) => ({ ...e, ...(typeof patch === "function" ? patch(e) : patch) })); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
+        editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor((e) => ({ ...e, ...(typeof patch === "function" ? patch(e) : patch) })); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" })),
+        offenesRezept && (React.createElement(RecipeView, {
+            recipe: offenesRezept, onClose: () => setRecipeOpen(null),
+            onEdit: () => { setRecipeEdit(offenesRezept.id); setRecipeOpen(null); },
+        })),
+        bearbeitetesRezept && (React.createElement(RecipeEditor, {
+            recipe: bearbeitetesRezept, onClose: () => setRecipeEdit(null),
+            onSave: (patch) => updateRecipe(bearbeitetesRezept.id, patch),
+            onDelete: () => { removeRecipe(bearbeitetesRezept.id); setRecipeEdit(null); },
+        }))));
+}
+/* ════════════════ Rezepte ════════════════ */
+function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen }) {
+    const suche = query.trim().toLowerCase();
+    const gefiltert = recipes.filter((r) => {
+        if (filter !== "alle" && r.cat !== filter)
+            return false;
+        if (!suche)
+            return true;
+        /* Auch in den Zutaten suchen - "was kann ich mit Kichererbsen machen?" */
+        const zutaten = (r.ingredients || []).map((z) => z.name).join(" ");
+        return (r.title + " " + zutaten).toLowerCase().includes(suche);
+    });
+    /* Nur Kategorien anbieten, in denen wirklich etwas liegt */
+    const belegt = RECIPE_CAT_KEYS.filter((k) => recipes.some((r) => r.cat === k));
+    return (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
+        React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement("input", { value: query, onChange: (e) => onQuery(e.target.value), placeholder: "Rezept oder Zutat suchen", className: "pl-input px-3 py-2 rounded text-sm flex-1" }),
+            React.createElement("button", { onClick: onAdd, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs shrink-0" },
+                React.createElement(Plus, { size: 13 }),
+                "Neu")),
+        belegt.length > 0 && (React.createElement("div", { className: "flex flex-wrap gap-1.5" }, [["alle", "alle"], ...belegt.map((k) => [k, RECIPE_CATS[k].label])].map(([k, lbl]) => {
+            const an = filter === k;
+            const farbe = k === "alle" ? "var(--ink)" : RECIPE_CATS[k].color;
+            return (React.createElement("button", { key: k, onClick: () => onFilter(k), className: "px-2.5 py-1 rounded-full mono text-xs", style: {
+                    background: an ? farbe : "transparent",
+                    color: an ? "#FFF" : "var(--muted)",
+                    border: `1px solid ${an ? farbe : "var(--line)"}`,
+                } }, lbl));
+        }))),
+        recipes.length === 0 && (React.createElement("div", { className: "pl-card rounded p-5 text-center" },
+            React.createElement("p", { className: "text-sm pl-muted leading-relaxed" }, "Noch keine Rezepte. Über „Neu\" legst du das erste an — mit Zutaten, Schritten und Nährwerten je Portion."))),
+        recipes.length > 0 && gefiltert.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted py-4 text-center" }, "Nichts gefunden.")),
+        gefiltert.map((r) => {
+            const k = RECIPE_CATS[r.cat] || RECIPE_CATS.hauptgericht;
+            const c = lift(k.color);
+            const zutaten = (r.ingredients || []).filter((z) => z.name.trim()).length;
+            return (React.createElement("button", { key: r.id, onClick: () => onOpen(r.id), className: "pl-card rounded p-3 text-left flex items-center gap-3" },
+                React.createElement("span", { className: "w-1 self-stretch rounded-full shrink-0", style: { background: k.color, minHeight: 34 } }),
+                React.createElement("span", { className: "flex-1 min-w-0" },
+                    React.createElement("span", { className: "text-sm font-medium block truncate" }, r.title || "Ohne Titel"),
+                    React.createElement("span", { className: "mono text-xs pl-muted" },
+                        k.label,
+                        zutaten ? ` · ${zutaten} ${zutaten === 1 ? "Zutat" : "Zutaten"}` : "",
+                        r.timeMin ? ` · ${durLabel(Number(r.timeMin))}` : "",
+                        r.kcal ? ` · ${r.kcal} kcal` : "")),
+                React.createElement(ChevronRight, { size: 16, style: { color: c, flexShrink: 0 } })));
+        })));
+}
+/* Rezept lesen. Der Portions-Zähler rechnet nur die Anzeige um und
+   verändert das Rezept nicht. */
+function RecipeView({ recipe, onClose, onEdit }) {
+    const basis = Math.max(1, Number(recipe.portions) || 1);
+    const [ziel, setZiel] = useState(basis);
+    const faktor = ziel / basis;
+    const k = RECIPE_CATS[recipe.cat] || RECIPE_CATS.hauptgericht;
+    const c = lift(k.color);
+    const zutaten = (recipe.ingredients || []).filter((z) => z.name.trim());
+    const schritte = (recipe.steps || []).filter((s) => s.trim());
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.4)" }, onClick: onClose },
+        React.createElement("div", { className: "pl-sheet pl-scroll overscroll-contain w-full md:max-w-md rounded-t-lg md:rounded-lg overflow-y-auto", style: { maxHeight: "88vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { style: { background: hexA(k.color, 0.14), borderBottom: `2px solid ${k.color}` }, className: "px-5 pt-4 pb-4" },
+                React.createElement("div", { className: "flex items-start justify-between gap-3" },
+                    React.createElement("div", { className: "min-w-0" },
+                        React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, k.label),
+                        React.createElement("h2", { className: "text-2xl font-semibold leading-tight mt-0.5 break-words" }, recipe.title || "Ohne Titel")),
+                    React.createElement("button", { onClick: onClose, className: "pl-muted shrink-0 p-1", "aria-label": "Schließen" },
+                        React.createElement(X, { size: 20 }))),
+                React.createElement("div", { className: "mono text-xs pl-muted mt-2" },
+                    recipe.timeMin ? durLabel(Number(recipe.timeMin)) : "ohne Zeitangabe",
+                    recipe.kcal ? ` · ${recipe.kcal} kcal je Portion` : "",
+                    recipe.protein ? ` · ${recipe.protein} g Eiweiß` : "")),
+            React.createElement("div", { className: "p-4 flex flex-col gap-4" },
+                React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Für wie viele Portionen?"),
+                    React.createElement("div", { className: "flex items-center gap-3" },
+                        React.createElement("div", { className: "flex items-center" },
+                            React.createElement("button", { onClick: () => setZiel((z) => Math.max(1, z - 1)), className: "pl-btn px-2.5 py-2 rounded-l", "aria-label": "weniger Portionen" }, "−"),
+                            React.createElement("span", { className: "mono text-lg border-t border-b flex items-center justify-center", style: { width: 76, padding: "6px 0", background: "var(--card)", borderColor: "var(--line)" } }, ziel),
+                            React.createElement("button", { onClick: () => setZiel((z) => Math.min(50, z + 1)), className: "pl-btn px-2.5 py-2 rounded-r", "aria-label": "mehr Portionen" }, "+")),
+                        ziel !== basis && (React.createElement("button", { onClick: () => setZiel(basis), className: "pl-btn px-2.5 py-1.5 rounded mono text-xs" }, "zurück auf " + basis)))),
+                zutaten.length > 0 && (React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Zutaten"),
+                    React.createElement("ul", { className: "divide-y" }, zutaten.map((z) => {
+                        const menge = Number(String(z.amount).replace(",", "."));
+                        return (React.createElement("li", { key: z.id, className: "flex items-baseline gap-2 py-1.5" },
+                            React.createElement("span", { className: "mono text-sm shrink-0", style: { minWidth: 74, color: c } }, isFinite(menge) && menge > 0
+                                ? mengeLabel(menge * faktor) + " " + (z.unit || "")
+                                : ""),
+                            React.createElement("span", { className: "text-sm flex-1 min-w-0" }, z.name)));
+                    })))),
+                schritte.length > 0 && (React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Zubereitung"),
+                    React.createElement("ol", { className: "flex flex-col gap-2" }, schritte.map((s, i) => (React.createElement("li", { key: i, className: "flex gap-2.5" },
+                        React.createElement("span", { className: "mono text-xs shrink-0 rounded-full flex items-center justify-center", style: { width: 20, height: 20, background: hexA(k.color, 0.18), color: c, marginTop: 1 } }, i + 1),
+                        React.createElement("span", { className: "text-sm leading-snug flex-1 min-w-0 break-words" }, s))))))),
+                recipe.kcal && ziel !== basis
+                    ? React.createElement("p", { className: "mono text-xs pl-muted" }, `Gesamt bei ${ziel} ${ziel === 1 ? "Portion" : "Portionen"}: ${Math.round(Number(recipe.kcal) * ziel)} kcal`)
+                    : null,
+                React.createElement("button", { onClick: onEdit, className: "pl-btn px-3 py-2.5 rounded mono text-xs" }, "Bearbeiten")))));
+}
+/* Rezept bearbeiten. Getippter Text bleibt bis zum Verlassen des Feldes
+   im Sheet - würde jedes Zeichen gesichert, wäre der Rückgängig-Speicher
+   nach einem Wort voll. Struktur-Änderungen (Zeile dazu oder weg) gehen
+   sofort in den Zustand. */
+function RecipeEditor({ recipe, onClose, onSave, onDelete }) {
+    const [title, setTitle] = useState(recipe.title || "");
+    const [kcal, setKcal] = useState(recipe.kcal || "");
+    const [protein, setProtein] = useState(recipe.protein || "");
+    const [zutaten, setZutaten] = useState(() => (recipe.ingredients || []).slice());
+    const [schritte, setSchritte] = useState(() => (recipe.steps || []).slice());
+    const [confirmDel, setConfirmDel] = useState(false);
+    const portionen = Math.max(1, Number(recipe.portions) || 1);
+    const zeit = Math.max(0, Number(recipe.timeMin) || 0);
+    const sichereZutaten = (liste) => onSave({ ingredients: liste });
+    const sichereSchritte = (liste) => onSave({ steps: liste });
+    const setZutat = (i, feld, wert) => setZutaten((alt) => alt.map((z, j) => (j === i ? { ...z, [feld]: wert } : z)));
+    const addZutat = () => setZutaten((alt) => { const neu = [...alt, { id: uid(), amount: "", unit: "g", name: "" }]; sichereZutaten(neu); return neu; });
+    const delZutat = (i) => setZutaten((alt) => { const neu = alt.filter((_, j) => j !== i); sichereZutaten(neu); return neu; });
+    const setSchritt = (i, wert) => setSchritte((alt) => alt.map((s, j) => (j === i ? wert : s)));
+    const addSchritt = () => setSchritte((alt) => { const neu = [...alt, ""]; sichereSchritte(neu); return neu; });
+    const delSchritt = (i) => setSchritte((alt) => { const neu = alt.filter((_, j) => j !== i); sichereSchritte(neu); return neu; });
+    /* Beim Schließen alles festschreiben, damit nichts verloren geht */
+    const commit = () => {
+        onSave({ title: title.trim() || "Ohne Titel", kcal, protein, ingredients: zutaten, steps: schritte });
+        onClose();
+    };
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.4)" }, onClick: commit },
+        React.createElement("div", { className: "pl-sheet pl-scroll overscroll-contain w-full md:max-w-md rounded-t-lg md:rounded-lg p-4 flex flex-col gap-3 overflow-y-auto", style: { maxHeight: "88vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                React.createElement("div", { className: "mono text-xs pl-muted" }, "Rezept bearbeiten"),
+                React.createElement("button", { onClick: commit, className: "pl-muted p-1", "aria-label": "Schließen" },
+                    React.createElement(X, { size: 18 }))),
+            React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onBlur: () => onSave({ title: title.trim() || "Ohne Titel" }), placeholder: "Name des Rezepts", className: "pl-input px-2 py-2 rounded text-base" }),
+            React.createElement("div", null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Kategorie"),
+                React.createElement("div", { className: "flex flex-wrap gap-1.5" }, RECIPE_CAT_KEYS.map((k) => {
+                    const an = recipe.cat === k;
+                    return (React.createElement("button", { key: k, onClick: () => onSave({ cat: k }), className: "px-2.5 py-1 rounded-full mono text-xs", style: {
+                            background: an ? RECIPE_CATS[k].color : "transparent",
+                            color: an ? "#FFF" : "var(--muted)",
+                            border: `1px solid ${an ? RECIPE_CATS[k].color : "var(--line)"}`,
+                        } }, RECIPE_CATS[k].label));
+                }))),
+            React.createElement("div", { className: "flex flex-wrap items-end gap-4" },
+                React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Portionen"),
+                    React.createElement(Stepper, { value: String(portionen), onMinus: () => onSave((r) => ({ portions: Math.max(1, (Number(r.portions) || 1) - 1) })), onPlus: () => onSave((r) => ({ portions: Math.min(50, (Number(r.portions) || 1) + 1) })) })),
+                React.createElement("div", { className: "flex-1 min-w-0" },
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Zeit"),
+                    React.createElement(Stepper, { value: zeit ? durLabel(zeit) : "—", onMinus: () => onSave((r) => ({ timeMin: Math.max(0, (Number(r.timeMin) || 0) - 5) })), onPlus: () => onSave((r) => ({ timeMin: Math.min(600, (Number(r.timeMin) || 0) + 5) })) }))),
+            React.createElement("div", null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Je Portion"),
+                React.createElement("div", { className: "flex items-center gap-2" },
+                    React.createElement("input", { value: kcal, onChange: (e) => setKcal(e.target.value.replace(/[^\d]/g, "")), onBlur: () => onSave({ kcal }), inputMode: "numeric", placeholder: "kcal", className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 84 } }),
+                    React.createElement("span", { className: "mono text-xs pl-muted" }, "kcal"),
+                    React.createElement("input", { value: protein, onChange: (e) => setProtein(e.target.value.replace(/[^\d]/g, "")), onBlur: () => onSave({ protein }), inputMode: "numeric", placeholder: "Eiweiß", className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 84 } }),
+                    React.createElement("span", { className: "mono text-xs pl-muted" }, "g Eiweiß"))),
+            React.createElement("div", null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Zutaten für " + portionen + (portionen === 1 ? " Portion" : " Portionen")),
+                React.createElement("div", { className: "flex flex-col gap-1.5" }, zutaten.map((z, i) => (React.createElement("div", { key: z.id || i, className: "flex items-center gap-1.5" },
+                    React.createElement("input", { value: z.amount, onChange: (e) => setZutat(i, "amount", e.target.value.replace(/[^\d.,]/g, "")), onBlur: () => sichereZutaten(zutaten), inputMode: "decimal", placeholder: "Menge", className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 68 } }),
+                    React.createElement("select", { value: z.unit || "g", onChange: (e) => { const w = e.target.value; setZutaten((alt) => { const neu = alt.map((x, j) => (j === i ? { ...x, unit: w } : x)); sichereZutaten(neu); return neu; }); }, className: "pl-input px-1 py-1.5 rounded mono text-sm", style: { width: 72 } }, UNITS.map((u) => React.createElement("option", { key: u, value: u }, u))),
+                    React.createElement("input", { value: z.name, onChange: (e) => setZutat(i, "name", e.target.value), onBlur: () => sichereZutaten(zutaten), placeholder: "Zutat", className: "pl-input px-2 py-1.5 rounded text-sm flex-1" }),
+                    React.createElement("button", { onClick: () => delZutat(i), className: "pl-muted p-1 shrink-0", "aria-label": "Zutat entfernen" },
+                        React.createElement(X, { size: 14 })))))),
+                React.createElement("button", { onClick: addZutat, className: "pl-btn px-2.5 py-1.5 rounded mono text-xs mt-1.5 flex items-center gap-1.5" },
+                    React.createElement(Plus, { size: 12 }),
+                    "Zutat")),
+            React.createElement("div", null,
+                React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Zubereitung"),
+                React.createElement("div", { className: "flex flex-col gap-1.5" }, schritte.map((s, i) => (React.createElement("div", { key: i, className: "flex items-start gap-1.5" },
+                    React.createElement("span", { className: "mono text-xs pl-muted shrink-0", style: { paddingTop: 8, width: 16 } }, i + 1),
+                    React.createElement("textarea", { value: s, onChange: (e) => setSchritt(i, e.target.value), onBlur: () => sichereSchritte(schritte), placeholder: "Was ist zu tun?", rows: 2, className: "pl-input px-2 py-1.5 rounded text-sm flex-1", style: { resize: "vertical" } }),
+                    React.createElement("button", { onClick: () => delSchritt(i), className: "pl-muted p-1 shrink-0", "aria-label": "Schritt entfernen", style: { marginTop: 4 } },
+                        React.createElement(X, { size: 14 })))))),
+                React.createElement("button", { onClick: addSchritt, className: "pl-btn px-2.5 py-1.5 rounded mono text-xs mt-1.5 flex items-center gap-1.5" },
+                    React.createElement(Plus, { size: 12 }),
+                    "Schritt")),
+            React.createElement("div", { className: "flex items-center gap-2 pt-1" },
+                React.createElement("button", { onClick: () => (confirmDel ? onDelete() : setConfirmDel(true)), className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs", style: confirmDel
+                        ? { background: "#A03A5E", color: "#FFF", borderColor: "#A03A5E" }
+                        : { color: lift("#A03A5E"), borderColor: "#A03A5E" } },
+                    React.createElement(Trash2, { size: 13 }),
+                    confirmDel ? "sicher?" : "Löschen"),
+                React.createElement("button", { onClick: commit, className: "px-4 py-2 rounded mono text-xs ml-auto", style: { background: "var(--ink)", color: "var(--paper)" } }, "Fertig")))));
 }
 /* ════════════════ Raster ════════════════ */
 function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, gridRef, ppm, maxH }) {
