@@ -87,7 +87,7 @@ const PALETTE = [
 const DAY_START = 6; // 06:00
 const DAY_END = 23; // 23:00
 const SLOT = 15; // Minuten-Raster
-const APP_VERSION = "2026-08-14m · Dunkles Erscheinungsbild";
+const APP_VERSION = "2026-08-15b · To-dos und Termine verbunden";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
@@ -1262,6 +1262,10 @@ function PlannerApp() {
         if (b === null || b === void 0 ? void 0 : b.studyKey) {
             next.studyDone = { ...(prev.studyDone || {}), [b.studyKey]: status === "done" };
         }
+        /* Hängt ein To-do daran, wandert es mit */
+        if (b && b.todoId) {
+            next.todos = prev.todos.map((t) => (t.id === b.todoId ? { ...t, done: status === "done" } : t));
+        }
         return next;
     });
     /* ── Fokus-Timer ─────────────────────────────────────────
@@ -1349,6 +1353,34 @@ function PlannerApp() {
         if (timer.endsAt - Date.now() <= 0)
             advanceFocus();
     }, [beat, timer, advanceFocus]);
+    /* Termin zum To-do machen — beide bleiben verbunden */
+    const blockZuTodo = (block) => {
+        const neuId = uid();
+        persist((prev) => ({
+            ...prev,
+            todos: [...prev.todos, {
+                id: neuId,
+                title: block.title || "Ohne Titel",
+                cat: block.cat, est: block.dur,
+                done: block.status === "done",
+            }],
+            blocks: prev.blocks.map((b) => (b.id === block.id ? { ...b, todoId: neuId } : b)),
+        }));
+        buzz(12);
+        setSync({ status: "ok", msg: "als To-do angelegt" });
+    };
+
+    /* Welcher Termin gehört zu welchem To-do? */
+    const todoPlan = useMemo(() => {
+        const m = {};
+        for (const b of state.blocks) {
+            if (!b.todoId) continue;
+            const alt = m[b.todoId];
+            if (!alt || b.day + pad(b.start) < alt.day + pad(alt.start)) m[b.todoId] = b;
+        }
+        return m;
+    }, [state.blocks]);
+
     const moveBlock = (id, day, start) => persist((prev) => ({
         ...prev,
         blocks: prev.blocks.map((b) => (b.id === id ? { ...b, day: day, start: start, synced: false } : b)),
@@ -1895,7 +1927,17 @@ function PlannerApp() {
                 React.createElement("button", { onClick: () => syncCloud(false), disabled: cloud.state === "busy", className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
                     React.createElement(RefreshCw, { size: 12, className: cloud.state === "busy" ? "animate-spin" : "" }),
                     "Ger\u00E4te abgleichen"),
-                cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : "var(--muted)" } }, cloud.msg))),
+                cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : "var(--muted)" } }, cloud.msg)),
+                React.createElement("button", {
+                    onClick: cloudLaden, disabled: cloud.state === "busy",
+                    className: "pl-btn px-2 py-1 rounded mono text-xs",
+                    title: "Cloud-Stand auf dieses Gerät holen"
+                }, "↓ laden"),
+                React.createElement("button", {
+                    onClick: cloudSpeichern, disabled: cloud.state === "busy",
+                    className: "pl-btn px-2 py-1 rounded mono text-xs",
+                    title: "Dieses Gerät in die Cloud schreiben"
+                }, "↑ sichern")),
             sync.msg && (React.createElement("div", { className: "mt-2 mono text-xs flex items-center gap-2", style: { color: sync.status === "error" ? "#A03A5E" : "var(--muted)" } },
                 sync.status === "error" && React.createElement(AlertCircle, { size: 13 }),
                 sync.msg))),
@@ -1969,7 +2011,7 @@ function PlannerApp() {
                             React.createElement(TabBtn, { active: panel === "todos", onClick: () => setPanel("todos"), icon: List, label: "To-dos" }),
                             React.createElement(TabBtn, { active: panel === "projekte", onClick: () => setPanel("projekte"), icon: Target, label: "Projekte" }),
                             React.createElement(TabBtn, { active: panel === "vorlage", onClick: () => setPanel("vorlage"), icon: LayoutGrid, label: "Vorlage" })),
-                        panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: startPlacing, pending: pendingTodo, onImportTodoist: importTodoist })),
+                        panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, plan: todoPlan, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: startPlacing, onOpenBlock: (id) => setDetailId(id), pending: manualPick, onImportTodoist: importTodoist })),
                         panel === "projekte" && (React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing })),
                         panel === "vorlage" && (React.createElement(TemplatePanel, { template: state.template || [], onApply: applyTemplate, onSaveWeek: saveWeekAsTemplate, onRemove: removeTemplateEntry, onToggleAuto: toggleTemplateAuto })))))),
             view === "training" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
@@ -2015,7 +2057,7 @@ function PlannerApp() {
                 React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest mb-1" }, "geschafft"),
                 React.createElement("div", { className: "text-4xl font-semibold", style: { color: lift(celebration.color) } }, celebration.title),
                 React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
-        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onDelete: () => { removeBlockAndCalendar(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
+        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onMakeTodo: blockZuTodo, todo: detailBlock && detailBlock.todoId ? state.todos.find((t) => t.id === detailBlock.todoId) : null, onDelete: () => { removeBlockAndCalendar(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
         editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor({ ...editor, ...patch }); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" }))));
 }
 /* ════════════════ Raster ════════════════ */
@@ -2450,12 +2492,14 @@ function CatPicker({ value, onChange }) {
             border: `1px solid ${CATS[k].color}`,
         } }, CATS[k].label)))));
 }
-function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending, onImportTodoist }) {
+"use strict";
+function TodoPanel({ todos, plan, onAdd, onToggle, onRemove, onPlan, onOpenBlock, pending, onImportTodoist }) {
     const [title, setTitle] = useState("");
     const [cat, setCat] = useState("fokus");
     const [est, setEst] = useState(60);
     const [tdOpen, setTdOpen] = useState(false);
     const [tdDraft, setTdDraft] = useState("");
+    const [zeigeFertig, setZeigeFertig] = useState(false);
     const hasToken = !!tdToken();
     const submit = () => {
         if (!title.trim())
@@ -2463,8 +2507,25 @@ function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending, onImport
         onAdd(title.trim(), cat, est);
         setTitle("");
     };
-    const open = todos.filter((t) => !t.done);
-    const done = todos.filter((t) => t.done);
+    const offen = todos.filter((t) => !t.done);
+    const fertig = todos.filter((t) => t.done);
+    const Termin = ({ t }) => {
+        var _a, _b, _c, _d;
+        const b = plan && plan[t.id];
+        if (!b) {
+            return (React.createElement("button", { onClick: () => onPlan({ title: t.title, cat: t.cat, est: t.est, todoId: t.id }), className: "mono text-xs px-1.5 py-0.5 rounded", style: {
+                    border: `1px solid ${pending && pending.todoId === t.id ? (_a = CATS[t.cat]) === null || _a === void 0 ? void 0 : _a.color : "var(--line)"}`,
+                    color: pending && pending.todoId === t.id ? "#FFF" : "var(--muted)",
+                    background: pending && pending.todoId === t.id ? (_b = CATS[t.cat]) === null || _b === void 0 ? void 0 : _b.color : "transparent",
+                } }, "einplanen"));
+        }
+        const d = new Date(b.day + "T00:00:00");
+        return (React.createElement("button", { onClick: () => onOpenBlock(b.id), className: "mono text-xs px-1.5 py-0.5 rounded flex items-center gap-1", style: { border: `1px solid ${lift(((_c = CATS[t.cat]) === null || _c === void 0 ? void 0 : _c.color) || "#6F7A72")}`, color: lift(((_d = CATS[t.cat]) === null || _d === void 0 ? void 0 : _d.color) || "#6F7A72") }, title: "Termin \u00F6ffnen" },
+            React.createElement(Calendar, { size: 10 }),
+            DAY_NAMES[(d.getDay() + 6) % 7],
+            " ",
+            minsToLabel(b.start)));
+    };
     return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
         React.createElement("div", { className: "flex flex-col gap-2" },
             React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onKeyDown: (e) => e.key === "Enter" && submit(), placeholder: "Was steht an?", className: "pl-input px-2 py-1.5 rounded text-sm" }),
@@ -2489,29 +2550,32 @@ function TodoPanel({ todos, onAdd, onToggle, onRemove, onPlan, pending, onImport
                         onImportTodoist();
                     } }, className: "px-3 py-1.5 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Sichern")))),
         React.createElement("div", { className: "border-t pl-hair pt-2 flex flex-col gap-1.5" },
-            open.length === 0 && done.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted py-2" }, "Noch keine Aufgaben. Leg eine an \u2014 danach kannst du sie direkt in eine freie Zeit ziehen.")),
-            open.map((t) => {
-                var _a, _b, _c;
+            offen.length === 0 && fertig.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted py-2" }, "Noch keine Aufgaben. Leg eine an \u2014 danach kannst du sie in eine freie Zeit legen.")),
+            offen.map((t) => {
+                var _a;
                 return (React.createElement("div", { key: t.id, className: "flex items-center gap-2 group" },
-                    React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0", style: { border: `1.5px solid ${((_a = CATS[t.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72"}` }, "aria-label": "Erledigt" }),
+                    React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0", style: { border: `1.5px solid ${lift(((_a = CATS[t.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72")}` }, "aria-label": "Erledigt" }),
                     React.createElement("span", { className: "text-sm truncate flex-1" }, t.title),
                     t.todoistId && React.createElement("span", { className: "mono text-xs pl-muted", title: "aus Todoist" }, "\u2197"),
                     React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(t.est)),
-                    React.createElement("button", { onClick: () => onPlan((pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? null : { title: t.title, cat: t.cat, est: t.est, todoId: t.id }), className: "mono text-xs px-1.5 py-0.5 rounded", style: {
-                            border: `1px solid ${(pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? (_b = CATS[t.cat]) === null || _b === void 0 ? void 0 : _b.color : "var(--line)"}`,
-                            color: (pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? "#FFF" : "var(--muted)",
-                            background: (pending === null || pending === void 0 ? void 0 : pending.todoId) === t.id ? (_c = CATS[t.cat]) === null || _c === void 0 ? void 0 : _c.color : "transparent",
-                        } }, "einplanen"),
+                    React.createElement(Termin, { t: t }),
                     React.createElement("button", { onClick: () => onRemove(t.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "L\u00F6schen" },
                         React.createElement(Trash2, { size: 13 }))));
             }),
-            done.length > 0 && (React.createElement("div", { className: "mt-1 pt-2 border-t pl-hair flex flex-col gap-1" }, done.map((t) => (React.createElement("div", { key: t.id, className: "flex items-center gap-2 group" },
-                React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0 flex items-center justify-center", style: { background: "var(--muted)" }, "aria-label": "Wieder \u00F6ffnen" },
-                    React.createElement(Check, { size: 11, color: lift("#FAFAF8") })),
-                React.createElement("span", { className: "text-sm truncate flex-1 line-through pl-muted" }, t.title),
-                React.createElement("button", { onClick: () => onRemove(t.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "L\u00F6schen" },
-                    React.createElement(Trash2, { size: 13 }))))))))));
+            fertig.length > 0 && (React.createElement("div", { className: "mt-1 pt-2 border-t pl-hair flex flex-col gap-1" },
+                React.createElement("button", { onClick: () => setZeigeFertig(!zeigeFertig), className: "mono text-xs pl-muted text-left" },
+                    zeigeFertig ? "▾" : "▸",
+                    " erledigt (",
+                    fertig.length,
+                    ")"),
+                zeigeFertig && fertig.map((t) => (React.createElement("div", { key: t.id, className: "flex items-center gap-2 group pl-rise" },
+                    React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0 flex items-center justify-center", style: { background: "var(--muted)" }, "aria-label": "Wieder \u00F6ffnen" },
+                        React.createElement(Check, { size: 11, color: "var(--card)" })),
+                    React.createElement("span", { className: "text-sm truncate flex-1 line-through pl-muted" }, t.title),
+                    React.createElement("button", { onClick: () => onRemove(t.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "L\u00F6schen" },
+                        React.createElement(Trash2, { size: 13 }))))))))));
 }
+
 function RoutinePanel({ routines, checks, days, weekStart, today, onAdd, onRemove, onToggle, onTarget, onPlan }) {
     const [title, setTitle] = useState("");
     const [cat, setCat] = useState("training");
@@ -3041,7 +3105,7 @@ function relTime(block, now) {
         return { label: `vor ${durLabel(m)} vorbei`, past: true };
     return { label: `vor ${Math.round(m / 60 / 24)} Tagen`, past: true };
 }
-function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete, onSync, onSave, onFocus, syncing }) {
+function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, onDelete, onSync, onSave, onFocus, onMakeTodo, syncing }) {
     var _a, _b, _c;
     const [confirmDel, setConfirmDel] = useState(false);
     const c = blockColor(block);
@@ -3092,9 +3156,13 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                     rel.live && React.createElement("span", { className: "pl-pulse w-1.5 h-1.5 rounded-full", style: { background: "#FFF" } }),
                     rel.label)),
             React.createElement("div", { className: "p-5 flex flex-col gap-4" },
-                (project || block.tplId || block.synced || block.external) && (React.createElement("div", { className: "flex flex-wrap gap-1.5" },
+                (project || block.tplId || block.synced || block.external || todo) && (React.createElement("div", { className: "flex flex-wrap gap-1.5" },
                     project && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs", style: { border: `1px solid ${(_b = CATS[project.cat]) === null || _b === void 0 ? void 0 : _b.color}`, color: (_c = CATS[project.cat]) === null || _c === void 0 ? void 0 : _c.color } }, project.title)),
-                    block.tplId && (React.createElement("span", { className: "pl-btn px-2 py-1 rounded mono text-xs flex items-center gap-1" },
+                    todo && (React.createElement("span", {
+                        className: "px-2 py-1 rounded mono text-xs flex items-center gap-1",
+                        style: { border: "1px solid " + lift("#1E6E5A"), color: lift("#1E6E5A") }
+                    }, React.createElement(List, { size: 11 }), todo.done ? "To-do erledigt" : "als To-do")),
+                                        block.tplId && (React.createElement("span", { className: "pl-btn px-2 py-1 rounded mono text-xs flex items-center gap-1" },
                         React.createElement(Repeat, { size: 11 }),
                         " jede Woche")),
                     block.synced && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs flex items-center gap-1", style: { border: "1px solid #1E6E5A", color: lift("#1E6E5A") } },
@@ -3105,7 +3173,14 @@ function BlockDetail({ block, now, projects, onClose, onEdit, onStatus, onDelete
                         React.createElement("div", { className: "mono text-xs pl-muted mb-1.5" }, "Wie ist es gelaufen?"),
                         React.createElement(StatusButtons, { current: block.status, size: "lg", onPick: (s) => onStatus(s) })),
                     React.createElement("div", { className: "flex items-center gap-2 pt-1" },
-                        onFocus && (React.createElement("button", { onClick: () => onFocus(block), className: "px-3 py-2.5 rounded mono text-xs flex items-center gap-1.5", style: { background: c, color: "#FFF" } },
+                        !todo && onMakeTodo && (React.createElement("button", {
+                        onClick: () => onMakeTodo(block),
+                        className: "pl-btn px-3 py-2.5 rounded flex items-center gap-1.5 mono text-xs",
+                        title: "Diesen Termin zusätzlich als Aufgabe führen"
+                    },
+                        React.createElement(List, { size: 13 }),
+                        "To-do")),
+                                        onFocus && (React.createElement("button", { onClick: () => onFocus(block), className: "px-3 py-2.5 rounded mono text-xs flex items-center gap-1.5", style: { background: c, color: "#FFF" } },
                             React.createElement(Timer, { size: 13 }),
                             " Fokus")),
                         React.createElement("button", { onClick: onEdit, className: "flex-1 px-3 py-2.5 rounded mono text-xs", style: block.title
