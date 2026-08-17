@@ -94,7 +94,9 @@
 <script>
   /* Notbremse: index.html?reset loescht Zwischenspeicher und Service Worker */
   if (location.search.indexOf('reset') !== -1) {
-    document.getElementById('boot').textContent = 'Zwischenspeicher wird geleert…';
+    /* Die App kann schon gerendert haben - dann gibt es kein #boot mehr */
+    var bootEl = document.getElementById('boot');
+    if (bootEl) bootEl.textContent = 'Zwischenspeicher wird geleert…';
     Promise.resolve()
       .then(function () {
         return navigator.serviceWorker
