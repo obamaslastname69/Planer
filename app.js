@@ -157,6 +157,20 @@ const spanTage = (b) => (b && b.allDay ? Math.max(1, Math.min(MAX_SPAN, b.days |
 const spanStart = (b) => new Date(b.day + "T00:00:00");
 /* Letzter Tag, den der Eintrag belegt (einschließlich) */
 const spanEnde = (b) => dayKey(addDays(spanStart(b), spanTage(b) - 1));
+/* Aus einem Enddatum die Anzahl Tage machen, beide Enden eingeschlossen.
+   Über UTC gerechnet, damit die Zeitumstellung nichts verschiebt. */
+function tageBis(vonKey, bisKey) {
+    if (!vonKey || !bisKey)
+        return 1;
+    const [jv, mv, tv] = vonKey.split("-").map(Number);
+    const [jb, mb, tb] = bisKey.split("-").map(Number);
+    if (!jv || !jb)
+        return 1;
+    const spanne = Date.UTC(jb, mb - 1, tb) - Date.UTC(jv, mv - 1, tv);
+    return Math.max(1, Math.min(MAX_SPAN, Math.round(spanne / 86400000) + 1));
+}
+/* Spätestes erlaubtes Enddatum - Grenze für die Datumsauswahl */
+const spanMaxEnde = (b) => dayKey(addDays(spanStart(b), MAX_SPAN - 1));
 /* Berührt der Eintrag diesen Tag? */
 function spanntUeber(b, key) {
     if (b.day === key)
@@ -3585,15 +3599,18 @@ function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, on
                     ". ",
                     MONTHS[d.getMonth()],
                     block.external || block.allDay ? "" : " · endet " + minsToLabel(block.start + block.dur)),
-                /* Über mehrere Tage — direkt hier, nicht erst im Bearbeiten-Sheet */
+                /* Über mehrere Tage — direkt hier, nicht erst im Bearbeiten-Sheet.
+                   Gefragt wird nach dem Enddatum, nicht nach einer Anzahl Tage:
+                   bei einem Urlaub weiß man, wann er endet, nicht wie viele
+                   Tage das sind. */
                 !block.external && (React.createElement("div", { className: "mt-3" }, block.allDay
                     ? (React.createElement("div", { className: "flex flex-wrap items-end gap-3" },
                         React.createElement("div", null,
-                            React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wie viele Tage?"),
-                            React.createElement("div", { className: "flex items-center" },
-                                React.createElement("button", { onClick: () => onSave((b) => ({ days: Math.max(1, spanTage(b) - 1), synced: false })), className: "pl-btn px-2.5 py-2 rounded-l", "aria-label": "ein Tag weniger" }, "−"),
-                                React.createElement("span", { className: "mono text-lg border-t border-b flex items-center justify-center", style: { width: 90, padding: "6px 0", background: "var(--card)", borderColor: "var(--line)" } }, spanTage(block) === 1 ? "1 Tag" : spanTage(block) + " Tage"),
-                                React.createElement("button", { onClick: () => onSave((b) => ({ days: Math.min(MAX_SPAN, spanTage(b) + 1), synced: false })), className: "pl-btn px-2.5 py-2 rounded-r", "aria-label": "ein Tag mehr" }, "+"))),
+                            React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Läuft bis"),
+                            React.createElement("input", { type: "date", value: spanEnde(block), min: block.day, max: spanMaxEnde(block), onChange: (e) => onSave((b) => ({ days: tageBis(b.day, e.target.value), synced: false })), className: "pl-input px-2 py-2 rounded mono text-sm", style: { width: 168 } }),
+                            React.createElement("div", { className: "mono text-xs pl-muted mt-1" }, spanTage(block) === 1
+                                ? "nur an diesem Tag"
+                                : spanTage(block) + " Tage")),
                         React.createElement("button", { onClick: () => onSave({ allDay: false, days: 1, start: 9 * 60, dur: 60, synced: false }), className: "pl-btn px-3 py-2 rounded mono text-xs" }, "mit Uhrzeit")))
                     : (React.createElement("button", { onClick: () => onSave({ allDay: true, days: 1, start: 0, dur: 0, synced: false }), className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs" },
                         React.createElement(Calendar, { size: 13 }),
@@ -3683,11 +3700,6 @@ function BlockEditor({ block, onClose, onSave, onDelete, onSync, onRepeat, proje
             onSave({ allDay: false, days: 1, start: s, dur: d, synced: false });
         }
     };
-    /* richtung ist +1 oder -1 */
-    const setTageLive = (richtung) => onSave((b) => ({
-        days: Math.max(1, Math.min(MAX_SPAN, spanTage(b) + richtung)),
-        synced: false,
-    }));
     const commit = () => { saveTitle(); onClose(); };
     /* Letzter Tag ausgeschrieben, damit "9 Tage" nicht nachgerechnet werden muss */
     const bisLabel = () => {
@@ -3725,9 +3737,9 @@ function BlockEditor({ block, onClose, onSave, onDelete, onSync, onRepeat, proje
                 ganztags ? "Ganztägig — über mehrere Tage" : "Ganztägig (Urlaub, Praktikum …)"),
             ganztags
                 ? (React.createElement("div", null,
-                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wie viele Tage?"),
-                    React.createElement(Stepper, { value: tage === 1 ? "1 Tag" : tage + " Tage", onMinus: () => setTageLive(-1), onPlus: () => setTageLive(+1) }),
-                    React.createElement("div", { className: "mono text-xs pl-muted mt-1" }, tage > 1 ? "läuft bis " + bisLabel() : "nur an diesem Tag")))
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Läuft bis"),
+                    React.createElement("input", { type: "date", value: spanEnde(block), min: block.day, max: spanMaxEnde(block), onChange: (e) => onSave((b) => ({ days: tageBis(b.day, e.target.value), synced: false })), className: "pl-input px-2 py-2 rounded mono text-sm", style: { width: 168 } }),
+                    React.createElement("div", { className: "mono text-xs pl-muted mt-1" }, tage === 1 ? "nur an diesem Tag" : `${tage} Tage · bis ${bisLabel()}`)))
                 : (React.createElement("div", { className: "flex flex-wrap items-end gap-4" },
                     React.createElement("div", null,
                         React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Beginn"),
