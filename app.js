@@ -1070,6 +1070,8 @@ const DEFAULT_STATE = {
     study: null,
     training: null,
     recipes: [],
+    /* Erinnerungen laufen im Gerät selbst, ohne fremden Dienst */
+    notify: { an: false, vorlauf: 10 },
     updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
@@ -1107,6 +1109,9 @@ function PlannerApp() {
     const [cloud, setCloud] = useState({ state: "off", msg: "" });
     const cloudRef = useRef({ armed: false, timer: null });
     const undoRef = useRef([]);
+    /* Schon gemeldete Termine, damit beim Neustellen der Wecker nichts
+       doppelt kommt. Wechselt der Tag, fangen wir wieder bei null an. */
+    const notifyRef = useRef({ tag: "", gemeldet: {} });
     const [canUndo, setCanUndo] = useState(false);
     const [timer, setTimer] = useState(() => {
         try {
@@ -1410,6 +1415,52 @@ function PlannerApp() {
         ...prev,
         projects: (prev.projects || []).map((p) => (p.id === id ? { ...p, target } : p)),
     }));
+    /* Projekt zusätzlich im Lernen-Tab zeigen */
+    const toggleProjectLearn = (id) => persist((prev) => ({
+        ...prev,
+        projects: (prev.projects || []).map((p) => (p.id === id ? { ...p, imLernen: !p.imLernen } : p)),
+    }));
+    /* ── Erinnerungen ───────────────────────────────────────
+       Läuft ohne fremden Dienst, dafür nur solange die App geöffnet ist
+       (auch im Hintergrund). Ganz geschlossen kann eine Seite ohne Server
+       niemanden wecken - dafür gäbe es keinen Weg im Browser. */
+    const notify = state.notify || DEFAULT_STATE.notify;
+    const setNotify = (patch) => persist((prev) => ({
+        ...prev,
+        notify: { ...DEFAULT_STATE.notify, ...(prev.notify || {}), ...patch },
+    }));
+    const [notifyRecht, setNotifyRecht] = useState(() => (typeof Notification !== "undefined" ? Notification.permission : "unsupported"));
+    const notifyAnschalten = useCallback(async () => {
+        if (typeof Notification === "undefined")
+            return;
+        let recht = Notification.permission;
+        if (recht === "default") {
+            try {
+                recht = await Notification.requestPermission();
+            }
+            catch (e) { /* Nutzer hat abgelehnt oder Browser blockt */ }
+        }
+        setNotifyRecht(recht);
+        if (recht === "granted")
+            setNotify({ an: true });
+    }, []);
+    /* Einen Hinweis zeigen - über den Service Worker, damit er auch
+       ankommt, wenn die App gerade nicht im Vordergrund ist */
+    const zeigeHinweis = useCallback(async (b) => {
+        const text = `${minsToLabel(b.start)} · ${durLabel(b.dur)}`;
+        try {
+            const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
+            if (reg && reg.showNotification) {
+                await reg.showNotification(b.title || "Termin", {
+                    body: text, icon: "icon-192.png", badge: "icon-192.png",
+                    tag: "planer-" + b.id, renotify: false,
+                });
+                return;
+            }
+            new Notification(b.title || "Termin", { body: text, icon: "icon-192.png" });
+        }
+        catch (e) { /* kein Recht oder kein Service Worker - dann eben nicht */ }
+    }, []);
     /* ── Rezepte ────────────────────────────────────────── */
     /* Immer frisch aus dem Zustand lesen, damit die Sheets Änderungen sofort zeigen */
     const offenesRezept = (state.recipes || []).find((r) => r.id === recipeOpen) || null;
@@ -1631,6 +1682,43 @@ function PlannerApp() {
         ...external.filter((b) => b.day === key && !eigeneGcalIds[b.gcalRawId]),
     ].sort((a, b) => a.start - b.start), [state.blocks, external, eigeneGcalIds]);
     const plannedMinutes = useCallback((key) => blocksFor(key).reduce((s, b) => s + b.dur, 0), [blocksFor]);
+    /* Wecker für die Termine von heute stellen. Steht hier, weil es
+       blocksFor braucht. Wird neu gestellt, sobald die App wieder sichtbar
+       wird: im Hintergrund bremsen Browser die Zeitgeber aus, danach
+       stimmen sie sonst nicht mehr. */
+    useEffect(() => {
+        if (!loaded || !notify.an || notifyRecht !== "granted")
+            return;
+        let wecker = [];
+        const stellen = () => {
+            wecker.forEach(clearTimeout);
+            wecker = [];
+            const jetzt = Date.now();
+            if (notifyRef.current.tag !== todayKey)
+                notifyRef.current = { tag: todayKey, gemeldet: {} };
+            const gemeldet = notifyRef.current.gemeldet;
+            for (const b of blocksFor(todayKey)) {
+                if (b.allDay || b.external || b.status || !b.title)
+                    continue;
+                const beginn = new Date(b.day + "T00:00:00").getTime() + b.start * 60000;
+                const wann = beginn - (Number(notify.vorlauf) || 0) * 60000;
+                if (wann <= jetzt || gemeldet[b.id])
+                    continue;
+                wecker.push(setTimeout(() => {
+                    gemeldet[b.id] = true;
+                    zeigeHinweis(b);
+                }, wann - jetzt));
+            }
+        };
+        stellen();
+        const beiRueckkehr = () => { if (document.visibilityState === "visible")
+            stellen(); };
+        document.addEventListener("visibilitychange", beiRueckkehr);
+        return () => {
+            wecker.forEach(clearTimeout);
+            document.removeEventListener("visibilitychange", beiRueckkehr);
+        };
+    }, [loaded, notify.an, notify.vorlauf, notifyRecht, blocksFor, todayKey, zeigeHinweis]);
     /* Freie Lücken eines Tages */
     const gapsFor = useCallback((key) => {
         const bs = blocksFor(key);
@@ -2455,7 +2543,7 @@ function PlannerApp() {
                             React.createElement(TabBtn, { active: panel === "projekte", onClick: () => setPanel("projekte"), icon: Target, label: "Projekte" }),
                             React.createElement(TabBtn, { active: panel === "vorlage", onClick: () => setPanel("vorlage"), icon: LayoutGrid, label: "Vorlage" })),
                         panel === "todos" && (React.createElement(TodoPanel, { todos: state.todos, plan: todoPlan, onAdd: addTodo, onToggle: toggleTodo, onRemove: removeTodo, onPlan: startPlacing, onOpenBlock: (id) => setDetailId(id), pending: manualPick, onImportTodoist: importTodoist })),
-                        panel === "projekte" && (React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing })),
+                        panel === "projekte" && (React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing, onToggleLearn: toggleProjectLearn })),
                         panel === "vorlage" && (React.createElement(TemplatePanel, { template: state.template || [], onApply: applyTemplate, onSaveWeek: saveWeekAsTemplate, onRemove: removeTemplateEntry, onToggleAuto: toggleTemplateAuto })))))),
             view === "training" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(TrainingView, {
@@ -2473,7 +2561,7 @@ function PlannerApp() {
                     }),
                 }))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
-                React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan }))),
+                React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing }))),
             view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id) })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
@@ -2491,7 +2579,14 @@ function PlannerApp() {
                     onOpen: () => goView("training"),
                 }),
                 React.createElement(ReviewPanel, { stats: weekStats, routines: state.routines, yearGrid: yearGrid, onPickWeek: (d) => setWeekStart(mondayOf(d)), onDemo: loadDemo, onReset: resetAll, onConfetti: testConfetti, onStatus: setBlockStatus, onOpen: (id) => setDetailId(id) }),
-                React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing }),
+                React.createElement(ProjectPanel, { projects: state.projects || [], stats: projectStats, onAdd: addProject, onRemove: removeProject, onTarget: setProjectTarget, onPlan: startPlacing, onToggleLearn: toggleProjectLearn }),
+                React.createElement(NotifyPanel, {
+                    notify: notify, recht: notifyRecht,
+                    onAnschalten: notifyAnschalten,
+                    onAus: () => setNotify({ an: false }),
+                    onVorlauf: (m) => setNotify({ vorlauf: m }),
+                    onTest: () => zeigeHinweis({ id: "test", title: "So sieht ein Hinweis aus", start: now.getHours() * 60 + now.getMinutes(), dur: 60 }),
+                }),
                 React.createElement(CatPanel, { cats: catsNow, onField: setCatField, onAdd: addCat, onRemove: removeCat }),
                 React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
         timer && (React.createElement(FocusTimer, { timer: timer, beat: beat, onPause: pauseFocus, onSkip: advanceFocus, onStop: () => stopFocus(false), onDone: () => stopFocus(true) })),
@@ -3052,7 +3147,7 @@ function StudyRow({ task, kind, done, edit, weekIdx, onEditTask, onDeleteTask, o
                 durLabel(task.m))),
         !on && task.t && (React.createElement("button", { onClick: () => onPlanTask(task), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" }, "einplanen"))));
 }
-function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onAddExam, onDeleteExam, onReset }) {
+function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onAddExam, onDeleteExam, onReset, lernProjekte = [], projectStats, onPlanProject }) {
     const [openSubject, setOpenSubject] = useState(null);
     const [showInfo, setShowInfo] = useState(false);
     const [edit, setEdit] = useState(false);
@@ -3079,6 +3174,25 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
     const doneMin = wk.must.reduce((s, t) => s + (done[t.id] ? t.m : 0), 0);
     const pct = mustMin ? (doneMin / mustMin) * 100 : 0;
     return (React.createElement("div", { className: "flex flex-col gap-3" },
+        /* Projekte, die du hier mitverfolgen willst \u2014 angehakt im Projekte-Panel */
+        lernProjekte.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2.5" },
+            React.createElement("div", { className: "mono text-xs pl-muted" }, "Projekte \u00B7 diese Woche"),
+            lernProjekte.map((p) => {
+                var _p;
+                const st = (projectStats && projectStats[p.id]) || { planned: 0, done: 0 };
+                const pc = ((_p = CATS[p.cat]) === null || _p === void 0 ? void 0 : _p.color) || "#6F7A72";
+                const fertig = Math.min(100, p.target ? (st.done / p.target) * 100 : 0);
+                const geplant = Math.min(100, p.target ? (st.planned / p.target) * 100 : 0);
+                return (React.createElement("div", { key: p.id },
+                    React.createElement("div", { className: "flex items-baseline gap-2 mb-1" },
+                        React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: pc } }),
+                        React.createElement("span", { className: "text-sm truncate flex-1" }, p.title),
+                        React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(st.done) + " / " + durLabel(p.target))),
+                    React.createElement("div", { className: "h-2.5 rounded-full relative overflow-hidden", style: { background: hexA(pc, 0.12) } },
+                        React.createElement("div", { className: "absolute inset-y-0 left-0 rounded-full pl-bar", style: { width: `${geplant}%`, background: hexA(pc, 0.4) } }),
+                        React.createElement("div", { className: "absolute inset-y-0 left-0 rounded-full pl-bar", style: { width: `${fertig}%`, background: pc } })),
+                    onPlanProject && React.createElement("button", { onClick: () => onPlanProject({ title: p.title, cat: p.cat, est: 90, projectId: p.id }), className: "pl-btn mono text-xs px-1.5 py-0.5 rounded mt-1.5" }, "einplanen")));
+            }))),
         React.createElement("div", { className: "pl-card rounded p-4 flex flex-col gap-3" },
             exams.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Keine Pr\u00FCfung eingetragen.")),
             exams.map((ex, idx) => {
@@ -3380,7 +3494,7 @@ function TemplatePanel({ template, onApply, onSaveWeek, onRemove, onToggleAuto }
                         React.createElement(Trash2, { size: 12 }))));
             })))))))));
 }
-function ProjectPanel({ projects, stats, onAdd, onRemove, onTarget, onPlan }) {
+function ProjectPanel({ projects, stats, onAdd, onRemove, onTarget, onPlan, onToggleLearn }) {
     const [title, setTitle] = useState("");
     const [cat, setCat] = useState("arbeit");
     const [target, setTarget] = useState(240);
@@ -3429,10 +3543,41 @@ function ProjectPanel({ projects, stats, onAdd, onRemove, onTarget, onPlan }) {
                         React.createElement("div", { className: "flex items-center opacity-60 group-hover:opacity-100" },
                             React.createElement("button", { onClick: () => onTarget(p.id, Math.max(60, p.target - 60)), className: "mono text-xs px-1.5 pl-muted", "aria-label": "Ziel senken" }, "\u2212"),
                             React.createElement("button", { onClick: () => onTarget(p.id, p.target + 60), className: "mono text-xs px-1.5 pl-muted", "aria-label": "Ziel erh\u00F6hen" }, "+")),
+                        /* Im Lernen-Tab mitzeigen \u2014 f\u00FCr Vorhaben, an denen du
+                           beim Lernen dranbleiben willst */
+                        onToggleLearn && React.createElement("button", { onClick: () => onToggleLearn(p.id), className: "pl-btn mono text-xs px-1.5 py-0.5 rounded", title: p.imLernen ? "wird im Lernen-Tab gezeigt" : "auch im Lernen-Tab zeigen", style: p.imLernen ? { color: lift("#2B4B8F"), borderColor: "#2B4B8F" } : {} }, "Lernen"),
                         React.createElement("button", { onClick: () => onPlan({ title: p.title, cat: p.cat, est: 90, projectId: p.id }), className: "pl-btn mono text-xs px-1.5 py-0.5 rounded" }, "einplanen"),
                         React.createElement("button", { onClick: () => onRemove(p.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "Projekt l\u00F6schen" },
                             React.createElement(Trash2, { size: 12 })))));
             }))));
+}
+function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) {
+    const nichtMoeglich = recht === "unsupported";
+    const blockiert = recht === "denied";
+    const an = notify.an && recht === "granted";
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+        React.createElement("div", { className: "mono text-xs pl-muted leading-relaxed" }, "Erinnert dich kurz vor einem Termin — ohne fremden Dienst, direkt auf diesem Gerät."),
+        nichtMoeglich && (React.createElement("p", { className: "mono text-xs", style: { color: lift("#8A4E1C") } }, "Dieser Browser kann keine Hinweise anzeigen.")),
+        blockiert && (React.createElement("p", { className: "mono text-xs", style: { color: lift("#8A4E1C") } }, "Hinweise sind für diese Seite gesperrt. Das lässt sich nur in den Browser-Einstellungen wieder freigeben — beim Schloss-Symbol neben der Adresse.")),
+        !nichtMoeglich && !blockiert && (React.createElement(React.Fragment, null,
+            React.createElement("button", { onClick: an ? onAus : onAnschalten, className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs self-start", style: an ? { color: lift("#1E6E5A"), borderColor: "#1E6E5A" } : {} },
+                an ? React.createElement(Check, { size: 13 }) : React.createElement(AlertCircle, { size: 13 }),
+                an ? "Erinnerungen sind an" : "Erinnerungen einschalten"),
+            an && (React.createElement(React.Fragment, null,
+                React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wie lange vorher?"),
+                    React.createElement("div", { className: "flex flex-wrap gap-1.5" }, [0, 5, 10, 15, 30, 60].map((m) => {
+                        const gewaehlt = Number(notify.vorlauf) === m;
+                        return (React.createElement("button", { key: m, onClick: () => onVorlauf(m), className: "px-2.5 py-1 rounded-full mono text-xs", style: {
+                                background: gewaehlt ? "var(--ink)" : "transparent",
+                                color: gewaehlt ? "var(--paper)" : "var(--muted)",
+                                border: `1px solid ${gewaehlt ? "var(--ink)" : "var(--line)"}`,
+                            } }, m === 0 ? "punktgenau" : m + " min"));
+                    }))),
+                React.createElement("button", { onClick: onTest, className: "pl-btn px-3 py-2 rounded mono text-xs self-start" }, "Hinweis ausprobieren"),
+                /* Was die Technik hergibt, offen gesagt - damit niemand auf
+                   einen Weckruf wartet, der nicht kommen kann */
+                React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Die Hinweise kommen, solange der Planer läuft — auch im Hintergrund. Ist er ganz geschlossen, bleibt es still: Eine Seite ohne eigenen Server kann niemanden wecken. Für Termine, die auf keinen Fall untergehen dürfen, schieb sie zusätzlich in den Google Kalender.")))))));
 }
 function YearGrid({ weeks, onPick }) {
     const shade = (q) => {
