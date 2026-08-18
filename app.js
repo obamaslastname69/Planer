@@ -1825,7 +1825,7 @@ function PlannerApp() {
         addBlock(day, minutes);
     };
     /* Wischen zwischen den Ansichten */
-    const VIEWS = ["heute", "woche", "training", "lernen", "auswerten", "rezepte"];
+    const VIEWS = ["heute", "woche", "lernen", "training", "auswerten", "rezepte"];
     const goView = (k, dir) => {
         if (k === view)
             return;
@@ -2353,7 +2353,7 @@ function PlannerApp() {
         .pl-roll-down{animation:pl-roll-down .2s cubic-bezier(.2,.9,.3,1);}
       `),
         React.createElement("div", { className: "px-4 pt-4 pb-2 md:px-6" },
-            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["training", "Training"], ["lernen", "Lernen"], ["auswerten", "Bilanz"], ["rezepte", "Rezepte"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
+            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["lernen", "Lernen"], ["training", "Training"], ["auswerten", "Bilanz"], ["rezepte", "Rezepte"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
                     ? { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" }
                     : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
                 lbl,
@@ -2386,7 +2386,7 @@ function PlannerApp() {
                 sync.msg))),
         React.createElement("div", { onTouchStart: onTouchStart, onTouchMove: onTouchMove, onTouchEnd: onTouchEnd, onClickCapture: onClickCapture, className: slide === "l" ? "pl-in-l" : slide === "r" ? "pl-in-r" : "" },
             view === "heute" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
-                React.createElement(TodayView, { dayK: selectedDay, blocks: blocksFor(selectedDay), now: now, isToday: selectedDay === todayKey, routines: state.routines, checks: state.checks, onToggleCheck: toggleCheck, onBlock: (b) => setDetailId(b.id), onStatus: setBlockStatus, onAdd: addTerminHere, onSlot: handleSlotClick, ppm: ppm, onShiftDay: (dir) => {
+                React.createElement(TodayView, { dayK: selectedDay, blocks: blocksFor(selectedDay), now: now, isToday: selectedDay === todayKey, routines: state.routines, checks: state.checks, onToggleCheck: toggleCheck, onBlock: (b) => setDetailId(b.id), onStatus: setBlockStatus, onAdd: addTerminHere, onSlot: handleSlotClick, onMove: moveBlock, ppm: ppm, todos: state.todos, todoPlan: todoPlan, onAddTodo: addTodo, onToggleTodo: toggleTodo, onRemoveTodo: removeTodo, onPlanTodo: startPlacing, onOpenBlock: (id) => setDetailId(id), pendingPick: manualPick, onImportTodoist: importTodoist, onShiftDay: (dir) => {
                         const nd = addDays(new Date(selectedDay + "T00:00:00"), dir);
                         setSelectedDay(dayKey(nd));
                         setWeekStart(mondayOf(nd));
@@ -2920,7 +2920,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
 function HourRail({ hours, ppm, every = 1, compact = false }) {
     return (React.createElement("div", { className: "relative", style: { height: (DAY_END - DAY_START) * 60 * ppm } }, hours.map((h, i) => (i % every === 0 ? (React.createElement("div", { key: h, className: "absolute mono pl-muted", style: { right: compact ? 3 : 6, top: (h - DAY_START) * 60 * ppm - 6, fontSize: compact ? 9 : 11 } }, compact ? h : pad(h))) : null))));
 }
-function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, onMove, ppm }) {
+function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, onMove, ppm, todos, todoPlan, onAddTodo, onToggleTodo, onRemoveTodo, onPlanTodo, onOpenBlock, pendingPick, onImportTodoist }) {
     var _a, _b;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const d = new Date(dayK + "T00:00:00");
@@ -2988,7 +2988,24 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                     React.createElement(Plus, { size: 12 }),
                     " Termin")),
             React.createElement("div", { className: "pl-card rounded" },
-                React.createElement(Grid, { visibleDays: [new Date(dayK + "T00:00:00")], todayKey: isToday ? dayK : "-", now: now, blocksFor: () => blocks, onSlot: onSlot, onBlock: onBlock, ppm: ppm, maxH: ppm * (DAY_END - DAY_START) * 60 + 4 }))),
+                React.createElement(Grid, { visibleDays: [new Date(dayK + "T00:00:00")], todayKey: isToday ? dayK : "-", now: now, blocksFor: () => blocks, onSlot: onSlot, onBlock: onBlock, onMove: onMove, ppm: ppm, maxH: ppm * (DAY_END - DAY_START) * 60 + 4 }))),
+        /* Routinen zuerst — sie werden im Tagesverlauf am häufigsten angetippt */
+        routines.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Routinen"),
+            React.createElement("div", { className: "flex flex-wrap gap-1.5" }, routines.map((r) => {
+                var _c;
+                const an = (checks[dayK] || []).includes(r.id);
+                const rc = ((_c = CATS[r.cat]) === null || _c === void 0 ? void 0 : _c.color) || "#6F7A72";
+                return (React.createElement("button", { key: r.id, onClick: () => { if (!an)
+                        buzz(12); onToggleCheck(r.id, dayK); }, className: `px-3 py-2 rounded flex items-center gap-1.5 text-sm ${an ? "pl-pop" : ""}`, style: {
+                        background: an ? rc : "transparent",
+                        color: an ? "#FFF" : "var(--ink)",
+                        border: `1px solid ${an ? rc : "var(--line)"}`,
+                    } },
+                    an && React.createElement(Check, { size: 13 }),
+                    r.title));
+            })))),
+        onAddTodo && (React.createElement(TodoPanel, { todos: todos || [], plan: todoPlan, onAdd: onAddTodo, onToggle: onToggleTodo, onRemove: onRemoveTodo, onPlan: onPlanTodo, onOpenBlock: onOpenBlock, pending: pendingPick, onImportTodoist: onImportTodoist })),
         React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Als Liste"),
             blocks.length === 0 ? (React.createElement("p", { className: "mono text-xs pl-muted py-3" }, "Nichts eingetragen. \u00DCber \u201ETermin\" oder die Wochenansicht f\u00FCllst du den Tag.")) : (React.createElement("div", { className: "flex flex-col" }, blocks.map((b) => {
@@ -3007,21 +3024,6 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                     b.status === "done" && React.createElement(Check, { size: 14, style: { color: lift("#1E6E5A") } }),
                     b.status === "moved" && React.createElement(ArrowRight, { size: 14, style: { color: lift("#8A4E1C") } }),
                     b.status === "skipped" && React.createElement(X, { size: 14, style: { color: lift("#A03A5E") } })));
-            })))),
-        routines.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
-            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Routinen"),
-            React.createElement("div", { className: "flex flex-wrap gap-1.5" }, routines.map((r) => {
-                var _a;
-                const on = (checks[dayK] || []).includes(r.id);
-                const c = ((_a = CATS[r.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72";
-                return (React.createElement("button", { key: r.id, onClick: () => { if (!on)
-                        buzz(12); onToggleCheck(r.id, dayK); }, className: `px-3 py-2 rounded flex items-center gap-1.5 text-sm ${on ? "pl-pop" : ""}`, style: {
-                        background: on ? c : "transparent",
-                        color: on ? "#FFF" : "var(--ink)",
-                        border: `1px solid ${on ? c : "var(--line)"}`,
-                    } },
-                    on && React.createElement(Check, { size: 13 }),
-                    r.title));
             }))))));
 }
 function StudyRow({ task, kind, done, edit, weekIdx, onEditTask, onDeleteTask, onToggleTask, onPlanTask }) {
@@ -3263,7 +3265,7 @@ function TodoPanel({ todos, plan, onAdd, onToggle, onRemove, onPlan, onOpenBlock
                     React.createElement("button", { onClick: () => onToggle(t.id), className: "w-4 h-4 rounded-sm shrink-0", style: { border: `1.5px solid ${lift(((_a = CATS[t.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72")}` }, "aria-label": "Erledigt" }),
                     React.createElement("span", { className: "text-sm truncate flex-1" }, t.title),
                     t.todoistId && React.createElement("span", { className: "mono text-xs pl-muted", title: "aus Todoist" }, "\u2197"),
-                    React.createElement("span", { className: "mono text-xs pl-muted" }, durLabel(t.est)),
+                    React.createElement("span", { className: "mono text-xs pl-muted" }, t.est ? durLabel(t.est) : "—"),
                     React.createElement(Termin, { t: t }),
                     React.createElement("button", { onClick: () => onRemove(t.id), className: "pl-muted opacity-0 group-hover:opacity-100", "aria-label": "L\u00F6schen" },
                         React.createElement(Trash2, { size: 13 }))));
