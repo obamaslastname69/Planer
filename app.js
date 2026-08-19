@@ -330,6 +330,48 @@ const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
 const FOCUS_MIN = 25;
 const BREAK_MIN = 5;
+/* ── Weckton ────────────────────────────────────────────────
+   Im Browser erzeugt statt aus einer Datei: nichts nachzuladen, klingelt
+   also auch offline. Browser lassen Ton erst nach einem Antippen zu -
+   deshalb wird der Kanal beim Start des Timers geöffnet. */
+let tonKanal = null;
+function tonFreischalten() {
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx)
+            return;
+        if (!tonKanal)
+            tonKanal = new Ctx();
+        if (tonKanal.state === "suspended")
+            tonKanal.resume();
+    }
+    catch (e) { /* kein Ton möglich - dann bleibt es eben still */ }
+}
+function klingel(mal) {
+    try {
+        tonFreischalten();
+        if (!tonKanal || tonKanal.state !== "running")
+            return;
+        const start = tonKanal.currentTime + 0.02;
+        for (let i = 0; i < (mal || 3); i++) {
+            const t0 = start + i * 0.42;
+            const ton = tonKanal.createOscillator();
+            const huelle = tonKanal.createGain();
+            ton.type = "sine";
+            /* Zwei Töne hintereinander - klingt nach Wecker, nicht nach Piepsen */
+            ton.frequency.setValueAtTime(880, t0);
+            ton.frequency.setValueAtTime(1175, t0 + 0.15);
+            huelle.gain.setValueAtTime(0.0001, t0);
+            huelle.gain.exponentialRampToValueAtTime(0.3, t0 + 0.02);
+            huelle.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.34);
+            ton.connect(huelle);
+            huelle.connect(tonKanal.destination);
+            ton.start(t0);
+            ton.stop(t0 + 0.36);
+        }
+    }
+    catch (e) { }
+}
 /* localStorage hinter derselben Schnittstelle wie im Artifact */
 window.storage = {
     async get(key) {
@@ -1112,6 +1154,9 @@ function PlannerApp() {
     /* Schon gemeldete Termine, damit beim Neustellen der Wecker nichts
        doppelt kommt. Wechselt der Tag, fangen wir wieder bei null an. */
     const notifyRef = useRef({ tag: "", gemeldet: {} });
+    /* Ob der Fokus-Wecker klingeln darf. Als Ref, weil advanceFocus sonst
+       bei jeder Änderung neu gebaut würde. */
+    const tonRef = useRef(true);
     const [canUndo, setCanUndo] = useState(false);
     const [timer, setTimer] = useState(() => {
         try {
@@ -1777,7 +1822,10 @@ function PlannerApp() {
     });
     /* ── Fokus-Timer ─────────────────────────────────────────
        Runden ergeben sich aus der Blockdauer: 25 min Fokus + 5 min Pause. */
+    /* Tonkanal beim Antippen öffnen — später ließe der Browser ihn nicht zu */
+    useEffect(() => { tonRef.current = (state.notify || {}).ton !== false; }, [state.notify]);
     const startFocus = (block) => {
+        tonFreischalten();
         const rounds = Math.max(1, Math.round(block.dur / 30));
         const t = {
             blockId: block.id, title: block.title, cat: block.cat, blockDur: block.dur,
@@ -1800,7 +1848,13 @@ function PlannerApp() {
         catch (e) { }
         if (!t)
             return;
-        const min = t.focused;
+        /* Die angefangene Runde zählt anteilig mit. Wer nach 20 von 25
+           Minuten aufhört, soll die 20 nicht verlieren. */
+        let min = t.focused;
+        if (t.phase === "focus") {
+            const rest = t.paused ? t.remain : Math.max(0, t.endsAt - Date.now());
+            min += Math.max(0, Math.round((FOCUS_MIN * 60000 - rest) / 60000));
+        }
         if (min > 0) {
             persist((prev) => ({
                 ...prev,
@@ -1817,6 +1871,9 @@ function PlannerApp() {
             const war = t.phase;
             const focused = war === "focus" ? t.focused + FOCUS_MIN : t.focused;
             buzz([20, 80, 20]);
+            /* Wecker: am Ende von allem länger als zwischen den Runden */
+            if (tonRef.current)
+                klingel(war === "focus" && t.round >= t.rounds ? 5 : 2);
             if (war === "focus" && t.round >= t.rounds) {
                 const fertig = { ...t, phase: "done", focused: focused, remain: 0 };
                 try {
@@ -2589,7 +2646,7 @@ function PlannerApp() {
                 }),
                 React.createElement(CatPanel, { cats: catsNow, onField: setCatField, onAdd: addCat, onRemove: removeCat }),
                 React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
-        timer && (React.createElement(FocusTimer, { timer: timer, beat: beat, onPause: pauseFocus, onSkip: advanceFocus, onStop: () => stopFocus(false), onDone: () => stopFocus(true) })),
+        timer && (React.createElement(FocusTimer, { timer: timer, beat: beat, onPause: pauseFocus, onSkip: advanceFocus, onStop: () => stopFocus(false), onDone: () => stopFocus(true), tonAn: (state.notify || {}).ton !== false, onTon: () => setNotify({ ton: (state.notify || {}).ton === false }) })),
         React.createElement(Confetti, { trigger: celebration === null || celebration === void 0 ? void 0 : celebration.id }),
         celebration && (React.createElement("button", { onClick: () => setCelebration(null), className: "fixed inset-0 z-50 flex items-center justify-center p-6", style: { background: "rgba(25,29,26,.28)" } },
             React.createElement("div", { className: "pl-sheet pl-rise rounded-lg px-8 py-6 text-center" },
@@ -4246,7 +4303,7 @@ function makeDemoState() {
     };
 }
 /* ════════════════ Fokus-Timer ════════════════ */
-function FocusTimer({ timer, beat, onPause, onSkip, onStop, onDone }) {
+function FocusTimer({ timer, beat, onPause, onSkip, onStop, onDone, tonAn, onTon }) {
     const [gross, setGross] = useState(false);
     const c = (CATS[timer.cat] && CATS[timer.cat].color) || "#5B3FA0";
     const pause = timer.phase === "break";
@@ -4257,6 +4314,9 @@ function FocusTimer({ timer, beat, onPause, onSkip, onStop, onDone }) {
     const sek = Math.ceil(rest / 1000);
     const uhr = pad(Math.floor(sek / 60)) + ":" + pad(sek % 60);
     const anteil = fertig ? 1 : 1 - rest / ganz;
+    /* Minuten der laufenden Fokusrunde - dieselbe Rechnung wie beim Beenden */
+    const laufend = !fertig && !pause ? Math.max(0, Math.round((FOCUS_MIN * 60000 - rest) / 60000)) : 0;
+    const bisher = timer.focused + laufend;
     const R = 54, U = 2 * Math.PI * R;
     return (React.createElement(React.Fragment, null,
         React.createElement("button", { onClick: () => setGross(true), className: "fixed flex items-center gap-2 px-3 py-2 rounded-full", style: {
@@ -4283,17 +4343,23 @@ function FocusTimer({ timer, beat, onPause, onSkip, onStop, onDone }) {
                             timer.round,
                             " von ",
                             timer.rounds))),
-                React.createElement("div", { className: "mono text-xs pl-muted" },
-                    timer.focused,
+                /* Die laufende Runde mitz\u00E4hlen, damit sichtbar ist, dass die
+                   Minuten auch bei fr\u00FChem Beenden erhalten bleiben */
+                React.createElement("div", { className: "mono text-xs pl-muted text-center" },
+                    bisher,
                     " von ",
                     timer.blockDur,
-                    " min fokussiert"),
+                    " min fokussiert",
+                    !fertig && !pause && laufend > 0
+                        ? React.createElement("div", { style: { opacity: 0.8 } }, `davon ${laufend} min in dieser Runde \u2014 bleiben dir auch beim Beenden`)
+                        : null),
+                onTon && (React.createElement("button", { onClick: onTon, className: "pl-btn px-2.5 py-1 rounded mono text-xs" }, tonAn ? "Wecker: an" : "Wecker: aus")),
                 fertig ? (React.createElement("div", { className: "flex gap-2 w-full" },
                     React.createElement("button", { onClick: onDone, className: "flex-1 px-3 py-2.5 rounded mono text-xs", style: { background: "#1E6E5A", color: "#FFF" } }, "Erledigt"),
                     React.createElement("button", { onClick: onStop, className: "pl-btn px-3 py-2.5 rounded mono text-xs" }, "Nur schlie\u00DFen"))) : (React.createElement("div", { className: "flex gap-2 w-full" },
                     React.createElement("button", { onClick: onPause, className: "pl-btn flex-1 px-3 py-2.5 rounded mono text-xs" }, timer.paused ? "Weiter" : "Anhalten"),
                     React.createElement("button", { onClick: onSkip, className: "pl-btn px-3 py-2.5 rounded mono text-xs" }, "\u00DCberspringen"),
-                    React.createElement("button", { onClick: onStop, className: "pl-btn px-3 py-2.5 rounded mono text-xs", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } }, "Beenden"))))))));
+                    React.createElement("button", { onClick: onStop, className: "pl-btn px-3 py-2.5 rounded mono text-xs", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } }, bisher > 0 ? "Beenden & anrechnen" : "Beenden"))))))));
 }
 /* ════════════════ Konfetti ════════════════ */
 function Confetti({ trigger }) {
