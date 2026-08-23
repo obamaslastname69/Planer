@@ -235,6 +235,23 @@ const NAEHRWERTE = {
     "backpulver": { kcal: 97, kh: 24, protein: 0, fett: 0 },
     "salz": { kcal: 0, kh: 0, protein: 0, fett: 0 },
     "pfeffer": { kcal: 251, kh: 64, protein: 10, fett: 3 },
+    /* Gewürze tragen kaum etwas bei, stehen aber in fast jedem Rezept —
+       ohne sie meldet die Rechnung ständig "nicht erkannt" */
+    "curry": { kcal: 325, kh: 56, protein: 14, fett: 14 },
+    "paprikapulver": { kcal: 282, kh: 54, protein: 14, fett: 13 },
+    "chili": { kcal: 282, kh: 50, protein: 12, fett: 14 },
+    "kreuzkümmel": { kcal: 375, kh: 44, protein: 18, fett: 22 },
+    "zimt": { kcal: 247, kh: 81, protein: 4, fett: 1 },
+    "muskatnuss": { kcal: 525, kh: 49, protein: 6, fett: 36 },
+    "oregano": { kcal: 265, kh: 69, protein: 9, fett: 4 },
+    "basilikum": { kcal: 233, kh: 48, protein: 23, fett: 4 },
+    "thymian": { kcal: 101, kh: 24, protein: 6, fett: 2 },
+    "rosmarin": { kcal: 131, kh: 21, protein: 3, fett: 6 },
+    "lorbeer": { kcal: 313, kh: 75, protein: 8, fett: 8 },
+    "petersilie": { kcal: 36, kh: 6, protein: 3, fett: 1 },
+    "schnittlauch": { kcal: 30, kh: 4, protein: 3, fett: 1 },
+    "currypaste": { kcal: 100, kh: 12, protein: 2, fett: 5 },
+    "vanillezucker": { kcal: 390, kh: 98, protein: 0, fett: 0 },
     "wasser": { kcal: 0, kh: 0, protein: 0, fett: 0 },
     "gemüsebrühe": { kcal: 4, kh: 1, protein: 0, fett: 0 },
 };
@@ -854,6 +871,138 @@ async function tdCloseTask(id) {
     await tdFetch("/tasks/" + id + "/close", { method: "POST" });
     return true;
 }
+/* ── Rezepte von Claude erzeugen ────────────────────────────
+   Der Schlüssel liegt nur im Browser dieses Geräts, nie im Repository —
+   das ist öffentlich. Gesendet wird ausschließlich der Kochwunsch, keine
+   Termine, keine Namen, nichts aus dem Planer.
+──────────────────────────────────────────────────────────── */
+const AI_KEY = "planer:anthropic";
+const AI_API = "https://api.anthropic.com/v1/messages";
+const AI_MODEL = "claude-opus-5";
+function aiKey() {
+    try {
+        return localStorage.getItem(AI_KEY) || "";
+    }
+    catch (e) {
+        return "";
+    }
+}
+function aiSetKey(v) {
+    try {
+        v ? localStorage.setItem(AI_KEY, v.trim()) : localStorage.removeItem(AI_KEY);
+    }
+    catch (e) { }
+}
+/* Antwortform. Nährwerte fehlen absichtlich: die rechnet die App aus der
+   eigenen Tabelle, das bleibt konsistent mit allen anderen Rezepten. */
+const REZEPT_SCHEMA = {
+    type: "object",
+    properties: {
+        title: { type: "string" },
+        cat: { type: "string", enum: RECIPE_CAT_KEYS },
+        portions: { type: "integer" },
+        timeMin: { type: "integer" },
+        ingredients: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    amount: { type: "number" },
+                    unit: { type: "string", enum: UNITS },
+                    name: { type: "string" },
+                },
+                required: ["amount", "unit", "name"],
+                additionalProperties: false,
+            },
+        },
+        steps: { type: "array", items: { type: "string" } },
+    },
+    required: ["title", "cat", "portions", "timeMin", "ingredients", "steps"],
+    additionalProperties: false,
+};
+const AI_SYSTEM = "Du schreibst Kochrezepte für einen Studenten in Österreich. "
+    + "Halte dich an alltagstaugliche Zutaten und knappe, klare Schritte. "
+    + "Nenne Zutaten so schlicht wie möglich (\"Zwiebel\", nicht \"1 mittelgroße gelbe Zwiebel, fein gewürfelt\") — "
+    + "das Zerkleinern gehört in den Zubereitungsschritt. "
+    + "Mengen beziehen sich auf die angegebene Portionszahl. Antworte auf Deutsch.";
+async function rezeptVonKi(wunsch) {
+    const key = aiKey();
+    if (!key)
+        throw new Error("Kein Schlüssel hinterlegt");
+    let res;
+    try {
+        res = await fetch(AI_API, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                /* Ohne diesen Kopf blockt der Browser die Anfrage (CORS) */
+                "anthropic-dangerous-direct-browser-access": "true",
+            },
+            body: JSON.stringify({
+                model: AI_MODEL,
+                max_tokens: 8000,
+                system: AI_SYSTEM,
+                /* Ein Rezept ist keine schwere Denkaufgabe - mittlerer Aufwand
+                   reicht und hält die Kosten niedrig */
+                output_config: {
+                    effort: "medium",
+                    format: { type: "json_schema", schema: REZEPT_SCHEMA },
+                },
+                messages: [{ role: "user", content: String(wunsch || "").slice(0, 2000) }],
+            }),
+        });
+    }
+    catch (e) {
+        throw new Error("Keine Verbindung zu Claude — Internet?");
+    }
+    if (res.status === 401)
+        throw new Error("Schlüssel wird nicht angenommen — stimmt er noch?");
+    if (res.status === 429)
+        throw new Error("Zu viele Anfragen — kurz warten");
+    if (!res.ok) {
+        let text = "";
+        try {
+            const j = await res.json();
+            text = (j && j.error && j.error.message) || "";
+        }
+        catch (e) { }
+        throw new Error("Claude " + res.status + (text ? ": " + text.slice(0, 120) : ""));
+    }
+    const data = await res.json();
+    if (data.stop_reason === "refusal")
+        throw new Error("Claude hat die Anfrage abgelehnt");
+    if (data.stop_reason === "max_tokens")
+        throw new Error("Antwort wurde abgeschnitten — bitte kürzer fragen");
+    /* Das Rezept steht als JSON-Text im ersten Textblock */
+    const block = (data.content || []).find((b) => b.type === "text");
+    if (!block)
+        throw new Error("Leere Antwort von Claude");
+    let roh;
+    try {
+        roh = JSON.parse(block.text);
+    }
+    catch (e) {
+        throw new Error("Antwort war kein gültiges Rezept");
+    }
+    return {
+        id: uid(),
+        title: String(roh.title || "Ohne Titel"),
+        cat: RECIPE_CATS[roh.cat] ? roh.cat : "hauptgericht",
+        portions: Math.max(1, Math.min(50, Number(roh.portions) || 2)),
+        timeMin: Math.max(0, Math.min(600, Number(roh.timeMin) || 30)),
+        ingredients: (roh.ingredients || []).slice(0, 40).map((z) => ({
+            id: uid(),
+            amount: z.amount === null || z.amount === undefined ? "" : String(z.amount).replace(".", ","),
+            unit: UNITS.indexOf(z.unit) >= 0 ? z.unit : "g",
+            name: String(z.name || ""),
+        })),
+        steps: (roh.steps || []).slice(0, 30).map((s) => String(s)),
+        kcal: "", kh: "", protein: "", fett: "",
+        createdAt: Date.now(),
+    };
+}
 /* ── Abgleich über Google Drive ────────────────────────────
    Speichert im versteckten appDataFolder: nur diese App sieht ihn.
 ──────────────────────────────────────────────────────────── */
@@ -1144,6 +1293,7 @@ function PlannerApp() {
     const [recipeEdit, setRecipeEdit] = useState(null);
     const [recipeFilter, setRecipeFilter] = useState("alle");
     const [recipeQuery, setRecipeQuery] = useState("");
+    const [recipeKi, setRecipeKi] = useState(false);
     const [pendingTodo, setPendingTodo] = useState(null);
     const [celebration, setCelebration] = useState(null);
     const [manualPick, setManualPick] = useState(null);
@@ -2619,7 +2769,7 @@ function PlannerApp() {
                 }))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing }))),
-            view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id) })),
+            view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true) })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -2659,14 +2809,69 @@ function PlannerApp() {
             recipe: offenesRezept, onClose: () => setRecipeOpen(null),
             onEdit: () => { setRecipeEdit(offenesRezept.id); setRecipeOpen(null); },
         })),
+        recipeKi && (React.createElement(RecipeAiSheet, {
+            onClose: () => setRecipeKi(false),
+            onFertig: (r) => {
+                persist((prev) => ({ ...prev, recipes: [r, ...(prev.recipes || [])] }));
+                setRecipeKi(false);
+                /* Gleich zum Nachbessern öffnen - Claude rät bei Mengen manchmal */
+                setRecipeEdit(r.id);
+            },
+        })),
         bearbeitetesRezept && (React.createElement(RecipeEditor, {
             recipe: bearbeitetesRezept, onClose: () => setRecipeEdit(null),
             onSave: (patch) => updateRecipe(bearbeitetesRezept.id, patch),
             onDelete: () => { removeRecipe(bearbeitetesRezept.id); setRecipeEdit(null); },
         }))));
 }
+/* ════════════════ Rezept von Claude ════════════════ */
+function RecipeAiSheet({ onClose, onFertig }) {
+    const [wunsch, setWunsch] = useState("");
+    const [schluessel, setSchluessel] = useState(aiKey());
+    const [schluesselOffen, setSchluesselOffen] = useState(!aiKey());
+    const [laeuft, setLaeuft] = useState(false);
+    const [fehler, setFehler] = useState("");
+    const los = async () => {
+        if (!wunsch.trim() || laeuft)
+            return;
+        /* Der Schlüssel wird sonst erst beim Verlassen des Feldes gesichert -
+           wer ihn eintippt und gleich auf Erzeugen tippt, stünde ohne da */
+        aiSetKey(schluessel);
+        setFehler("");
+        setLaeuft(true);
+        try {
+            const r = await rezeptVonKi(wunsch.trim());
+            onFertig(r);
+        }
+        catch (e) {
+            setFehler(e.message);
+            setLaeuft(false);
+        }
+    };
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.4)" }, onClick: onClose },
+        React.createElement("div", { className: "pl-sheet pl-scroll overscroll-contain w-full md:max-w-md rounded-t-lg md:rounded-lg p-4 flex flex-col gap-3 overflow-y-auto", style: { maxHeight: "88vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                React.createElement("div", { className: "mono text-xs pl-muted" }, "Rezept von Claude"),
+                React.createElement("button", { onClick: onClose, className: "pl-muted p-1", "aria-label": "Schließen" },
+                    React.createElement(X, { size: 18 }))),
+            React.createElement("textarea", { value: wunsch, onChange: (e) => setWunsch(e.target.value), placeholder: "Was möchtest du kochen? Zum Beispiel: etwas mit roten Linsen und Kokosmilch, für 2, unter 30 Minuten", rows: 3, className: "pl-input px-2 py-2 rounded text-sm", style: { resize: "vertical" }, autoFocus: true }),
+            fehler && (React.createElement("p", { className: "mono text-xs", style: { color: lift("#A03A5E") } }, fehler)),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("button", { onClick: los, disabled: laeuft || !wunsch.trim() || !schluessel, className: "px-4 py-2 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)", opacity: laeuft || !wunsch.trim() || !schluessel ? 0.5 : 1 } }, laeuft ? "Claude kocht…" : "Rezept erzeugen"),
+                React.createElement("button", { onClick: () => setSchluesselOffen((o) => !o), className: "pl-btn px-2.5 py-2 rounded mono text-xs ml-auto" }, schluessel ? "Schlüssel ändern" : "Schlüssel eintragen")),
+            schluesselOffen && (React.createElement("div", { className: "border-t pl-hair pt-3 flex flex-col gap-2" },
+                React.createElement("input", { type: "password", value: schluessel, onChange: (e) => setSchluessel(e.target.value), onBlur: () => aiSetKey(schluessel), placeholder: "sk-ant-…", className: "pl-input px-2 py-1.5 rounded mono text-xs", autoComplete: "off" }),
+                React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Dein Schlüssel von console.anthropic.com. Er bleibt im Browser dieses Geräts und wandert nie ins Repository — das ist öffentlich. Gesendet wird nur dein Kochwunsch, nichts aus deinem Planer."),
+                schluessel && (React.createElement("button", { onClick: () => { aiSetKey(""); setSchluessel(""); }, className: "pl-btn px-2.5 py-1 rounded mono text-xs self-start", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } }, "Schlüssel löschen")))),
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Das Rezept öffnet sich danach zum Nachbessern. Die Nährwerte rechnet der Planer selbst aus den Zutaten."))));
+}
 /* ════════════════ Rezepte ════════════════ */
-function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen }) {
+function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen, onKi }) {
     const suche = query.trim().toLowerCase();
     const gefiltert = recipes.filter((r) => {
         if (filter !== "alle" && r.cat !== filter)
@@ -2684,7 +2889,8 @@ function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen }
             React.createElement("input", { value: query, onChange: (e) => onQuery(e.target.value), placeholder: "Rezept oder Zutat suchen", className: "pl-input px-3 py-2 rounded text-sm flex-1" }),
             React.createElement("button", { onClick: onAdd, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs shrink-0" },
                 React.createElement(Plus, { size: 13 }),
-                "Neu")),
+                "Neu"),
+            onKi && React.createElement("button", { onClick: onKi, className: "pl-btn px-3 py-2 rounded mono text-xs shrink-0", title: "Rezept von Claude erzeugen lassen" }, "Claude")),
         belegt.length > 0 && (React.createElement("div", { className: "flex flex-wrap gap-1.5" }, [["alle", "alle"], ...belegt.map((k) => [k, RECIPE_CATS[k].label])].map(([k, lbl]) => {
             const an = filter === k;
             const farbe = k === "alle" ? "var(--ink)" : RECIPE_CATS[k].color;
