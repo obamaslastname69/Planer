@@ -342,6 +342,202 @@ function mengeLabel(n) {
     const gerundet = Math.round(n * 10) / 10;
     return String(Number.isInteger(gerundet) ? gerundet : gerundet.toFixed(1)).replace(".", ",");
 }
+/* ── Finanzen ───────────────────────────────────────────────
+   Umsätze kommen als CSV aus dem Online-Banking. Ein direkter Bankzugang
+   scheidet aus: dafür braucht es einen Server mit geheimem Schlüssel, und
+   der wäre in einer Seite wie dieser für jeden auslesbar. */
+const GELD_CATS = {
+    einkommen: { label: "Einkommen", color: "#1E6E5A", ein: true },
+    wohnen: { label: "Wohnen", color: "#8A4E1C" },
+    essen: { label: "Lebensmittel", color: "#5E7A1E" },
+    verkehr: { label: "Verkehr", color: "#12657F" },
+    uni: { label: "Uni", color: "#2B4B8F" },
+    freizeit: { label: "Freizeit", color: "#7A3F9E" },
+    gesundheit: { label: "Gesundheit", color: "#C2185B" },
+    abo: { label: "Abos", color: "#546E7A" },
+    sonstiges: { label: "Sonstiges", color: "#6F7A72" },
+};
+const GELD_CAT_KEYS = Object.keys(GELD_CATS);
+/* Stichwörter zum Vorsortieren. Trifft nichts, bleibt es "Sonstiges" —
+   lieber offen lassen als falsch einsortieren. */
+const GELD_REGELN = [
+    ["essen", ["spar", "billa", "hofer", "lidl", "penny", "merkur", "mpreis", "unimarkt", "bakery", "bäckerei", "metro"]],
+    ["verkehr", ["öbb", "obb", "wiener linien", "linz ag", "tankstelle", "shell", "omv", "jet", "bp ", "eni", "klimaticket", "westbahn", "uber", "taxi"]],
+    ["wohnen", ["miete", "wohnung", "strom", "gas", "heizung", "energie", "hausverwaltung", "betriebskosten", "gis", "orf"]],
+    ["abo", ["netflix", "spotify", "disney", "amazon prime", "youtube", "icloud", "google one", "dropbox", "adobe", "openai", "anthropic", "fitness", "gym", "mcfit", "clever fit"]],
+    ["uni", ["fh ", "universit", "öh", "oeh", "studien", "skript", "moodle", "bibliothek", "hochschule"]],
+    ["gesundheit", ["apotheke", "arzt", "zahnarzt", "ögk", "oegk", "krankenkasse", "optiker", "therapie"]],
+    ["freizeit", ["kino", "restaurant", "gasthaus", "cafe", "café", "bar ", "pub", "kletter", "boulder", "schwimmbad", "konzert", "ticket"]],
+    ["einkommen", ["gehalt", "lohn", "beihilfe", "stipendium", "familienbeihilfe", "gutschrift", "rückzahlung", "ruckzahlung", "honorar"]],
+];
+function geldKategorieRaten(text, betrag) {
+    const t = String(text || "").toLowerCase();
+    /* Bei Eingängen zuerst auf Einkommen prüfen: "FH Stipendium" ist Geld,
+       das kommt — sonst gewänne die Uni-Regel und es stünde als Ausgabe da. */
+    if (betrag > 0) {
+        const einkommen = GELD_REGELN.find(([k]) => k === "einkommen");
+        if (einkommen && einkommen[1].some((w) => t.includes(w)))
+            return "einkommen";
+    }
+    for (const [kat, woerter] of GELD_REGELN) {
+        for (const wort of woerter)
+            if (t.includes(wort))
+                return kat;
+    }
+    /* Kein Treffer: Eingänge sind meist Einkommen */
+    return betrag > 0 ? "einkommen" : "sonstiges";
+}
+/* Betrag aus dem CSV lesen. Banken schreiben mal "1.234,56", mal
+   "1,234.56", mal mit nachgestelltem Minus oder in Klammern. */
+function geldBetrag(roh) {
+    let s = String(roh || "").trim().replace(/[€\s]/g, "").replace(/"/g, "");
+    if (!s)
+        return null;
+    let negativ = false;
+    if (/^\(.*\)$/.test(s)) {
+        negativ = true;
+        s = s.slice(1, -1);
+    }
+    if (s.endsWith("-")) {
+        negativ = true;
+        s = s.slice(0, -1);
+    }
+    if (s.startsWith("-")) {
+        negativ = true;
+        s = s.slice(1);
+    }
+    if (s.startsWith("+"))
+        s = s.slice(1);
+    const letzteKomma = s.lastIndexOf(",");
+    const letzterPunkt = s.lastIndexOf(".");
+    /* Das hintere Zeichen trennt die Nachkommastellen */
+    if (letzteKomma > -1 && letzterPunkt > -1) {
+        if (letzteKomma > letzterPunkt)
+            s = s.replace(/\./g, "").replace(",", ".");
+        else
+            s = s.replace(/,/g, "");
+    }
+    else if (letzteKomma > -1) {
+        /* "1,234" ist bei zwei Nachkommastellen ein Komma, sonst Tausender */
+        s = s.length - letzteKomma - 1 === 3 && /^\d{1,3},\d{3}$/.test(s)
+            ? s.replace(",", "")
+            : s.replace(",", ".");
+    }
+    const z = Number(s);
+    if (!isFinite(z))
+        return null;
+    return negativ ? -z : z;
+}
+/* Datum aus dem CSV lesen und auf JJJJ-MM-TT bringen */
+function geldDatum(roh) {
+    const s = String(roh || "").trim().replace(/"/g, "");
+    if (!s)
+        return null;
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m)
+        return `${m[1]}-${m[2]}-${m[3]}`;
+    m = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/);
+    if (m) {
+        let jahr = m[3];
+        if (jahr.length === 2)
+            jahr = (Number(jahr) > 70 ? "19" : "20") + jahr;
+        return `${jahr}-${pad(Number(m[2]))}-${pad(Number(m[1]))}`;
+    }
+    return null;
+}
+/* Eine CSV-Zeile zerlegen, Anführungszeichen beachten */
+function csvZeile(zeile, trenner) {
+    const felder = [];
+    let feld = "";
+    let inAnfuehrung = false;
+    for (let i = 0; i < zeile.length; i++) {
+        const z = zeile[i];
+        if (z === '"') {
+            if (inAnfuehrung && zeile[i + 1] === '"') {
+                feld += '"';
+                i++;
+            }
+            else
+                inAnfuehrung = !inAnfuehrung;
+        }
+        else if (z === trenner && !inAnfuehrung) {
+            felder.push(feld);
+            feld = "";
+        }
+        else
+            feld += z;
+    }
+    felder.push(feld);
+    return felder.map((f) => f.trim());
+}
+const SPALTE_DATUM = ["buchungsdatum", "buchungstag", "valutadatum", "valuta", "datum", "date"];
+const SPALTE_BETRAG = ["betrag", "umsatz", "amount", "wert"];
+const SPALTE_TEXT = ["verwendungszweck", "buchungstext", "partnername", "empfänger", "empfaenger", "auftraggeber", "beschreibung", "text", "umsatztext", "zahlungsreferenz", "name"];
+/* Kontoauszug einlesen. Erkennt Trennzeichen und Spalten selbst, weil
+   jede Bank ein eigenes Format ausgibt. */
+function csvUmsaetze(text) {
+    const zeilen = String(text || "").split(/\r?\n/).filter((z) => z.trim());
+    if (!zeilen.length)
+        return { fehler: "Die Datei ist leer.", buchungen: [] };
+    /* Trennzeichen: was die erste Zeile am häufigsten enthält */
+    let trenner = ";";
+    let meiste = 0;
+    for (const t of [";", ",", "\t", "|"]) {
+        const n = (zeilen[0].match(new RegExp("\\" + t, "g")) || []).length;
+        if (n > meiste) {
+            meiste = n;
+            trenner = t;
+        }
+    }
+    if (!meiste)
+        return { fehler: "Keine Spalten erkannt — ist das eine CSV-Datei?", buchungen: [] };
+    const kopf = csvZeile(zeilen[0], trenner).map((s) => s.toLowerCase().replace(/"/g, ""));
+    const finde = (kandidaten) => kopf.findIndex((s) => kandidaten.some((k) => s.includes(k)));
+    let iDatum = finde(SPALTE_DATUM);
+    let iBetrag = finde(SPALTE_BETRAG);
+    const iText = finde(SPALTE_TEXT);
+    /* Keine Kopfzeile? Dann aus der ersten Datenzeile schließen */
+    let ersteDatenzeile = 1;
+    if (iDatum === -1 && iBetrag === -1) {
+        const probe = csvZeile(zeilen[0], trenner);
+        iDatum = probe.findIndex((f) => geldDatum(f) !== null);
+        iBetrag = probe.findIndex((f, i) => i !== iDatum && geldBetrag(f) !== null);
+        ersteDatenzeile = 0;
+    }
+    if (iDatum === -1 || iBetrag === -1)
+        return { fehler: "Datum oder Betrag nicht gefunden. Die Datei braucht Spalten mit Buchungsdatum und Betrag.", buchungen: [] };
+    const buchungen = [];
+    let uebersprungen = 0;
+    for (let i = ersteDatenzeile; i < zeilen.length; i++) {
+        const f = csvZeile(zeilen[i], trenner);
+        const datum = geldDatum(f[iDatum]);
+        const betrag = geldBetrag(f[iBetrag]);
+        if (!datum || betrag === null || betrag === 0) {
+            uebersprungen++;
+            continue;
+        }
+        /* Alle Textspalten zusammenziehen: Partnername UND Verwendungszweck
+           gehören zusammen, sonst fehlt für die Zuordnung die halbe Information.
+           Reine Zahlen, Datumsangaben und Währungskürzel bleiben draußen. */
+        const teile = f.filter((x, j) => j !== iDatum && j !== iBetrag && x
+            && x.length > 1
+            && !/^-?[\d.,]+$/.test(x)
+            && !/^[A-Z]{3}$/.test(x)
+            && !geldDatum(x));
+        /* Die ausgewiesene Textspalte zuerst, danach der Rest */
+        const bevorzugt = iText > -1 && f[iText] ? [f[iText]] : [];
+        const text = bevorzugt.concat(teile.filter((x) => x !== f[iText]))
+            .join(" ").replace(/\s+/g, " ").trim().slice(0, 120);
+        buchungen.push({
+            id: uid(), datum: datum, betrag: betrag,
+            text: text || "Ohne Text",
+            kat: geldKategorieRaten(text, betrag),
+        });
+    }
+    return { buchungen: buchungen, uebersprungen: uebersprungen, fehler: buchungen.length ? "" : "Keine Buchungen gefunden." };
+}
+/* Damit ein zweiter Import dieselben Zeilen nicht doppelt anlegt */
+const geldSchluessel = (b) => `${b.datum}|${b.betrag.toFixed(2)}|${String(b.text).slice(0, 40)}`;
 const APP_VERSION = "2026-08-15b · To-dos und Termine verbunden";
 const STORE_KEY = "planner:v1";
 const TIMER_KEY = "planer:timer";
@@ -1340,6 +1536,8 @@ const DEFAULT_STATE = {
     recipes: [],
     /* Erinnerungen laufen im Gerät selbst, ohne fremden Dienst */
     notify: { an: false, vorlauf: 10 },
+    /* Umsätze aus dem Kontoauszug plus die festen Posten */
+    geld: { buchungen: [], fix: [] },
     updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
@@ -1772,6 +1970,54 @@ function PlannerApp() {
     const removeRecipe = (id) => persist((prev) => ({
         ...prev,
         recipes: (prev.recipes || []).filter((r) => r.id !== id),
+    }));
+    /* ── Finanzen ───────────────────────────────────────── */
+    const geld = state.geld || { buchungen: [], fix: [] };
+    const setGeld = (fn) => persist((prev) => {
+        const alt = prev.geld || { buchungen: [], fix: [] };
+        return { ...prev, geld: { ...alt, ...fn(alt) } };
+    });
+    /* Import: schon vorhandene Zeilen werden übersprungen, damit ein
+       zweiter Auszug mit Überlappung nichts verdoppelt */
+    const geldImport = (neue) => {
+        let uebernommen = 0, doppelt = 0;
+        setGeld((alt) => {
+            const bekannt = {};
+            for (const b of alt.buchungen || [])
+                bekannt[geldSchluessel(b)] = true;
+            const dazu = [];
+            for (const b of neue) {
+                const s = geldSchluessel(b);
+                if (bekannt[s]) {
+                    doppelt++;
+                    continue;
+                }
+                bekannt[s] = true;
+                dazu.push(b);
+                uebernommen++;
+            }
+            return { buchungen: [...dazu, ...(alt.buchungen || [])].sort((x, y) => (x.datum < y.datum ? 1 : -1)) };
+        });
+        return { uebernommen: uebernommen, doppelt: doppelt };
+    };
+    const geldBuchung = (id, patch) => setGeld((alt) => ({
+        buchungen: (alt.buchungen || []).map((b) => (b.id === id ? { ...b, ...patch } : b)),
+    }));
+    const geldBuchungWeg = (id) => setGeld((alt) => ({
+        buchungen: (alt.buchungen || []).filter((b) => b.id !== id),
+    }));
+    const geldBuchungNeu = (datum, betrag, text, kat) => setGeld((alt) => ({
+        buchungen: [{ id: uid(), datum: datum, betrag: betrag, text: text, kat: kat }, ...(alt.buchungen || [])]
+            .sort((x, y) => (x.datum < y.datum ? 1 : -1)),
+    }));
+    const geldFixNeu = () => setGeld((alt) => ({
+        fix: [...(alt.fix || []), { id: uid(), titel: "", betrag: 0, kat: "abo" }],
+    }));
+    const geldFix = (id, patch) => setGeld((alt) => ({
+        fix: (alt.fix || []).map((f) => (f.id === id ? { ...f, ...patch } : f)),
+    }));
+    const geldFixWeg = (id) => setGeld((alt) => ({
+        fix: (alt.fix || []).filter((f) => f.id !== id),
     }));
     const projectStats = useMemo(() => {
         const map = {};
@@ -2209,7 +2455,7 @@ function PlannerApp() {
         addBlock(day, minutes);
     };
     /* Wischen zwischen den Ansichten */
-    const VIEWS = ["heute", "woche", "lernen", "training", "auswerten", "rezepte"];
+    const VIEWS = ["heute", "woche", "lernen", "training", "auswerten", "rezepte", "geld"];
     const goView = (k, dir) => {
         if (k === view)
             return;
@@ -2778,7 +3024,7 @@ function PlannerApp() {
         .pl-roll-down{animation:pl-roll-down .2s cubic-bezier(.2,.9,.3,1);}
       `),
         React.createElement("div", { className: "px-4 pt-4 pb-2 md:px-6" },
-            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["lernen", "Lernen"], ["training", "Training"], ["auswerten", "Bilanz"], ["rezepte", "Rezepte"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
+            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["lernen", "Lernen"], ["training", "Training"], ["auswerten", "Bilanz"], ["rezepte", "Rezepte"], ["geld", "Geld"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
                     ? { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" }
                     : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
                 lbl,
@@ -2900,6 +3146,7 @@ function PlannerApp() {
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing }))),
             view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true) })),
+            view === "geld" && (React.createElement(GeldView, { geld: geld, heute: today, onImport: geldImport, onBuchung: geldBuchung, onBuchungWeg: geldBuchungWeg, onBuchungNeu: geldBuchungNeu, onFixNeu: geldFixNeu, onFix: geldFix, onFixWeg: geldFixWeg })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -2999,6 +3246,190 @@ function RecipeAiSheet({ onClose, onFertig }) {
                 React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Dein Schlüssel von console.anthropic.com. Er bleibt im Browser dieses Geräts und wandert nie ins Repository — das ist öffentlich. Gesendet wird nur dein Kochwunsch, nichts aus deinem Planer."),
                 schluessel && (React.createElement("button", { onClick: () => { aiSetKey(""); setSchluessel(""); }, className: "pl-btn px-2.5 py-1 rounded mono text-xs self-start", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } }, "Schlüssel löschen")))),
             React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Das Rezept öffnet sich danach zum Nachbessern. Die Nährwerte rechnet der Planer selbst aus den Zutaten."))));
+}
+/* ════════════════ Finanzen ════════════════ */
+const MONATE = ["Jänner", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+const eur = (n) => (n < 0 ? "−" : "") + Math.abs(n).toLocaleString("de-AT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+/* Kontoauszüge kommen oft in Windows-1252 statt UTF-8 — dann sind die
+   Umlaute zerschossen. Erst UTF-8 versuchen, bei Ersatzzeichen umschalten. */
+function leseTextdatei(datei) {
+    return new Promise((fertig, scheitern) => {
+        const r = new FileReader();
+        r.onerror = () => scheitern(new Error("Datei nicht lesbar"));
+        r.onload = () => {
+            const text = String(r.result || "");
+            if (text.indexOf("�") === -1)
+                return fertig(text);
+            const r2 = new FileReader();
+            r2.onerror = () => fertig(text);
+            r2.onload = () => fertig(String(r2.result || ""));
+            r2.readAsText(datei, "windows-1252");
+        };
+        r.readAsText(datei, "utf-8");
+    });
+}
+function GeldView({ geld, heute, onImport, onBuchung, onBuchungWeg, onBuchungNeu, onFixNeu, onFix, onFixWeg }) {
+    const [monat, setMonat] = useState(() => dayKey(heute).slice(0, 7));
+    const [meldung, setMeldung] = useState("");
+    const [neuOffen, setNeuOffen] = useState(false);
+    const [nText, setNText] = useState("");
+    const [nBetrag, setNBetrag] = useState("");
+    const [nKat, setNKat] = useState("essen");
+    const [nDatum, setNDatum] = useState(() => dayKey(heute));
+    const dateiRef = useRef(null);
+    const buchungen = geld.buchungen || [];
+    const fix = geld.fix || [];
+    const desMonats = useMemo(() => buchungen.filter((b) => String(b.datum).slice(0, 7) === monat), [buchungen, monat]);
+    const summe = useMemo(() => {
+        let ein = 0, aus = 0;
+        const proKat = {};
+        for (const b of desMonats) {
+            if (b.betrag > 0)
+                ein += b.betrag;
+            else
+                aus += -b.betrag;
+            if (b.betrag < 0)
+                proKat[b.kat] = (proKat[b.kat] || 0) + -b.betrag;
+        }
+        return { ein: ein, aus: aus, saldo: ein - aus, proKat: proKat };
+    }, [desMonats]);
+    const fixSumme = fix.reduce((s, f) => s + (Number(f.betrag) || 0), 0);
+    const monatWechseln = (richtung) => {
+        const [j, m] = monat.split("-").map(Number);
+        const d = new Date(j, m - 1 + richtung, 1);
+        setMonat(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`);
+    };
+    const monatLabel = () => {
+        const [j, m] = monat.split("-").map(Number);
+        return `${MONATE[m - 1]} ${j}`;
+    };
+    const dateiGewaehlt = async (e) => {
+        const datei = e.target.files && e.target.files[0];
+        e.target.value = "";
+        if (!datei)
+            return;
+        setMeldung("wird gelesen…");
+        try {
+            const text = await leseTextdatei(datei);
+            const ergebnis = csvUmsaetze(text);
+            if (ergebnis.fehler)
+                return setMeldung(ergebnis.fehler);
+            const { uebernommen, doppelt } = onImport(ergebnis.buchungen);
+            setMeldung(`${uebernommen} übernommen`
+                + (doppelt ? `, ${doppelt} schon vorhanden` : "")
+                + (ergebnis.uebersprungen ? `, ${ergebnis.uebersprungen} Zeilen ohne Betrag übersprungen` : ""));
+            /* Zum Monat der neuesten Buchung springen, sonst sieht man nichts */
+            if (uebernommen && ergebnis.buchungen.length)
+                setMonat(ergebnis.buchungen.map((b) => b.datum).sort().reverse()[0].slice(0, 7));
+        }
+        catch (err) {
+            setMeldung("Konnte die Datei nicht lesen: " + err.message);
+        }
+    };
+    const neuSpeichern = () => {
+        const betrag = geldBetrag(nBetrag);
+        if (betrag === null || betrag === 0 || !nText.trim())
+            return;
+        /* Ausgaben sind negativ - beim Tippen wird das Minus oft vergessen */
+        const wert = GELD_CATS[nKat] && GELD_CATS[nKat].ein ? Math.abs(betrag) : -Math.abs(betrag);
+        onBuchungNeu(nDatum, wert, nText.trim(), nKat);
+        setNText("");
+        setNBetrag("");
+        setNeuOffen(false);
+        setMonat(nDatum.slice(0, 7));
+    };
+    const katListe = Object.keys(summe.proKat).sort((a, b) => summe.proKat[b] - summe.proKat[a]);
+    return (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
+        /* Monatswechsel */
+        React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement("button", { onClick: () => monatWechseln(-1), className: "pl-btn p-2 rounded", "aria-label": "Monat zurück" },
+                React.createElement(ChevronLeft, { size: 16 })),
+            React.createElement("div", { className: "flex-1 text-center" },
+                React.createElement("div", { className: "text-lg font-semibold leading-tight" }, monatLabel())),
+            React.createElement("button", { onClick: () => monatWechseln(1), className: "pl-btn p-2 rounded", "aria-label": "Monat vor" },
+                React.createElement(ChevronRight, { size: 16 }))),
+        /* Übersicht */
+        React.createElement("div", { className: "pl-card rounded p-4" },
+            React.createElement("div", { className: "grid grid-cols-3 gap-2 text-center" },
+                React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, "rein"),
+                    React.createElement("div", { className: "mono text-sm font-medium", style: { color: lift("#1E6E5A") } }, eur(summe.ein))),
+                React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, "raus"),
+                    React.createElement("div", { className: "mono text-sm font-medium", style: { color: lift("#A03A5E") } }, eur(summe.aus))),
+                React.createElement("div", null,
+                    React.createElement("div", { className: "mono text-xs pl-muted" }, "bleibt"),
+                    React.createElement("div", { className: "mono text-sm font-medium", style: { color: summe.saldo >= 0 ? lift("#1E6E5A") : lift("#A03A5E") } }, eur(summe.saldo)))),
+            katListe.length > 0 && (React.createElement("div", { className: "mt-4 flex flex-col gap-1.5" }, katListe.map((k) => {
+                const kat = GELD_CATS[k] || GELD_CATS.sonstiges;
+                const anteil = summe.aus ? (summe.proKat[k] / summe.aus) * 100 : 0;
+                return (React.createElement("div", { key: k },
+                    React.createElement("div", { className: "flex items-baseline gap-2" },
+                        React.createElement("span", { className: "w-1.5 h-1.5 rounded-full shrink-0", style: { background: kat.color } }),
+                        React.createElement("span", { className: "text-sm flex-1 truncate" }, kat.label),
+                        React.createElement("span", { className: "mono text-xs pl-muted" }, eur(summe.proKat[k]))),
+                    React.createElement("div", { className: "h-1.5 rounded-full mt-1 overflow-hidden", style: { background: hexA(kat.color, 0.12) } },
+                        React.createElement("div", { className: "h-1.5 rounded-full pl-bar", style: { width: `${anteil}%`, background: kat.color } }))));
+            }))),
+            desMonats.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted mt-3" }, "Für diesen Monat ist nichts erfasst."))),
+        /* Import und manuelles Eintragen */
+        React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2" },
+            React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
+                React.createElement("button", { onClick: () => dateiRef.current && dateiRef.current.click(), className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs" },
+                    React.createElement(UploadCloud, { size: 13 }),
+                    "Kontoauszug einlesen"),
+                React.createElement("button", { onClick: () => setNeuOffen(!neuOffen), className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs" },
+                    React.createElement(Plus, { size: 13 }),
+                    "Einzeln eintragen"),
+                React.createElement("input", { ref: dateiRef, type: "file", accept: ".csv,.txt,text/csv,text/plain", onChange: dateiGewaehlt, style: { display: "none" } })),
+            meldung && React.createElement("p", { className: "mono text-xs pl-muted" }, meldung),
+            neuOffen && (React.createElement("div", { className: "flex flex-col gap-2 pt-1" },
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("input", { type: "date", value: nDatum, onChange: (e) => setNDatum(e.target.value), className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 150 } }),
+                    React.createElement("input", { value: nBetrag, onChange: (e) => setNBetrag(e.target.value), inputMode: "decimal", placeholder: "Betrag", className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 100 } })),
+                React.createElement("input", { value: nText, onChange: (e) => setNText(e.target.value), onKeyDown: (e) => e.key === "Enter" && neuSpeichern(), placeholder: "Wofür?", className: "pl-input px-2 py-1.5 rounded text-sm" }),
+                React.createElement("div", { className: "flex flex-wrap gap-1.5" }, GELD_CAT_KEYS.map((k) => {
+                    const an = nKat === k;
+                    return (React.createElement("button", { key: k, onClick: () => setNKat(k), className: "px-2 py-1 rounded-full mono text-xs", style: {
+                            background: an ? GELD_CATS[k].color : "transparent",
+                            color: an ? "#FFF" : "var(--muted)",
+                            border: `1px solid ${an ? GELD_CATS[k].color : "var(--line)"}`,
+                        } }, GELD_CATS[k].label));
+                })),
+                React.createElement("button", { onClick: neuSpeichern, className: "px-3 py-2 rounded mono text-xs self-start", style: { background: "var(--ink)", color: "var(--paper)" } }, "Eintragen"))),
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Der Auszug bleibt auf deinem Gerät. Ein direkter Bankzugang ginge nur über einen eigenen Server mit geheimem Schlüssel — in einer Seite wie dieser wäre der für jeden lesbar.")),
+        /* Feste Posten */
+        React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2" },
+            React.createElement("div", { className: "flex items-center justify-between" },
+                React.createElement("span", { className: "mono text-xs pl-muted" }, "Fixkosten und Abos"),
+                React.createElement("span", { className: "mono text-sm font-medium", style: { color: lift("#A03A5E") } }, eur(-Math.abs(fixSumme)) + " / Monat")),
+            fix.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Noch nichts eingetragen. Miete, Handy, Abos — alles, was jeden Monat abgeht.")),
+            fix.map((f) => (React.createElement("div", { key: f.id, className: "flex items-center gap-1.5" },
+                React.createElement("input", { value: f.titel, onChange: (e) => onFix(f.id, { titel: e.target.value }), placeholder: "z. B. Handy", className: "pl-input px-2 py-1.5 rounded text-sm flex-1" }),
+                React.createElement("input", { value: f.betrag === 0 ? "" : Math.abs(f.betrag), onChange: (e) => onFix(f.id, { betrag: Math.abs(geldBetrag(e.target.value) || 0) }), inputMode: "decimal", placeholder: "€", className: "pl-input px-2 py-1.5 rounded mono text-sm", style: { width: 76 } }),
+                React.createElement("select", { value: f.kat, onChange: (e) => onFix(f.id, { kat: e.target.value }), className: "pl-input px-1 py-1.5 rounded mono text-xs", style: { width: 104 } }, GELD_CAT_KEYS.filter((k) => !GELD_CATS[k].ein).map((k) => React.createElement("option", { key: k, value: k }, GELD_CATS[k].label))),
+                React.createElement("button", { onClick: () => onFixWeg(f.id), className: "pl-muted p-1 shrink-0", "aria-label": "Posten entfernen" },
+                    React.createElement(X, { size: 14 }))))),
+            React.createElement("button", { onClick: onFixNeu, className: "pl-btn px-2.5 py-1.5 rounded mono text-xs self-start flex items-center gap-1.5" },
+                React.createElement(Plus, { size: 12 }),
+                "Posten")),
+        /* Buchungen des Monats */
+        desMonats.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
+            React.createElement("div", { className: "mono text-xs pl-muted mb-2" },
+                desMonats.length,
+                desMonats.length === 1 ? " Buchung" : " Buchungen"),
+            React.createElement("div", { className: "flex flex-col" }, desMonats.map((b) => {
+                const kat = GELD_CATS[b.kat] || GELD_CATS.sonstiges;
+                return (React.createElement("div", { key: b.id, className: "flex items-center gap-2 py-1.5 border-b pl-hair group" },
+                    React.createElement("span", { className: "mono text-xs pl-muted shrink-0", style: { width: 42 } }, b.datum.slice(8) + "." + b.datum.slice(5, 7) + "."),
+                    React.createElement("span", { className: "w-1 self-stretch rounded-full shrink-0", style: { background: kat.color, minHeight: 20 } }),
+                    React.createElement("span", { className: "flex-1 min-w-0" },
+                        React.createElement("span", { className: "text-sm block truncate" }, b.text),
+                        React.createElement("select", { value: b.kat, onChange: (e) => onBuchung(b.id, { kat: e.target.value }), className: "mono text-xs pl-muted", style: { background: "transparent", border: "none", padding: 0, color: "var(--muted)" } }, GELD_CAT_KEYS.map((k) => React.createElement("option", { key: k, value: k }, GELD_CATS[k].label)))),
+                    React.createElement("span", { className: "mono text-sm shrink-0", style: { color: b.betrag > 0 ? lift("#1E6E5A") : "var(--ink)" } }, eur(b.betrag)),
+                    React.createElement("button", { onClick: () => onBuchungWeg(b.id), className: "pl-muted opacity-0 group-hover:opacity-100 shrink-0", "aria-label": "Buchung löschen" },
+                        React.createElement(Trash2, { size: 12 }))));
+            }))))));
 }
 /* ════════════════ Rezepte ════════════════ */
 function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen, onKi }) {
