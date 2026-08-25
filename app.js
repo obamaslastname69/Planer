@@ -3296,8 +3296,38 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
         const snapped = Math.round(raw / SLOT) * SLOT;
         onSlot(day, Math.max(DAY_START * 60, Math.min(DAY_END * 60 - 30, snapped)));
     };
-    /* Ganztägige Termine gehören nicht ins Zeitraster */
-    const allDayRows = Math.max(0, ...visibleDays.map((d) => blocksFor(dayKey(d)).filter((b) => b.allDay).length));
+    /* Ganztägige Termine gehören nicht ins Zeitraster. Mehrtägiges wird zu
+       EINEM Balken über alle betroffenen Spalten zusammengefasst — als
+       einzelne Kästchen pro Tag stünde der Titel nur im ersten und wäre
+       dort auf Spaltenbreite abgeschnitten. */
+    const ganztags = useMemo(() => {
+        const proTermin = {};
+        visibleDays.forEach((d, i) => {
+            for (const b of blocksFor(dayKey(d))) {
+                if (!b.allDay)
+                    continue;
+                /* Externe haben je Tag eine eigene id, aber dieselbe Google-Kennung */
+                const schluessel = b.gcalRawId || b.id;
+                if (!proTermin[schluessel])
+                    proTermin[schluessel] = { block: b, von: i, bis: i };
+                else
+                    proTermin[schluessel].bis = i;
+            }
+        });
+        /* Früh beginnende und lange Balken zuerst — ergibt ruhigere Zeilen */
+        const liste = Object.keys(proTermin).map((k) => proTermin[k])
+            .sort((a, b) => a.von - b.von || (b.bis - b.von) - (a.bis - a.von));
+        const zeilenEnde = [];
+        for (const e of liste) {
+            let z = 0;
+            while (zeilenEnde[z] !== undefined && zeilenEnde[z] >= e.von)
+                z++;
+            zeilenEnde[z] = e.bis;
+            e.zeile = z;
+        }
+        return { liste: liste, zeilen: zeilenEnde.length };
+    }, [visibleDays, blocksFor]);
+    const allDayRows = ganztags.zeilen;
     return (React.createElement("div", null,
         n > 1 && (React.createElement("div", { className: "grid border-b pl-hair", style: { gridTemplateColumns: tpl } },
             React.createElement("div", null),
@@ -3309,36 +3339,37 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                     React.createElement("div", { className: "mono text-sm font-medium", style: { color: isToday ? "#2B4B8F" : "var(--ink)" } }, d.getDate())));
             }))),
         allDayRows > 0 && (React.createElement("div", { className: "grid border-b pl-hair", style: { gridTemplateColumns: tpl } },
-            React.createElement("div", { className: "mono pl-muted flex items-center justify-end pr-1 overflow-hidden", style: { fontSize: 9 } }, compact ? "" : "ganztags"),
-            visibleDays.map((d) => {
-                const k = dayKey(d);
-                const items = blocksFor(k).filter((b) => b.allDay);
-                return (React.createElement("div", { key: k, className: "border-l pl-hair p-0.5 flex flex-col gap-0.5", style: { minHeight: allDayRows * 17 + 4 } }, items.map((b) => {
-                    const c = blockColor(b);
-                    /* Mehrtägiges läuft als ein Balken durch: Rundung und
-                       Farbkante nur an den Enden, Titel nur am ersten Tag. */
-                    const mehrtaegig = spanTage(b) > 1;
-                    const erster = !b.spanFolge;
-                    const letzter = !mehrtaegig || spanEnde(b) === k;
-                    /* Läuft der Eintrag aus der Vorwoche herein, steht der Titel
-                       am ersten sichtbaren Tag — sonst bliebe der Balken leer. */
-                    const zeigtTitel = erster || k === dayKey(visibleDays[0]);
-                    const r = (an) => (an ? "7px" : "0");
-                    return (React.createElement("button", { key: b.id, onClick: () => onBlock(b),
-                        className: "pl-block text-left truncate" + (b.external ? " pl-ext" : ""),
-                        title: mehrtaegig ? `${b.title} · ${spanTage(b)} Tage` : b.title,
-                        style: {
-                            background: hexA(c, 0.16),
-                            borderLeft: erster ? `2px solid ${c}` : "none",
-                            borderRadius: mehrtaegig
-                                ? `${r(erster)} ${r(letzter)} ${r(letzter)} ${r(erster)}`
-                                : "5px",
-                            /* Balken bis an die Tagesgrenze ziehen, damit er
-                               ohne Lücke weiterläuft */
-                            marginLeft: erster ? 0 : -3, marginRight: letzter ? 0 : -3,
-                            padding: "1px 3px", fontSize: compact ? 9 : 10, lineHeight: "13px", color: lift(c),
-                        } }, zeigtTitel ? b.title : ""));
-                })));
+            React.createElement("div", { className: "mono pl-muted flex items-center justify-end pr-1 overflow-hidden", style: { fontSize: 9, gridColumn: 1, gridRow: `1 / span ${allDayRows}` } }, compact ? "" : "ganztags"),
+            /* Leere Zellen nur für die Tagestrennlinien — die Balken liegen darüber */
+            visibleDays.map((d, i) => (React.createElement("div", { key: "spalte-" + dayKey(d), className: "border-l pl-hair", style: { gridColumn: i + 2, gridRow: `1 / span ${allDayRows}` } }))),
+            ganztags.liste.map((e) => {
+                const b = e.block;
+                const c = blockColor(b);
+                const tage = spanTage(b);
+                /* Beginnt bzw. endet der Termin innerhalb der sichtbaren Tage?
+                   Sonst läuft der Balken an dieser Kante glatt weiter. */
+                const beginntHier = !b.spanFolge;
+                const endetHier = tage < 2 || spanEnde(b) === dayKey(visibleDays[e.bis]);
+                const r = (an) => (an ? "7px" : "0");
+                const breite = e.bis - e.von + 1;
+                return (React.createElement("button", { key: b.id, onClick: () => onBlock(b),
+                    className: "pl-block text-left truncate" + (b.external ? " pl-ext" : ""),
+                    title: tage > 1 ? `${b.title} · ${tage} Tage` : b.title,
+                    style: {
+                        gridColumn: `${e.von + 2} / span ${breite}`,
+                        gridRow: e.zeile + 1,
+                        background: hexA(c, 0.16),
+                        borderLeft: beginntHier ? `2px solid ${c}` : "none",
+                        borderRadius: `${r(beginntHier)} ${r(endetHier)} ${r(endetHier)} ${r(beginntHier)}`,
+                        /* An offenen Enden bis an den Spaltenrand, damit man
+                           sieht, dass es weitergeht */
+                        marginLeft: beginntHier ? 2 : 0, marginRight: endetHier ? 2 : 0,
+                        marginTop: 1, marginBottom: 1, alignSelf: "start",
+                        padding: "1px 4px", fontSize: compact ? 9 : 10, lineHeight: "15px",
+                        minHeight: 15, color: lift(c),
+                    } },
+                    /* Läuft er von links herein, zeigt ein Pfeil das an */
+                    (beginntHier ? "" : "‹ ") + (b.title || "Ohne Titel") + (endetHier ? "" : " ›")));
             }))),
         React.createElement("div", { ref: gridRef, className: "pl-scroll overflow-y-auto", style: { maxHeight: maxH } },
             React.createElement("div", { className: "grid", ref: areaRef, style: { gridTemplateColumns: tpl, touchAction: "pan-y" }, onPointerMove: onAreaMove, onPointerUp: endDrag, onPointerLeave: endDrag },
