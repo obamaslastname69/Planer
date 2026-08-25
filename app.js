@@ -1376,7 +1376,9 @@ function PlannerApp() {
     const [manualPick, setManualPick] = useState(null);
     const [detailId, setDetailId] = useState(null);
     const [cloud, setCloud] = useState({ state: "off", msg: "" });
-    const cloudRef = useRef({ armed: false, timer: null });
+    const cloudRef = useRef({ armed: false, timer: null, offen: false });
+    /* Wann zuletzt von selbst abgeglichen wurde - gegen zu häufiges Nachfragen */
+    const autoSyncRef = useRef(0);
     const undoRef = useRef([]);
     /* Schon gemeldete Termine, damit beim Neustellen der Wecker nichts
        doppelt kommt. Wechselt der Tag, fangen wir wieder bei null an. */
@@ -1489,10 +1491,20 @@ function PlannerApp() {
             window.storage.set(STORE_KEY, JSON.stringify(next)).catch(() => { });
             if (cloudRef.current.armed) {
                 clearTimeout(cloudRef.current.timer);
+                /* Merken, dass noch etwas hochzuladen ist - solange darf der
+                   selbsttätige Abgleich nichts herunterladen, sonst käme der
+                   fremde Stand über die eigenen frischen Änderungen */
+                cloudRef.current.offen = true;
                 cloudRef.current.timer = setTimeout(() => {
                     driveSave(next)
-                        .then(() => setCloud({ state: "ok", msg: "gesichert " + new Date().toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" }) }))
-                        .catch((e) => setCloud({ state: "error", msg: e.message }));
+                        .then(() => {
+                        cloudRef.current.offen = false;
+                        setCloud({ state: "ok", msg: "gesichert " + new Date().toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" }) });
+                    })
+                        .catch((e) => {
+                        cloudRef.current.offen = false;
+                        setCloud({ state: "error", msg: e.message });
+                    });
                 }, 4000);
             }
             return next;
@@ -2356,9 +2368,42 @@ function PlannerApp() {
             return;
         const zurueckVonAnmeldung = gcAbsichtNachRueckkehr === "sync";
         gcAbsichtNachRueckkehr = "";
+        autoSyncRef.current = Date.now();
         syncCloud(!zurueckVonAnmeldung);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loaded]);
+    /* Von selbst abgleichen, damit Änderungen vom anderen Gerät ankommen,
+       ohne dass jemand einen Knopf drückt. Hochgeladen wird ohnehin schon
+       kurz nach jeder Änderung — hier geht es ums Holen.
+       Ausgelöst beim Zurückkommen zur App und in ruhigen Abständen; nie
+       öfter als alle 45 Sekunden und nie, solange noch etwas hochzuladen
+       ist. */
+    useEffect(() => {
+        if (!loaded || !gcConfigured())
+            return;
+        const MINDESTABSTAND = 45000;
+        const versuch = () => {
+            if (document.visibilityState !== "visible")
+                return;
+            if (!gcHasToken() || cloudRef.current.offen)
+                return;
+            const jetzt = Date.now();
+            if (jetzt - autoSyncRef.current < MINDESTABSTAND)
+                return;
+            autoSyncRef.current = jetzt;
+            syncCloud(true);
+        };
+        const beiRueckkehr = () => { if (document.visibilityState === "visible")
+            versuch(); };
+        document.addEventListener("visibilitychange", beiRueckkehr);
+        window.addEventListener("focus", versuch);
+        const takt = setInterval(versuch, 4 * 60000);
+        return () => {
+            document.removeEventListener("visibilitychange", beiRueckkehr);
+            window.removeEventListener("focus", versuch);
+            clearInterval(takt);
+        };
+    }, [loaded, syncCloud]);
     /* Einplanen: direkt ins Wochenraster, Sheet bleibt als Alternative */
     const startPlacing = (item) => {
         if (!item) {
