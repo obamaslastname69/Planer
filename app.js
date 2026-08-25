@@ -573,6 +573,76 @@ const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
     }
     catch (e) { /* kaputter Eintrag wird einfach ignoriert */ }
 })();
+/* ── Anmeldung über Weiterleitung ───────────────────────────
+   Als installierte App (Android, standalone) meldet Google das Ergebnis
+   des Anmeldefensters nicht zurück — der Abgleich blieb deshalb hängen.
+   Dort gehen wir stattdessen über eine Weiterleitung: dieselbe Seite
+   verlässt kurz den Planer und kommt mit dem Token im Adresszusatz
+   zurück. Dafür muss die Adresse in der Google Cloud Console unter
+   "Autorisierte Weiterleitungs-URIs" stehen. */
+const GC_REDIRECT_KEY = "planer:gcweiter";
+const gcRedirectUri = () => location.origin + location.pathname.replace(/index\.html$/, "");
+function gcBrauchtWeiterleitung() {
+    try {
+        return window.matchMedia("(display-mode: standalone)").matches
+            || window.navigator.standalone === true;
+    }
+    catch (e) {
+        return false;
+    }
+}
+function gcStarteWeiterleitung(absicht) {
+    const nonce = uid() + uid();
+    try {
+        sessionStorage.setItem(GC_REDIRECT_KEY, JSON.stringify({ nonce: nonce, absicht: absicht || "" }));
+    }
+    catch (e) { }
+    const p = new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        redirect_uri: gcRedirectUri(),
+        response_type: "token",
+        scope: GC_SCOPE,
+        state: nonce,
+        prompt: "select_account",
+        include_granted_scopes: "true",
+    });
+    location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + p.toString();
+}
+/* Was die App nach der Rückkehr noch erledigen soll */
+let gcAbsichtNachRueckkehr = "";
+/* Was gerade läuft, wenn eine Anmeldung nötig wird — wird über die
+   Weiterleitung mitgenommen, damit es danach von selbst weitergeht */
+let gcWunschNachRueckkehr = "";
+/* Kommen wir gerade von Google zurück? Dann Token übernehmen. */
+(function gcRueckkehrPruefen() {
+    try {
+        if (!location.hash || location.hash.indexOf("access_token") === -1)
+            return;
+        const f = new URLSearchParams(location.hash.slice(1));
+        const token = f.get("access_token");
+        const state = f.get("state");
+        let merk = null;
+        try {
+            merk = JSON.parse(sessionStorage.getItem(GC_REDIRECT_KEY) || "null");
+        }
+        catch (e) { }
+        /* Adresse sofort säubern, damit das Token nicht im Verlauf landet */
+        try {
+            history.replaceState(null, "", location.pathname + location.search);
+        }
+        catch (e) { }
+        try {
+            sessionStorage.removeItem(GC_REDIRECT_KEY);
+        }
+        catch (e) { }
+        /* Nur annehmen, wenn die Kennung zu unserer Anfrage passt */
+        if (!token || !merk || merk.nonce !== state)
+            return;
+        gcStoreToken(token, Number(f.get("expires_in")) || 3600);
+        gcAbsichtNachRueckkehr = merk.absicht || "";
+    }
+    catch (e) { }
+})();
 function gcStoreToken(token, expiresIn) {
     gcToken = token;
     gcExpiry = Date.now() + (expiresIn || 3600) * 1000;
@@ -606,6 +676,13 @@ function gcAuth(silent) {
             return reject(new Error("keine Client-ID hinterlegt"));
         if (gcToken && Date.now() < gcExpiry - 120000)
             return resolve(gcToken);
+        /* Als installierte App über die Weiterleitung gehen — das Fenster
+           käme dort nie zurück. Die Seite verlässt den Planer, das Versprechen
+           bleibt also offen; nach der Rückkehr geht es von vorn weiter. */
+        if (gcBrauchtWeiterleitung()) {
+            gcStarteWeiterleitung(gcWunschNachRueckkehr);
+            return;
+        }
         if (!(window.google && window.google.accounts && window.google.accounts.oauth2))
             return reject(new Error("Google-Bibliothek nicht geladen"));
         let fertig = false;
@@ -2221,6 +2298,9 @@ function PlannerApp() {
                 setCloud({ state: "error", msg: "keine Google-Client-ID hinterlegt" });
             return;
         }
+        /* Falls dafür eine Anmeldung nötig wird, soll der Abgleich nach der
+           Rückkehr von selbst weiterlaufen */
+        gcWunschNachRueckkehr = "sync";
         setCloud({ state: "busy", msg: "Abgleich läuft…" });
         try {
             const remote = await driveLoad();
@@ -2267,11 +2347,16 @@ function PlannerApp() {
             setCloud({ state: "error", msg: e.message });
         }
     }, [state, persistLocal]);
-    /* Beim Start einmal die Geräte abgleichen, wenn die Anmeldung noch gilt */
+    /* Beim Start einmal die Geräte abgleichen, wenn die Anmeldung noch gilt.
+       Kommen wir gerade von der Google-Weiterleitung zurück, wird der
+       Abgleich sichtbar ausgeführt statt still — der Nutzer hat ihn ja
+       angestoßen und wartet darauf. */
     useEffect(() => {
         if (!loaded || !gcConfigured() || !gcHasToken())
             return;
-        syncCloud(true);
+        const zurueckVonAnmeldung = gcAbsichtNachRueckkehr === "sync";
+        gcAbsichtNachRueckkehr = "";
+        syncCloud(!zurueckVonAnmeldung);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loaded]);
     /* Einplanen: direkt ins Wochenraster, Sheet bleibt als Alternative */
