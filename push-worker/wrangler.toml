@@ -1,0 +1,21 @@
+name = "planer-push"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Jede Minute nachsehen, ob eine Erinnerung fällig ist
+[triggers]
+crons = ["* * * * *"]
+
+# Speicher für die Anmeldungen. Die id trägst du nach dem Anlegen ein:
+#   npx wrangler kv namespace create PLANER
+[[kv_namespaces]]
+binding = "PLANER"
+id = "HIER_DIE_ID_EINTRAGEN"
+
+[vars]
+# Der öffentliche Schlüssel darf hier stehen — er ist nicht geheim.
+VAPID_PUBLIC = "BOIKB_JD4m1QY-f_7I8TGkAmJawcnwRxkhhXU5f9v87FbjBpThJZk6qonvJIjl5pmlOnDPdHz4Jhmbxg1H4yRJE"
+VAPID_SUBJECT = "mailto:harrerjonathan49@gmail.com"
+
+# Der PRIVATE Schlüssel gehört NICHT in diese Datei, sondern als Secret:
+#   npx wrangler secret put VAPID_JWK

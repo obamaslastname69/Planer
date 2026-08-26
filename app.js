@@ -560,6 +560,79 @@ function tonFreischalten() {
     }
     catch (e) { /* kein Ton möglich - dann bleibt es eben still */ }
 }
+/* ── Erinnerungen bei geschlossener App ─────────────────────
+   Ein eigener kleiner Dienst weckt die App. Er bekommt nur Zeitpunkte,
+   keine Titel — was ansteht, legt die App hier im Gerät ab, damit der
+   Service Worker es beim Aufwachen selbst lesen kann. */
+const PUSH_DIENST = (typeof window !== "undefined" && window.PLANER_PUSH_URL) || "";
+const PUSH_KEY = (typeof window !== "undefined" && window.PLANER_PUSH_KEY) || "";
+const pushMoeglich = () => !!(PUSH_DIENST && PUSH_KEY && "serviceWorker" in navigator && "PushManager" in window);
+function b64urlZuBytes(s) {
+    const roh = atob(String(s).replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4));
+    return Uint8Array.from(roh, (c) => c.charCodeAt(0));
+}
+function hinweisSpeicher() {
+    return new Promise((fertig, schief) => {
+        const a = indexedDB.open("planer-hinweise", 1);
+        a.onupgradeneeded = () => {
+            if (!a.result.objectStoreNames.contains("termine"))
+                a.result.createObjectStore("termine", { keyPath: "id" });
+        };
+        a.onsuccess = () => fertig(a.result);
+        a.onerror = () => schief(a.error);
+    });
+}
+/* Die Termine, die der Service Worker beim Aufwachen braucht */
+async function hinweiseAblegen(liste) {
+    const db = await hinweisSpeicher();
+    await new Promise((fertig) => {
+        const t = db.transaction("termine", "readwrite");
+        const laden = t.objectStore("termine");
+        laden.clear();
+        for (const e of liste)
+            laden.put(e);
+        t.oncomplete = t.onerror = () => fertig();
+    });
+}
+async function pushAnmelden() {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+        sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: b64urlZuBytes(PUSH_KEY),
+        });
+    }
+    return sub;
+}
+/* Weckzeiten zum Dienst schicken. Titel bleiben ausdrücklich hier. */
+async function pushZeitenMelden(weckzeiten) {
+    if (!pushMoeglich())
+        return { ok: false, grund: "nicht eingerichtet" };
+    const sub = await pushAnmelden();
+    const antwort = await fetch(PUSH_DIENST.replace(/\/$/, "") + "/anmelden", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub, weckzeiten: weckzeiten }),
+    });
+    if (!antwort.ok)
+        throw new Error("Dienst antwortet mit " + antwort.status);
+    return antwort.json();
+}
+async function pushAbmelden() {
+    try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (!sub)
+            return;
+        await fetch(PUSH_DIENST.replace(/\/$/, "") + "/abmelden", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+        }).catch(() => { });
+        await sub.unsubscribe();
+    }
+    catch (e) { }
+}
 function klingel(mal) {
     try {
         tonFreischalten();
@@ -2249,6 +2322,49 @@ function PlannerApp() {
             document.removeEventListener("visibilitychange", beiRueckkehr);
         };
     }, [loaded, notify.an, notify.vorlauf, notifyRecht, blocksFor, todayKey, zeigeHinweis]);
+    /* Für die geschlossene App: die nächsten Tage an den Push-Dienst melden.
+       Dorthin gehen nur Zeitpunkte; Titel und Text bleiben im Gerät. */
+    useEffect(() => {
+        if (!loaded || !notify.an || notifyRecht !== "granted" || !pushMoeglich())
+            return;
+        let abgebrochen = false;
+        const melden = async () => {
+            const jetzt = Date.now();
+            const vorlauf = (Number(notify.vorlauf) || 0) * 60000;
+            const eintraege = [];
+            /* Vierzehn Tage im Voraus reichen; der Dienst vergisst Altes selbst */
+            for (let i = 0; i < 14; i++) {
+                const tag = dayKey(addDays(new Date(), i));
+                for (const b of blocksFor(tag)) {
+                    if (b.allDay || b.external || b.status || !b.title)
+                        continue;
+                    const beginn = new Date(b.day + "T00:00:00").getTime() + b.start * 60000;
+                    const weckzeit = beginn - vorlauf;
+                    if (weckzeit <= jetzt + 30000)
+                        continue;
+                    eintraege.push({
+                        id: String(b.id), weckzeit: weckzeit,
+                        titel: b.title,
+                        text: `${minsToLabel(b.start)} · ${durLabel(b.dur)}`,
+                    });
+                }
+            }
+            eintraege.sort((a, b) => a.weckzeit - b.weckzeit);
+            const knapp = eintraege.slice(0, 200);
+            try {
+                await hinweiseAblegen(knapp);
+                if (!abgebrochen)
+                    await pushZeitenMelden(knapp.map((e) => e.weckzeit));
+            }
+            catch (e) {
+                if (!abgebrochen)
+                    console.warn("Push-Dienst nicht erreicht:", e.message);
+            }
+        };
+        /* Kurz warten, damit nicht jede Tasteneingabe eine Meldung auslöst */
+        const wecker = setTimeout(melden, 3000);
+        return () => { abgebrochen = true; clearTimeout(wecker); };
+    }, [loaded, notify.an, notify.vorlauf, notifyRecht, state.blocks, blocksFor]);
     /* Freie Lücken eines Tages */
     const gapsFor = useCallback((key) => {
         const bs = blocksFor(key);
@@ -4432,7 +4548,9 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) 
                 React.createElement("button", { onClick: onTest, className: "pl-btn px-3 py-2 rounded mono text-xs self-start" }, "Hinweis ausprobieren"),
                 /* Was die Technik hergibt, offen gesagt - damit niemand auf
                    einen Weckruf wartet, der nicht kommen kann */
-                React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Die Hinweise kommen, solange der Planer läuft — auch im Hintergrund. Ist er ganz geschlossen, bleibt es still: Eine Seite ohne eigenen Server kann niemanden wecken. Für Termine, die auf keinen Fall untergehen dürfen, schieb sie zusätzlich in den Google Kalender.")))))));
+                pushMoeglich()
+                    ? React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Dein Push-Dienst ist eingerichtet — Hinweise kommen auch bei geschlossener App. Dorthin gehen nur die Uhrzeiten; was ansteht, bleibt auf diesem Gerät.")
+                    : React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Die Hinweise kommen, solange der Planer läuft — auch im Hintergrund. Ist er ganz geschlossen, bleibt es still: Ohne eigenen Dienst kann niemand die Seite wecken. Der Push-Dienst dafür liegt im Ordner push-worker.")))))));
 }
 function YearGrid({ weeks, onPick }) {
     const shade = (q) => {
