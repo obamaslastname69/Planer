@@ -2,97 +2,113 @@
 
 Damit der Planer dich auch dann erinnert, wenn er geschlossen ist.
 
+Alles im Browser — **nichts zu installieren**, kein Node nötig.
+
 **Warum das nötig ist:** Eine Webseite kann sich nicht selbst wecken. Es
 muss jemand von außen anklopfen. Dieser kleine Dienst ist dieser Jemand.
 
 **Was er über dich erfährt:** nur Zeitpunkte — „wecke das Gerät um 14:45".
 Keine Titel, keine Orte, keinen Inhalt. Was ansteht, liest der Planer beim
-Aufwachen aus deinem Gerät. Wer den Dienst einsähe, wüsste bestenfalls,
-*dass* um 14:45 etwas ist, nie *was*.
+Aufwachen aus deinem Gerät.
 
-**Kosten:** keine. Die kostenlose Cloudflare-Stufe reicht dafür bei weitem.
+**Kosten:** keine. Die kostenlose Stufe reicht bei weitem.
+
+Rechne mit zehn Minuten.
 
 ---
 
-## 1. Cloudflare-Konto
+## 1. Konto anlegen
 
-[dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) — Mailadresse
-und Passwort genügen, keine Zahlungsdaten.
+[dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) —
+Mailadresse und Passwort genügen, keine Zahlungsdaten. Mail bestätigen.
 
-## 2. Vorbereiten
+## 2. Speicher anlegen
 
-Terminal im Ordner `push-worker` öffnen:
+Links im Menü **Storage & Databases → KV**, dann **Create instance**.
 
-```bash
-npx wrangler login
+Als Namen genau `PLANER` eintragen, anlegen.
+
+## 3. Worker anlegen
+
+Links **Compute (Workers) → Workers & Pages**, dann **Create** →
+**Start with Hello World** → **Deploy**.
+
+Als Namen `planer-push` eintragen (dann heißt deine Adresse später
+`planer-push.…`).
+
+## 4. Code einsetzen
+
+Im Worker auf **Edit code** (oder `</> Edit code`).
+
+Im Editor **alles markieren und löschen**, dann den kompletten Inhalt von
+**worker.js** aus diesem Ordner einfügen. Oben rechts **Deploy**.
+
+## 5. Speicher verbinden
+
+Im Worker auf **Settings → Bindings → Add**.
+
+- Art: **KV namespace**
+- Variable name: `PLANER`  ← genau so
+- KV namespace: den eben angelegten auswählen
+
+Speichern.
+
+## 6. Schlüssel hinterlegen
+
+Weiterhin unter **Settings**, Abschnitt **Variables and Secrets → Add**.
+
+Drei Einträge:
+
+| Art | Name | Wert |
+|---|---|---|
+| **Secret** | `VAPID_JWK` | die lange Zeile aus *Planer-Push-Zugangsdaten.txt*, beginnt mit `{"kty":"EC"` |
+| Text | `VAPID_PUBLIC` | `BOIKB_JD4m1QY-f_7I8TGkAmJawcnwRxkhhXU5f9v87FbjBpThJZk6qonvJIjl5pmlOnDPdHz4Jhmbxg1H4yRJE` |
+| Text | `VAPID_SUBJECT` | `mailto:harrerjonathan49@gmail.com` |
+
+Beim ersten Eintrag unbedingt **Secret** wählen, nicht Text — dann ist er
+danach nicht mehr lesbar. Genau so soll es sein.
+
+Speichern, dann **Deploy**.
+
+## 7. Wecker stellen
+
+**Settings → Trigger Events → Add → Cron Trigger**.
+
+Dort eintragen:
+
+```
+* * * * *
 ```
 
-Es öffnet sich der Browser, dort bestätigen.
+Das heißt „jede Minute nachsehen". Speichern.
 
-## 3. Speicher anlegen
+## 8. Adresse holen
 
-```bash
-npx wrangler kv namespace create PLANER
-```
-
-Die Ausgabe enthält eine Zeile wie `id = "abc123..."`. Diese id in
-`wrangler.toml` eintragen, wo jetzt `HIER_DIE_ID_EINTRAGEN` steht.
-
-## 4. Privaten Schlüssel hinterlegen
-
-```bash
-npx wrangler secret put VAPID_JWK
-```
-
-Dann den Wert aus **Planer-Push-Zugangsdaten.txt** (auf deinem Desktop)
-einfügen — die lange Zeile, die mit `{"kty":"EC"` beginnt.
-
-Der Schlüssel liegt danach verschlüsselt bei Cloudflare. Er steht bewusst
-in keiner Datei dieses Projekts, weil das Repo öffentlich ist.
-
-## 5. Veröffentlichen
-
-```bash
-npx wrangler deploy
-```
-
-Am Ende nennt dir Wrangler eine Adresse, etwa:
+Oben im Worker steht die Adresse, etwa:
 
 ```
 https://planer-push.deinname.workers.dev
 ```
 
-## 6. Adresse in den Planer eintragen
+Ruf sie einmal im Browser auf — es sollte
+**„Push-Dienst des Wochenplaners"** erscheinen. Dann läuft er.
 
-Diese Adresse in `config.js` bei `window.PLANER_PUSH_URL` einsetzen,
-Änderung hochladen — fertig. Solange dort nichts steht, bleibt alles beim
-Alten: Hinweise nur bei geöffneter App.
-
-## 7. Ausprobieren
-
-Im Planer unter **Bilanz → Erinnerungen einschalten**. Danach einen Termin
-ein paar Minuten in die Zukunft legen, die App **ganz schließen** und
-warten.
+**Diese Adresse mir schicken** — ich trage sie in `config.js` ein und lade
+sie hoch. Danach ist es fertig.
 
 ---
 
 ## Wenn nichts kommt
 
-**Läuft der Dienst?** Adresse im Browser öffnen — es sollte
-„Push-Dienst des Wochenplaners" erscheinen.
+**Kommt „Push-Dienst des Wochenplaners"?** Wenn nicht, ist Schritt 4 oder
+das Deploy schiefgegangen.
 
-**Nimmt er Anmeldungen an?**
+**Fehler im Worker sehen:** Im Worker auf **Logs** → **Begin log stream**.
+Dort steht live, was ankommt.
 
-```bash
-npx wrangler tail
-```
+**Auf dem Handy:** Android-Einstellungen → Apps → Chrome →
+Benachrichtigungen erlauben. Bei Xiaomi zusätzlich unter Akku die
+Optimierung für Chrome ausnehmen — sonst schläft der Browser weg.
 
-zeigt live mit, was ankommt.
-
-**Auf dem Handy:** In den Android-Einstellungen unter Apps → Chrome →
-Benachrichtigungen prüfen, ob sie erlaubt sind. Manche Hersteller
-(Xiaomi, Samsung) haben zusätzlich eine Akku-Optimierung, die Chrome im
-Hintergrund einschläfert — dort für Chrome ausnehmen.
-
-**Kosten im Blick:** Der Cron läuft jede Minute, also rund 43.000-mal im
-Monat. Die kostenlose Stufe erlaubt 100.000 Aufrufe pro Tag.
+**Kosten im Blick:** Der Cron läuft rund 43.000-mal im Monat, die
+kostenlose Stufe erlaubt 100.000 Aufrufe **pro Tag**.
