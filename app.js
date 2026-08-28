@@ -2316,6 +2316,18 @@ function PlannerApp() {
     }, [state.blocks, state.routines, state.checks, weekKeys, now]);
     /* Blöcke pro Tag */
     /* Google-IDs, die zu eigenen Blöcken gehören - die dürfen nicht doppelt erscheinen */
+    /* Wie viel ist je Lernaufgabe schon zusammengekommen? Aus den erledigten
+       Blöcken gerechnet statt mitgeschrieben — so stimmt es auch, wenn ein
+       Block nachträglich verlängert, gekürzt oder gelöscht wird, und nichts
+       kann doppelt gezählt werden. */
+    const studyMinuten = useMemo(() => {
+        const map = {};
+        for (const b of state.blocks) {
+            if (b.studyKey && b.status === "done")
+                map[b.studyKey] = (map[b.studyKey] || 0) + (Number(b.dur) || 0);
+        }
+        return map;
+    }, [state.blocks]);
     const eigeneGcalIds = useMemo(() => {
         const set = {};
         for (const b of state.blocks)
@@ -2459,9 +2471,10 @@ function PlannerApp() {
             ...prev,
             blocks: prev.blocks.map((x) => (x.id === id ? { ...x, status } : x)),
         };
-        if (b === null || b === void 0 ? void 0 : b.studyKey) {
-            next.studyDone = { ...(prev.studyDone || {}), [b.studyKey]: status === "done" };
-        }
+        /* Lernaufgaben werden hier bewusst NICHT abgehakt. Wer von fünf
+           Stunden eine schafft, hat eine Stunde geschafft - nicht die
+           Aufgabe. Der Fortschritt ergibt sich aus den erledigten Blöcken
+           (siehe studyMinuten). */
         /* Hängt ein To-do daran, wandert es mit */
         if (b && b.todoId) {
             next.todos = prev.todos.map((t) => (t.id === b.todoId ? { ...t, done: status === "done" } : t));
@@ -2676,10 +2689,18 @@ function PlannerApp() {
         ...prev,
         studyDone: { ...(prev.studyDone || {}), [k]: !(prev.studyDone || {})[k] },
     }));
-    const planStudyTask = (task) => startPlacing({
-        title: (SUBJECTS[task.s] ? SUBJECTS[task.s].short + ": " : "") + task.t,
-        cat: "uni", est: task.m, studyKey: task.id,
-    });
+    const planStudyTask = (task) => {
+        /* Nur noch die offene Zeit vorschlagen — wer von fünf Stunden zwei
+           hat, will beim nächsten Mal nicht wieder fünf einplanen. Auf zwei
+           Stunden gedeckelt, weil längere Blöcke am Stück selten aufgehen. */
+        const geschafft = studyMinuten[task.id] || 0;
+        const offen = Math.max(0, task.m - geschafft);
+        const vorschlag = offen > 0 ? Math.min(120, offen) : task.m;
+        startPlacing({
+            title: (SUBJECTS[task.s] ? SUBJECTS[task.s].short + ": " : "") + task.t,
+            cat: "uni", est: vorschlag, studyKey: task.id,
+        });
+    };
     /* Abgleich mit Google Drive: der neuere Stand gewinnt */
     /* Enthält dieser Stand überhaupt eigene Eingaben? */
     const inhaltLeer = (d) => !d || (
@@ -3314,7 +3335,7 @@ function PlannerApp() {
                     }),
                 }))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
-                React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing }))),
+                React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing, minuten: studyMinuten }))),
             view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true) })),
             view === "geld" && (React.createElement(GeldView, { geld: geld, heute: today, onImport: geldImport, onBuchung: geldBuchung, onBuchungWeg: geldBuchungWeg, onBuchungNeu: geldBuchungNeu, onFixNeu: geldFixNeu, onFix: geldFix, onFixWeg: geldFixWeg })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
@@ -4146,8 +4167,15 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                     b.status === "skipped" && React.createElement(X, { size: 14, style: { color: lift("#A03A5E") } })));
             }))))));
 }
-function StudyRow({ task, kind, done, edit, weekIdx, onEditTask, onDeleteTask, onToggleTask, onPlanTask }) {
-    const on = !!done[task.id];
+function StudyRow({ task, kind, done, edit, weekIdx, onEditTask, onDeleteTask, onToggleTask, onPlanTask, minuten = {} }) {
+    /* Schon gelernte Zeit aus den erledigten Blöcken */
+    const geschafft = Math.max(0, Number(minuten[task.id]) || 0);
+    const voll = geschafft >= task.m;
+    /* Erledigt ist die Aufgabe, wenn sie von Hand abgehakt wurde oder die
+       geplante Zeit zusammengekommen ist */
+    const on = !!done[task.id] || voll;
+    const offen = Math.max(0, task.m - geschafft);
+    const anteil = task.m ? Math.min(100, (geschafft / task.m) * 100) : 0;
     const c = kind === "must" ? "#2B4B8F" : "#6F7A72";
     if (edit) {
         return (React.createElement("div", { className: "flex items-start gap-2 py-1.5" },
@@ -4169,10 +4197,17 @@ function StudyRow({ task, kind, done, edit, weekIdx, onEditTask, onDeleteTask, o
             React.createElement("div", { className: "mono text-xs pl-muted" },
                 SUBJECTS[task.s] ? SUBJECTS[task.s].short : task.s,
                 " \u00B7 ",
-                durLabel(task.m))),
-        !on && task.t && (React.createElement("button", { onClick: () => onPlanTask(task), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" }, "einplanen"))));
+                /* Angefangenes sichtbar machen: "1h von 5h \u00B7 noch 4h" */
+                geschafft > 0 && !on
+                    ? `${durLabel(geschafft)} von ${durLabel(task.m)} \u00B7 noch ${durLabel(offen)}`
+                    : durLabel(task.m)),
+            /* Schmaler Balken, solange etwas offen ist */
+            geschafft > 0 && !on && (React.createElement("div", { className: "h-1 rounded-full mt-1 overflow-hidden", style: { background: hexA(c, 0.15) } },
+                React.createElement("div", { className: "h-1 rounded-full pl-bar", style: { width: `${anteil}%`, background: c } })))),
+        !on && task.t && (React.createElement("button", { onClick: () => onPlanTask(task), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" },
+            geschafft > 0 ? "weiter" : "einplanen"))));
 }
-function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onAddExam, onDeleteExam, onReset, lernProjekte = [], projectStats, onPlanProject }) {
+function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onAddExam, onDeleteExam, onReset, lernProjekte = [], projectStats, onPlanProject, minuten = {} }) {
     const [openSubject, setOpenSubject] = useState(null);
     const [showInfo, setShowInfo] = useState(false);
     const [edit, setEdit] = useState(false);
@@ -4194,9 +4229,14 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
             .filter((id) => SUBJECTS[id].note)
             .sort((a, b) => { var _a, _b; return ((_a = reihen[a]) !== null && _a !== void 0 ? _a : 99) - ((_b = reihen[b]) !== null && _b !== void 0 ? _b : 99); });
     }, [exams]);
-    const mustDone = wk.must.filter((t) => done[t.id]).length;
+    /* Geschaffte Zeit je Aufgabe: von Hand abgehakt zählt voll, sonst die
+       Minuten aus den erledigten Blöcken — gedeckelt auf das Soll, damit
+       eine übererfüllte Aufgabe den Balken nicht über 100 % treibt. */
+    const geschafft = (t) => (done[t.id] ? t.m : Math.min(t.m, minuten[t.id] || 0));
+    const erledigt = (t) => !!done[t.id] || (minuten[t.id] || 0) >= t.m;
+    const mustDone = wk.must.filter(erledigt).length;
     const mustMin = wk.must.reduce((s, t) => s + t.m, 0);
-    const doneMin = wk.must.reduce((s, t) => s + (done[t.id] ? t.m : 0), 0);
+    const doneMin = wk.must.reduce((s, t) => s + geschafft(t), 0);
     const pct = mustMin ? (doneMin / mustMin) * 100 : 0;
     return (React.createElement("div", { className: "flex flex-col gap-3" },
         /* Projekte, die du hier mitverfolgen willst \u2014 angehakt im Projekte-Panel */
@@ -4290,13 +4330,13 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
                 React.createElement("div", { className: "h-2 rounded-full pl-bar", style: { width: `${pct}%`, background: "#2B4B8F" } })))),
         React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs mb-1", style: { color: lift("#2B4B8F") } }, "Muss \u2014 auch in einer schlechten Woche"),
-            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.must.map((t) => React.createElement(StudyRow, { key: t.id, task: t, kind: "must", done: done, edit: edit, weekIdx: weekIdx, onEditTask: onEditTask, onDeleteTask: onDeleteTask, onToggleTask: onToggleTask, onPlanTask: onPlanTask }))),
+            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.must.map((t) => React.createElement(StudyRow, { key: t.id, task: t, kind: "must", done: done, edit: edit, weekIdx: weekIdx, onEditTask: onEditTask, onDeleteTask: onDeleteTask, onToggleTask: onToggleTask, onPlanTask: onPlanTask, minuten: minuten }))),
             edit && (React.createElement("button", { onClick: () => onAddTask(weekIdx, "must"), className: "pl-btn mt-2 px-2 py-1 rounded mono text-xs flex items-center gap-1" },
                 React.createElement(Plus, { size: 12 }),
                 " Aufgabe"))),
         (wk.extra.length > 0 || edit) && (React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "Wenn Zeit \u2014 Aufbau auf 8\u201310 h"),
-            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.extra.map((t) => React.createElement(StudyRow, { key: t.id, task: t, kind: "extra", done: done, edit: edit, weekIdx: weekIdx, onEditTask: onEditTask, onDeleteTask: onDeleteTask, onToggleTask: onToggleTask, onPlanTask: onPlanTask }))),
+            React.createElement("div", { className: "divide-y", style: { borderColor: "var(--line-soft)" } }, wk.extra.map((t) => React.createElement(StudyRow, { key: t.id, task: t, kind: "extra", done: done, edit: edit, weekIdx: weekIdx, onEditTask: onEditTask, onDeleteTask: onDeleteTask, onToggleTask: onToggleTask, onPlanTask: onPlanTask, minuten: minuten }))),
             edit && (React.createElement("button", { onClick: () => onAddTask(weekIdx, "extra"), className: "pl-btn mt-2 px-2 py-1 rounded mono text-xs flex items-center gap-1" },
                 React.createElement(Plus, { size: 12 }),
                 " Aufgabe")))),
