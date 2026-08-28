@@ -826,6 +826,32 @@ function gcReadCalendars() {
 /* Zusatzkalender, die beim letzten Laden nicht erreichbar waren */
 let gcUebersprungen = [];
 const GC_TOKEN_KEY = "planer:gctoken";
+/* Welches Google-Konto zuletzt verwendet wurde. Damit überspringt Google
+   die Kontoauswahl — sonst muss man sie bei jeder Anmeldung erneut
+   durchklicken, obwohl es immer dasselbe Konto ist. */
+const GC_KONTO_KEY = "planer:gckonto";
+function gcKonto() {
+    try {
+        return localStorage.getItem(GC_KONTO_KEY) || "";
+    }
+    catch (e) {
+        return "";
+    }
+}
+function gcKontoMerken(mail) {
+    if (!mail || String(mail).indexOf("@") === -1)
+        return;
+    try {
+        localStorage.setItem(GC_KONTO_KEY, String(mail));
+    }
+    catch (e) { }
+}
+function gcKontoVergessen() {
+    try {
+        localStorage.removeItem(GC_KONTO_KEY);
+    }
+    catch (e) { }
+}
 let gcToken = null, gcExpiry = 0;
 const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
 /* Anmeldung überdauert das Neuladen: Token bis zum Ablauf merken */
@@ -872,9 +898,15 @@ function gcStarteWeiterleitung(absicht) {
         response_type: "token",
         scope: GC_SCOPE,
         state: nonce,
-        prompt: "select_account",
         include_granted_scopes: "true",
     });
+    /* Ist das Konto bekannt, geht es ohne Auswahl durch — Google zeigt dann
+       höchstens kurz einen Zwischenschritt. Nur beim ersten Mal fragen. */
+    const konto = gcKonto();
+    if (konto)
+        p.set("login_hint", konto);
+    else
+        p.set("prompt", "select_account");
     location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + p.toString();
 }
 /* Was die App nach der Rückkehr noch erledigen soll */
@@ -986,6 +1018,9 @@ function gcAuth(silent) {
         const client = window.google.accounts.oauth2.initTokenClient({
             client_id: GOOGLE_CLIENT_ID,
             scope: GC_SCOPE,
+            /* Bekanntes Konto vorgeben: das Fenster blitzt dann nur kurz auf,
+               statt jedes Mal nach der Auswahl zu fragen */
+            hint: gcKonto() || undefined,
             prompt: "",
             callback: (res) => {
                 if (fertig) return;
@@ -1048,6 +1083,10 @@ async function loadCalendar(weekStart) {
     /* Erst den eigenen Kalender: der holt bei Bedarf die Anmeldung.
        Danach die Zusatzkalender - die laufen dann mit gültigem Token. */
     const eigene = await gcFetch(gcEventsUrl(cals[0].id) + "?" + q);
+    /* Der eigene Kalender heißt bei Google wie die Mailadresse — daraus
+       merkt sich die App das Konto, ohne dafür eine eigene Berechtigung
+       zu brauchen */
+    gcKontoMerken(eigene.summary);
     const weitere = await Promise.allSettled(cals.slice(1).map((cal) => gcFetch(gcEventsUrl(cal.id) + "?" + q, { nebensache: true })));
     const out = [];
     gcUebersprungen = [];
@@ -1647,6 +1686,14 @@ function PlannerApp() {
     const [manualPick, setManualPick] = useState(null);
     const [detailId, setDetailId] = useState(null);
     const [cloud, setCloud] = useState({ state: "off", msg: "" });
+    /* Das gemerkte Konto als Zustand, damit der Wechsel-Knopf auftaucht,
+       sobald eines bekannt ist — localStorage allein löst kein Neuzeichnen aus */
+    const [kontoName, setKontoName] = useState(() => gcKonto());
+    /* Nach jedem Abgleich oder Kalenderabruf nachsehen, ob nun eines bekannt ist */
+    useEffect(() => {
+        const jetzt = gcKonto();
+        setKontoName((alt) => (alt === jetzt ? alt : jetzt));
+    });
     const cloudRef = useRef({ armed: false, timer: null, offen: false });
     /* Wann zuletzt von selbst abgeglichen wurde - gegen zu häufiges Nachfragen */
     const autoSyncRef = useRef(0);
@@ -3158,6 +3205,13 @@ function PlannerApp() {
                     React.createElement(RefreshCw, { size: 12, className: cloud.state === "busy" ? "animate-spin" : "" }),
                     "Ger\u00E4te abgleichen"),
                 cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : "var(--muted)" } }, cloud.msg)),
+                /* Ausweg, falls doch mal ein anderes Konto gebraucht wird —
+                   sonst käme man am gemerkten nicht mehr vorbei */
+                kontoName && (React.createElement("button", {
+                    onClick: () => { gcKontoVergessen(); gcClearToken(); setKontoName(""); setCloud({ state: "idle", msg: "Konto vergessen — beim nächsten Abgleich neu wählen" }); },
+                    className: "pl-btn px-2 py-1 rounded mono text-xs",
+                    title: "Angemeldet als " + kontoName + " — hier wechseln",
+                }, "Konto")),
                 React.createElement("button", {
                     onClick: cloudLaden, disabled: cloud.state === "busy",
                     className: "pl-btn px-2 py-1 rounded mono text-xs",
