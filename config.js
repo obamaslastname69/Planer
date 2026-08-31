@@ -30,5 +30,5 @@ window.PLANER_EXTRA_CALENDARS = [
    Trage unten die Adresse ein, die dir Cloudflare nach dem Veröffentlichen
    nennt (Form: https://planer-push.DEINNAME.workers.dev). Solange sie leer
    ist, bleibt alles beim Alten: Hinweise nur bei geöffneter App. */
-window.PLANER_PUSH_URL = "";
+window.PLANER_PUSH_URL = "https://planer-push.harrerjonathan49.workers.dev";
 window.PLANER_PUSH_KEY = "BOIKB_JD4m1QY-f_7I8TGkAmJawcnwRxkhhXU5f9v87FbjBpThJZk6qonvJIjl5pmlOnDPdHz4Jhmbxg1H4yRJE";
