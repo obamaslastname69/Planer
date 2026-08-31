@@ -51,6 +51,10 @@ const AlertCircle = mkIcon("AlertCircle");
 const LayoutGrid = mkIcon("LayoutGrid");
 const Target = mkIcon("Target");
 const Flame = mkIcon("Flame");
+/* Lupe für die Suche - nachgetragen, damit die lange Icon-Zeile oben
+   nicht angefasst werden muss */
+ICONS.Search = "<circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/>";
+const Lupe = mkIcon("Search");
 const Undo2 = mkIcon("Undo2");
 const Timer = mkIcon("Timer");
 const Moon = mkIcon("Moon");
@@ -1421,14 +1425,18 @@ function rezeptAusText(roh) {
         .filter((s) => s && s.length > 2 && !KEINE_ZUTAT.test(s) && !RE_SCHRITTE_KOPF.test(s));
     /* Fließtext in Sätze zerlegen. Viele Seiten schreiben die ganze
        Zubereitung als einen Absatz; ungeteilt stünde sie als ein
-       einziger Schritt da und wäre beim Kochen unbrauchbar. */
-    schritte = schritte.reduce((raus, s) => {
-        const saetze = s.match(/[^.!?]+[.!?]+/g);
-        if (s.length > 120 && saetze && saetze.length > 1)
-            return raus.concat(saetze.map((t) => t.trim()).filter((t) => t.length > 2));
-        raus.push(s);
-        return raus;
-    }, []);
+       einziger Schritt da und wäre beim Kochen unbrauchbar.
+       Kam sie dagegen schon als Liste, bleiben die Zeilen so stehen -
+       dann ist die Gliederung Absicht des Verfassers und nicht zu
+       verbessern. Nur einzelne Ausreißer werden noch getrennt. */
+    const inSaetze = (s) => (s.match(/[^.!?]+[.!?]+/g) || [s]).map((t) => t.trim()).filter((t) => t.length > 2);
+    if (schritte.length === 1 && inSaetze(schritte[0]).length >= 3)
+        schritte = inSaetze(schritte[0]);
+    else
+        schritte = schritte.reduce((raus, s) => {
+            const saetze = inSaetze(s);
+            return s.length > 200 && saetze.length > 1 ? raus.concat(saetze) : raus.concat([s]);
+        }, []);
     schritte = schritte.slice(0, 30);
     let kategorie = "hauptgericht";
     const suchraum = titel + " " + text.slice(0, 400);
@@ -1878,6 +1886,8 @@ function PlannerApp() {
     const [versOffen, setVersOffen] = useState(false);
     /* Rezept aus eingefügtem Text übernehmen */
     const [recipePaste, setRecipePaste] = useState(false);
+    /* Suche über alle Tabs */
+    const [sucheOffen, setSucheOffen] = useState(false);
     const [recipeFilter, setRecipeFilter] = useState("alle");
     const [recipeQuery, setRecipeQuery] = useState("");
     const [recipeKi, setRecipeKi] = useState(false);
@@ -2360,6 +2370,30 @@ function PlannerApp() {
     const gebetNeu = (tag, teil, text) => gebetSetzen(tag, teil, (l) => [...l, { id: uid(), text: text, dagegen: "" }]);
     const gebetAendern = (tag, teil, id, patch) => gebetSetzen(tag, teil, (l) => l.map((e) => (e.id === id ? { ...e, ...patch } : e)));
     const gebetWeg = (tag, teil, id) => gebetSetzen(tag, teil, (l) => l.filter((e) => e.id !== id));
+    /* ── Suche ──────────────────────────────────────────── */
+    /* Ein Treffer führt dorthin, wo er zu Hause ist: erst den Tag und
+       die Woche stellen, dann den Tab wechseln, dann das Einzelne
+       öffnen - in dieser Reihenfolge, sonst zeigt der Tab noch auf den
+       alten Tag, wenn das Detail schon offen ist. */
+    const suchZiel = (ziel) => {
+        setSucheOffen(false);
+        if (!ziel)
+            return;
+        if (ziel.tag) {
+            setSelectedDay(ziel.tag);
+            setWeekStart(mondayOf(new Date(ziel.tag + "T00:00:00")));
+        }
+        if (ziel.panel)
+            setPanel(ziel.panel);
+        if (ziel.woche !== undefined && ziel.woche !== null)
+            setWeekIdx(ziel.woche);
+        if (ziel.view)
+            goView(ziel.view);
+        if (ziel.block)
+            setDetailId(ziel.block);
+        if (ziel.rezept)
+            setRecipeOpen(ziel.rezept);
+    };
     const projectStats = useMemo(() => {
         const map = {};
         for (const p of state.projects || [])
@@ -3439,6 +3473,11 @@ function PlannerApp() {
                     React.createElement(Undo2, { size: 12 }),
                     " R\u00FCckg\u00E4ngig")),
                 React.createElement("button", {
+                    onClick: () => setSucheOffen(true),
+                    className: "pl-btn px-2 py-1 rounded flex items-center",
+                    title: "Suchen"
+                }, React.createElement(Lupe, { size: 13 })),
+                React.createElement("button", {
                     onClick: toggleTheme,
                     className: "pl-btn px-2 py-1 rounded flex items-center",
                     title: dark ? "Helles Erscheinungsbild" : "Dunkles Erscheinungsbild"
@@ -3610,6 +3649,9 @@ function PlannerApp() {
                 /* Gleich zum Nachbessern öffnen - Claude rät bei Mengen manchmal */
                 setRecipeEdit(r.id);
             },
+        })),
+        sucheOffen && (React.createElement(SearchSheet, {
+            state: state, onClose: () => setSucheOffen(false), onZiel: suchZiel,
         })),
         recipePaste && (React.createElement(RecipePasteSheet, {
             onClose: () => setRecipePaste(false),
@@ -4128,6 +4170,145 @@ function sichtFenster(visibleDays, blocksFor) {
     }
     von = Math.max(0, von);
     return [von, Math.min(24, Math.max(bis, von + 6))];
+}
+/* ── Suche über alles ───────────────────────────────────────
+   Sieben Tabs sind zu viele, um sich zu merken, wo etwas liegt. Gesucht
+   wird in allem, was Text trägt - und zusätzlich im ganzen Buch der
+   Sprüche, nicht nur in den schon gelesenen Versen. Alles läuft im
+   Gerät; die Datenmengen hier sind klein genug, dass sich ein Index
+   nicht lohnt. */
+const SUCHE_MAX = 60;
+const datumKurz = (d) => (String(d || "").length === 10 ? d.slice(8, 10) + "." + d.slice(5, 7) + "." : "");
+function sucheAlles(state, frage) {
+    const q = String(frage || "").trim().toLowerCase();
+    if (q.length < 2)
+        return [];
+    const treffer = [];
+    const passt = (...felder) => felder.some((f) => String(f || "").toLowerCase().indexOf(q) > -1);
+    const dazu = (art, titel, zusatz, ziel) => {
+        if (treffer.length < SUCHE_MAX)
+            treffer.push({ id: art + ":" + treffer.length, art: art, titel: titel, zusatz: zusatz, ziel: ziel });
+    };
+    /* Termine */
+    for (const b of state.blocks || []) {
+        if (!passt(b.title))
+            continue;
+        const kat = CATS[b.cat];
+        dazu("Termin", b.title || "Ohne Titel", [datumKurz(b.day), b.allDay ? "ganztägig" : minsToLabel(b.start), kat && kat.label].filter(Boolean).join(" · "), { view: "heute", tag: b.day, block: b.id });
+    }
+    /* To-dos */
+    for (const t of state.todos || []) {
+        if (!passt(t.title))
+            continue;
+        const kat = CATS[t.cat];
+        dazu("To-do", t.title, [t.done ? "erledigt" : "offen", kat && kat.label].filter(Boolean).join(" · "), { view: "heute", panel: "todos" });
+    }
+    /* Projekte */
+    for (const p of state.projects || []) {
+        if (!passt(p.title))
+            continue;
+        const kat = CATS[p.cat];
+        dazu("Projekt", p.title, (kat && kat.label) || "", { view: "auswerten" });
+    }
+    /* Rezepte - auch in den Zutaten, das ist der halbe Zweck davon */
+    for (const r of state.recipes || []) {
+        const zutaten = (r.ingredients || []).map((z) => z.name).join(" ");
+        if (!passt(r.title, zutaten))
+            continue;
+        const kat = RECIPE_CATS[r.cat];
+        dazu("Rezept", r.title || "Ohne Titel", [kat && kat.label, (r.ingredients || []).length + " Zutaten"].filter(Boolean).join(" · "), { view: "rezepte", rezept: r.id });
+    }
+    /* Lernplan: Wochentitel und einzelne Aufgaben */
+    const wochen = (state.study && state.study.weeks) || [];
+    wochen.forEach((w, i) => {
+        if (passt(w.title))
+            dazu("Lernen", w.title, "Woche " + (w.n !== undefined ? w.n : i), { view: "lernen", woche: i });
+        for (const a of w.must || []) {
+            if (!passt(a.t))
+                continue;
+            dazu("Lernen", a.t, ["Woche " + (w.n !== undefined ? w.n : i), a.m ? durLabel(a.m) : ""].filter(Boolean).join(" · "), { view: "lernen", woche: i });
+        }
+    });
+    /* Training: Einheiten und einzelne Übungen */
+    for (const ty of (state.training && state.training.types) || []) {
+        if (passt(ty.name))
+            dazu("Training", ty.name, "Einheit", { view: "training" });
+        for (const ue of ty.exercises || []) {
+            if (!passt(ue.name, ue.note))
+                continue;
+            dazu("Training", ue.name, ty.name, { view: "training" });
+        }
+    }
+    /* Gebetsliste, Tag für Tag und Rubrik für Rubrik */
+    const gebet = state.gebet || {};
+    for (let tag = 0; tag < 7; tag++) {
+        const derTag = gebet[tag] || gebet[String(tag)] || {};
+        for (const teil of GEBET_TEILE) {
+            for (const e of derTag[teil.key] || []) {
+                if (!passt(e.text, e.dagegen))
+                    continue;
+                dazu("Gebet", e.text, DAY_NAMES[tag] + " · " + teil.label, { view: "bibel" });
+            }
+        }
+    }
+    /* Schon gelesene Tagesverse */
+    for (const g of (state.bibel && state.bibel.gelesen) || []) {
+        if (!passt(g.text))
+            continue;
+        dazu("Vers", g.text, datumKurz(g.datum) + " · Sprüche " + g.kap + "," + g.vers, { view: "bibel" });
+    }
+    /* Das ganze Buch der Sprüche. Erst ab drei Zeichen, sonst schwemmt
+       es bei "der" alles andere weg. */
+    if (q.length >= 3) {
+        let gefunden = 0;
+        for (const v of SPRUECHE) {
+            if (gefunden >= 8)
+                break;
+            if (String(v[2]).toLowerCase().indexOf(q) === -1)
+                continue;
+            gefunden++;
+            dazu("Sprüche", v[2], "Sprüche " + v[0] + "," + v[1], { view: "bibel" });
+        }
+    }
+    return treffer;
+}
+/* ════════════════ Suche ════════════════ */
+function SearchSheet({ state, onClose, onZiel }) {
+    const [frage, setFrage] = useState("");
+    const treffer = useMemo(() => sucheAlles(state, frage), [state, frage]);
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+    /* Nach Art gruppieren, Reihenfolge wie sie gefunden wurde */
+    const gruppen = [];
+    for (const t of treffer) {
+        let g = gruppen.find((x) => x.art === t.art);
+        if (!g) {
+            g = { art: t.art, liste: [] };
+            gruppen.push(g);
+        }
+        g.liste.push(t);
+    }
+    const zuKurz = frage.trim().length > 0 && frage.trim().length < 2;
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-start justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.4)" }, onClick: onClose },
+        React.createElement("div", { className: "pl-sheet pl-scroll overscroll-contain w-full md:max-w-lg rounded-b-lg md:rounded-lg p-4 flex flex-col gap-3 overflow-y-auto", style: { maxHeight: "92vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("input", { value: frage, onChange: (e) => setFrage(e.target.value), placeholder: "Suchen — Termine, To-dos, Rezepte, Verse …", className: "pl-input px-3 py-2 rounded text-sm flex-1", autoFocus: true }),
+                React.createElement("button", { onClick: onClose, className: "pl-muted p-1 shrink-0", "aria-label": "Schließen" },
+                    React.createElement(X, { size: 18 }))),
+            zuKurz && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Mindestens zwei Zeichen.")),
+            frage.trim().length >= 2 && treffer.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted py-4 text-center" }, "Nichts gefunden.")),
+            gruppen.map((g) => (React.createElement("div", { key: g.art, className: "flex flex-col gap-1" },
+                React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest pt-1" },
+                    g.art,
+                    " · ",
+                    g.liste.length),
+                g.liste.map((t) => (React.createElement("button", { key: t.id, onClick: () => onZiel(t.ziel), className: "pl-card rounded p-2.5 text-left flex flex-col gap-0.5" },
+                    React.createElement("span", { className: "text-sm leading-snug" }, t.titel),
+                    t.zusatz && (React.createElement("span", { className: "mono text-xs pl-muted" }, t.zusatz)))))))),
+            treffer.length >= SUCHE_MAX && (React.createElement("p", { className: "mono text-xs pl-muted text-center" }, "Nur die ersten " + SUCHE_MAX + " Treffer — such genauer.")))));
 }
 /* ════════════════ Raster ════════════════ */
 function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, gridRef, ppm, maxH }) {

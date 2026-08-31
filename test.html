@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Planer — Selbsttest</title>
+<style>
+  body{background:#E4E6E1;color:#191D1A;font-family:ui-monospace,'IBM Plex Mono',monospace;
+    font-size:13px;margin:0;padding:20px;line-height:1.5;}
+  h1{font-size:16px;margin:0 0 4px;}
+  .hinweis{color:#6F7A72;margin:0 0 16px;max-width:60ch;}
+  #kopf{padding:10px 14px;border-radius:6px;margin-bottom:14px;font-weight:600;}
+  .gut{background:#D7E8DF;border:1px solid #1E6E5A;color:#12503F;}
+  .schlecht{background:#F2DADF;border:1px solid #A03A5E;color:#7A2844;}
+  .gruppe{margin:14px 0 6px;font-weight:600;border-bottom:1px solid #C8CCC5;padding-bottom:3px;}
+  .fall{padding:2px 0 2px 18px;position:relative;}
+  .fall.ok::before{content:"✓";position:absolute;left:0;color:#1E6E5A;}
+  .fall.weg::before{content:"✕";position:absolute;left:0;color:#A03A5E;}
+  .fall.weg{color:#7A2844;}
+  .detail{color:#6F7A72;padding-left:18px;white-space:pre-wrap;}
+  #root{display:none;}
+</style>
+</head>
+<body>
+<h1>Planer — Selbsttest</h1>
+<p class="hinweis">Prüft die Rechenteile der App: Tagesvers, Rezept-Zerlegung,
+Kalenderraster, Suche und die Zeit-Helfer. Die App selbst wird dabei
+<b>nicht</b> gestartet und nichts gespeichert — die Seite darf gefahrlos
+neben dem Planer offen sein.</p>
+<div id="kopf">läuft…</div>
+<div id="ausgabe"></div>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script>
+/* app.js startet sich am Dateiende selbst. Hier soll es das nicht: eine
+   zweite laufende App schriebe in denselben Speicher wie die echte. Der
+   Aufruf wird deshalb ins Leere geleitet, bevor app.js geladen wird. */
+ReactDOM.createRoot = function () { return { render: function () {}, unmount: function () {} }; };
+/* Sicherheitsnetz: selbst wenn doch etwas schreiben wollte, geht in
+   dieser Seite nichts in den Speicher. Lesen bleibt erlaubt. */
+try {
+  var echtesSetzen = Storage.prototype.setItem;
+  Storage.prototype.setItem = function () { /* im Test bewusst folgenlos */ };
+  Storage.prototype.removeItem = function () {};
+  Storage.prototype.clear = function () {};
+} catch (e) {}
+/* config.js absichtlich nicht geladen: der Test braucht weder Kalender
+   noch Schlüssel. */
+window.PLANER_CLIENT_ID = "";
+</script>
+<script src="verse.js"></script>
+<script src="app.js"></script>
+
+<script>
+(function () {
+  var gruppen = [], aktuell = null, gut = 0, schlecht = 0;
+
+  function gruppe(name) { aktuell = { name: name, faelle: [] }; gruppen.push(aktuell); }
+  function pruefe(was, bedingung, detail) {
+    var ok = !!bedingung;
+    aktuell.faelle.push({ was: was, ok: ok, detail: ok ? "" : (detail || "") });
+    ok ? gut++ : schlecht++;
+  }
+  function gleich(was, ist, soll) {
+    pruefe(was, JSON.stringify(ist) === JSON.stringify(soll),
+      "erwartet " + JSON.stringify(soll) + ", bekommen " + JSON.stringify(ist));
+  }
+
+  /* ── Sprüche und Tagesvers ── */
+  gruppe("Sprüche und Tagesvers");
+  var verse = window.PLANER_SPRUECHE || [];
+  gleich("915 Verse in verse.js", verse.length, 915);
+  var kapitel = {};
+  verse.forEach(function (v) { kapitel[v[0]] = (kapitel[v[0]] || 0) + 1; });
+  gleich("31 Kapitel", Object.keys(kapitel).length, 31);
+  pruefe("kein Vers ohne Text", verse.every(function (v) { return String(v[2] || "").trim().length > 0; }));
+  pruefe("gleiches Datum, gleicher Vers",
+    versDesTages("2026-08-31") && versDesTages("2026-08-31").stelle === versDesTages("2026-08-31").stelle);
+  gleich("bekanntes Datum liefert Sprüche 28,10",
+    versDesTages("2026-08-31").stelle, "Sprüche 28,10");
+  var stellen = {}, tage = 915, doppelt = 0;
+  for (var i = 0; i < tage; i++) {
+    var d = new Date(Date.UTC(2026, 7, 31) + i * 86400000).toISOString().slice(0, 10);
+    var s = versDesTages(d).stelle;
+    if (stellen[s]) doppelt++;
+    stellen[s] = 1;
+  }
+  gleich("915 Tage ohne Wiederholung", doppelt, 0);
+  gleich("deckt das ganze Buch ab", Object.keys(stellen).length, 915);
+  var rund = new Date(Date.UTC(2026, 7, 31) + 915 * 86400000).toISOString().slice(0, 10);
+  gleich("Zyklus schließt sich nach 915 Tagen",
+    versDesTages(rund).stelle, versDesTages("2026-08-31").stelle);
+  pruefe("Unsinn als Datum ergibt null", versDesTages("kein-datum") === null);
+
+  /* ── Mengen lesen ── */
+  gruppe("Mengen und Einheiten");
+  gleich("200 g", [mengeLesen("200 g Mehl").wert, mengeLesen("200 g Mehl").rest], [200, "g Mehl"]);
+  gleich("1,5 l als Komma-Zahl", mengeLesen("1,5 l Milch").wert, 1.5);
+  gleich("1/2 als Bruch", mengeLesen("1/2 TL Salz").wert, 0.5);
+  gleich("1 1/2 als gemischter Bruch", mengeLesen("1 1/2 EL Öl").wert, 1.5);
+  gleich("½ als Zeichen", mengeLesen("½ TL Zimt").wert, 0.5);
+  gleich("2-3 nimmt die kleinere Zahl", mengeLesen("2-3 EL Honig").wert, 2);
+  gleich("ohne Zahl kein Wert", mengeLesen("Salz").wert, null);
+
+  gruppe("Zutaten zerlegen");
+  gleich("200 g rote Linsen",
+    (function () { var z = zutatLesen("200 g rote Linsen"); return [z.amount, z.unit, z.name]; })(),
+    ["200", "g", "rote Linsen"]);
+  gleich("Zehen werden Stück",
+    (function () { var z = zutatLesen("2 Zehen Knoblauch"); return [z.amount, z.unit, z.name]; })(),
+    ["2", "Stk", "Knoblauch"]);
+  gleich("Zubereitung wird abgeschnitten",
+    zutatLesen("1 Zwiebel, fein gewürfelt").name, "Zwiebel");
+  gleich("Salz und Pfeffer bleibt zusammen",
+    zutatLesen("Salz und Pfeffer").name, "Salz und Pfeffer");
+  gleich("Gewürz ohne Menge wird Prise",
+    (function () { var z = zutatLesen("Salz"); return [z.amount, z.unit]; })(), ["", "Prise"]);
+  gleich("Tasse wird in ml umgerechnet",
+    (function () { var z = zutatLesen("1 Tasse Milch"); return [z.amount, z.unit]; })(), ["250", "ml"]);
+  gleich("Becher bleibt unangetastet",
+    zutatLesen("1 Becher Joghurt").name, "Becher Joghurt");
+  gleich("Aufzählungszeichen stört nicht",
+    zutatLesen("- 400 ml Kokosmilch").name, "Kokosmilch");
+
+  /* ── Ganze Rezepte ── */
+  gruppe("Rezept aus Text");
+  var rA = rezeptAusText(
+    "Linsen-Kokos-Curry\nZubereitungszeit: 25 Minuten\nPortionen: 4\n\n" +
+    "Zutaten\n- 200 g rote Linsen\n- 400 ml Kokosmilch\n- 1 Zwiebel\n- Salz\n\n" +
+    "Zubereitung\n1. Zwiebel schneiden.\n2. Anbraten.\n3. Köcheln lassen.");
+  gleich("Titel", rA.title, "Linsen-Kokos-Curry");
+  gleich("Portionen aus 'Portionen: 4'", rA.portions, 4);
+  gleich("Dauer", rA.timeMin, 25);
+  gleich("vier Zutaten", rA.ingredients.length, 4);
+  gleich("drei Schritte", rA.steps.length, 3);
+  gleich("Nummerierung entfernt", rA.steps[0], "Zwiebel schneiden.");
+
+  var rB = rezeptAusText(
+    "Bananenbrot\n\nArbeitszeit ca. 15 Minuten, Backzeit 1 Stunde\n\n" +
+    "ZUTATEN\n3 Bananen\n250 g Mehl\n½ TL Zimt\n\n" +
+    "ZUBEREITUNG\nOfen vorheizen. Bananen zerdrücken. Mehl unterrühren. " +
+    "Teig einfüllen und backen. Auskühlen lassen.");
+  gleich("Arbeits- und Backzeit zusammengezählt", rB.timeMin, 75);
+  gleich("Kategorie erkannt", rB.cat, "backen");
+  pruefe("Fließtext in Schritte zerlegt", rB.steps.length >= 4,
+    "nur " + rB.steps.length + " Schritte");
+  gleich("halber Teelöffel", rB.ingredients[2].amount, "0,5");
+
+  var rC = rezeptAusText("für 2 Personen\n100g Haferflocken\n250 ml Milch");
+  gleich("Portionen aus 'für 2 Personen'", rC.portions, 2);
+  pruefe("leerer Text ergibt null", rezeptAusText("") === null);
+
+  /* ── Kalenderraster ── */
+  gruppe("Kalender: Spalten und Sichtfenster");
+  var B = function (start, dur) { return { start: start, dur: dur, id: "b" + start }; };
+  var einzeln = spaltenLegen([B(540, 30), B(600, 30)]);
+  gleich("nacheinander: je eine volle Spalte",
+    einzeln.map(function (e) { return e.spalten; }), [1, 1]);
+  var zwei = spaltenLegen([B(540, 60), B(555, 60)]);
+  gleich("zwei überlappende: zwei Spalten",
+    zwei.map(function (e) { return [e.spalte, e.spalten]; }), [[0, 2], [1, 2]]);
+  var drei = spaltenLegen([B(900, 60), B(915, 60), B(930, 30)]);
+  gleich("drei überlappende: drei Spalten",
+    drei.map(function (e) { return e.spalten; }), [3, 3, 3]);
+  pruefe("gleiche Spalte wird nie doppelt vergeben",
+    (function () {
+      var g = spaltenLegen([B(540, 60), B(550, 60), B(560, 60)]);
+      var s = g.map(function (e) { return e.spalte; }).sort();
+      return s.join(",") === "0,1,2";
+    })());
+
+  var tag = new Date(2026, 7, 31);
+  var kein = sichtFenster([tag], function () { return []; });
+  gleich("ohne Termine 7 bis 22 Uhr", kein, [7, 22]);
+  var frueh = sichtFenster([tag], function () { return [{ start: 5 * 60 + 30, dur: 60 }]; });
+  gleich("früher Termin weitet nach vorn", frueh[0], 5);
+  var spaet = sichtFenster([tag], function () { return [{ start: 22 * 60 + 30, dur: 45 }]; });
+  gleich("später Termin weitet nach hinten", spaet[1], 24);
+  var ganz = sichtFenster([tag], function () { return [{ start: 0, dur: 0, allDay: true }]; });
+  gleich("ganztägiges zählt nicht mit", ganz, [7, 22]);
+
+  /* Der eigentliche Anlass des Umbaus: Höhe muss der Dauer folgen */
+  gruppe("Kalender: Höhen sind ehrlich");
+  var hoehe = function (dur, ppm) { return Math.max(dur * ppm - 1, 3); };
+  [0.6, 0.9, 1.4].forEach(function (ppm) {
+    var h15 = hoehe(15, ppm), h30 = hoehe(30, ppm), h60 = hoehe(60, ppm);
+    pruefe("bei " + ppm + " px/min ist 30 min höher als 15 min", h30 > h15 + 3,
+      h15 + " vs " + h30);
+    pruefe("bei " + ppm + " px/min ist 60 min etwa doppelt so hoch wie 30 min",
+      Math.abs(h60 / h30 - 2) < 0.1, (h60 / h30).toFixed(2));
+  });
+
+  /* ── Suche ── */
+  gruppe("Suche über alles");
+  var probeStand = {
+    blocks: [{ id: "t1", day: "2026-08-31", title: "Thermodynamik Übung", cat: "uni", start: 600, dur: 90 }],
+    todos: [{ id: "d1", title: "Skript ausdrucken", cat: "uni", done: false }],
+    projects: [{ id: "p1", title: "Bachelorarbeit", cat: "uni" }],
+    recipes: [{ id: "r1", title: "Linsencurry", cat: "hauptgericht", ingredients: [{ name: "rote Linsen" }] }],
+    study: { weeks: [{ n: 3, title: "Mitte des Stoffs", must: [{ t: "Altklausur rechnen", m: 90 }] }] },
+    training: { types: [{ id: "y1", name: "Kraft & Limit", exercises: [{ id: "e1", name: "Weighted Pull-ups" }] }] },
+    gebet: { "0": { dank: [{ id: "g1", text: "Dass ich studieren darf" }] } },
+    bibel: { gelesen: [{ datum: "2026-08-30", kap: 27, vers: 4, text: "Grausam ist der Zorn" }] }
+  };
+  var f = function (q) { return sucheAlles(probeStand, q); };
+  pruefe("findet einen Termin", f("thermo").some(function (t) { return t.art === "Termin"; }));
+  pruefe("findet ein To-do", f("skript").some(function (t) { return t.art === "To-do"; }));
+  pruefe("findet ein Projekt", f("bachelor").some(function (t) { return t.art === "Projekt"; }));
+  pruefe("findet ein Rezept über die Zutat", f("linsen").some(function (t) { return t.art === "Rezept"; }));
+  pruefe("findet eine Lernaufgabe", f("altklausur").some(function (t) { return t.art === "Lernen"; }));
+  pruefe("findet eine Übung", f("pull-ups").some(function (t) { return t.art === "Training"; }));
+  pruefe("findet einen Gebetseintrag", f("studieren").some(function (t) { return t.art === "Gebet"; }));
+  pruefe("findet einen gelesenen Vers", f("grausam").some(function (t) { return t.art === "Vers"; }));
+  pruefe("findet im ganzen Buch der Sprüche",
+    f("weisheit").some(function (t) { return t.art === "Sprüche"; }));
+  gleich("ein Zeichen sucht nicht", f("t").length, 0);
+  gleich("Unbekanntes findet nichts", f("xylophonkonzert").length, 0);
+  pruefe("Groß- und Kleinschreibung egal", f("THERMO").length === f("thermo").length);
+  pruefe("Termin-Treffer kennt sein Ziel",
+    (function () { var t = f("thermo")[0]; return t.ziel && t.ziel.view === "heute" && t.ziel.block === "t1"; })());
+
+  /* ── Zeit-Helfer ── */
+  gruppe("Zeit-Helfer");
+  gleich("minsToLabel 09:30", minsToLabel(570), "09:30");
+  gleich("minsToLabel Mitternacht", minsToLabel(0), "00:00");
+  gleich("durLabel unter einer Stunde", durLabel(45), "45 min");
+  gleich("durLabel glatte Stunde", durLabel(60), "1h");
+  gleich("durLabel mit Rest", durLabel(90), "1h30");
+  gleich("dayKey", dayKey(new Date(2026, 7, 31)), "2026-08-31");
+  gleich("mondayOf trifft den Montag", dayKey(mondayOf(new Date(2026, 8, 3))), "2026-08-31");
+  gleich("mondayOf lässt Montag stehen", dayKey(mondayOf(new Date(2026, 7, 31))), "2026-08-31");
+  gleich("pad", pad(7), "07");
+  gleich("datumLang", datumLang("2026-08-31"), "Montag, 31. August 2026");
+  gleich("addDays über den Monat", dayKey(addDays(new Date(2026, 7, 31), 1)), "2026-09-01");
+
+  /* ── Gebetsliste ── */
+  gruppe("Gebetsliste");
+  gleich("fünf Rubriken", GEBET_TEILE.length, 5);
+  pruefe("jede Rubrik hat einen eigenen Schlüssel",
+    new Set(GEBET_TEILE.map(function (t) { return t.key; })).size === GEBET_TEILE.length);
+  pruefe("Über mich hat das Gegenteil-Feld",
+    GEBET_TEILE.some(function (t) { return t.key === "gedanken" && t.mitDagegen; }));
+  gleich("Montag ist Tag 0", gebetTagNr(new Date(2026, 7, 31)), 0);
+  gleich("Sonntag ist Tag 6", gebetTagNr(new Date(2026, 8, 6)), 6);
+
+  /* ── Ausgabe ── */
+  var html = "";
+  gruppen.forEach(function (g) {
+    html += '<div class="gruppe">' + g.name + "</div>";
+    g.faelle.forEach(function (f) {
+      html += '<div class="fall ' + (f.ok ? "ok" : "weg") + '">' + f.was + "</div>";
+      if (!f.ok && f.detail) html += '<div class="detail">' + f.detail + "</div>";
+    });
+  });
+  document.getElementById("ausgabe").innerHTML = html;
+  var kopf = document.getElementById("kopf");
+  kopf.className = schlecht === 0 ? "gut" : "schlecht";
+  kopf.textContent = schlecht === 0
+    ? "Alles in Ordnung — " + gut + " Prüfungen bestanden."
+    : schlecht + " von " + (gut + schlecht) + " Prüfungen fehlgeschlagen.";
+  document.title = (schlecht === 0 ? "OK" : "FEHLER") + " — Planer Selbsttest";
+})();
+</script>
+</body>
+</html>
