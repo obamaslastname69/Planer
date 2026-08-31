@@ -111,9 +111,14 @@ self.addEventListener('fetch', (e) => {
   const sameOrigin = url.startsWith(self.location.origin);
 
   if (sameOrigin) {
-    // Netzwerk zuerst: neue Fassung gewinnt, Cache springt nur offline ein
+    // Netzwerk zuerst: neue Fassung gewinnt, Cache springt nur offline ein.
+    // 'no-store' geht am Zwischenspeicher des Browsers vorbei. Ohne das
+    // liefert GitHub Pages bis zu zehn Minuten lang (max-age=600) die alte
+    // Fassung, und eine frisch veroeffentlichte Aenderung kaeme erst
+    // verspaetet an. Der eigene Cache unten bleibt davon unberuehrt und
+    // traegt weiterhin den Offline-Betrieb.
     e.respondWith(
-      fetch(e.request)
+      fetch(e.request, { cache: 'no-store' })
         .then((res) => {
           if (res && res.status === 200) {
             const copy = res.clone();
