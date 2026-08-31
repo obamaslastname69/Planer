@@ -1915,7 +1915,7 @@ function PlannerApp() {
         }
     });
     const [beat, setBeat] = useState(0);
-    const [zoom, setZoom] = useState("fit");
+    const [zoom, setZoom] = useState("normal");
     const [cols, setCols] = useState(() => (typeof window !== "undefined" && window.innerWidth >= 900 ? 7 : 5));
     const [viewH, setViewH] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 800));
     const [now, setNow] = useState(new Date());
@@ -1949,10 +1949,15 @@ function PlannerApp() {
         const from = new Date(selectedDay + "T00:00:00");
         return Array.from({ length: cols }, (_, i) => addDays(from, i));
     }, [cols, days, selectedDay]);
-    const totalDayMin = (DAY_END - DAY_START) * 60;
-    const fitPpm = Math.max(0.24, (viewH * 0.5) / totalDayMin);
-    const ppm = zoom === "fit" ? fitPpm : zoom === "mid" ? 0.8 : 1.4;
-    const gridMaxH = zoom === "fit" ? totalDayMin * ppm + 4 : Math.round(viewH * 0.62);
+    /* Fester Maßstab statt "ganzer Tag auf einen Blick". Der gequetschte
+       Tag war der Grund, warum 15 und 30 Minuten gleich hoch aussahen:
+       17 Stunden auf halber Bildschirmhöhe sind 0,4 px je Minute, ein
+       Viertelstundenblock also 6 px - unlesbar, weshalb eine Mindesthöhe
+       von 16 px alles unter einer Dreiviertelstunde gleich groß machte.
+       Jetzt gilt eine feste Höhe und das Raster scrollt, so wie es jeder
+       gewohnte Kalender hält. 0,9 px je Minute sind 54 px je Stunde. */
+    const ppm = zoom === "klein" ? 0.6 : zoom === "gross" ? 1.4 : 0.9;
+    const gridMaxH = Math.round(Math.max(320, viewH * 0.62));
     /* Laden */
     useEffect(() => {
         (async () => {
@@ -3521,7 +3526,7 @@ function PlannerApp() {
                     React.createElement("div", { className: "flex-1 min-w-0" },
                         React.createElement("div", { className: "flex items-center gap-1 mb-1" },
                             [[1, "1 Tag"], [5, "5 Tage"], [7, "Woche"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => setCols(k), className: "pl-btn px-2 py-1 rounded mono text-xs", style: cols === k ? { background: "var(--ink)", color: "var(--paper)", borderColor: "var(--ink)" } : {} }, lbl))),
-                            React.createElement("button", { onClick: () => setZoom(zoom === "fit" ? "mid" : zoom === "mid" ? "big" : "fit"), className: "pl-btn px-2 py-1 rounded mono text-xs", title: "H\u00F6he des Rasters umschalten" }, zoom === "fit" ? "ganzer Tag" : zoom === "mid" ? "mittel" : "groß"),
+                            React.createElement("button", { onClick: () => setZoom(zoom === "klein" ? "normal" : zoom === "normal" ? "gross" : "klein"), className: "pl-btn px-2 py-1 rounded mono text-xs", title: "Höhe des Rasters umschalten" }, zoom === "klein" ? "eng" : zoom === "normal" ? "normal" : "groß"),
                             React.createElement("button", { onClick: addTerminHere, className: "ml-auto px-3 py-1 rounded flex items-center gap-1.5 mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } },
                                 React.createElement(Plus, { size: 13 }),
                                 " Termin")),
@@ -4079,14 +4084,79 @@ function RecipeEditor({ recipe, onClose, onSave, onDelete }) {
                     confirmDel ? "sicher?" : "Löschen"),
                 React.createElement("button", { onClick: commit, className: "px-4 py-2 rounded mono text-xs ml-auto", style: { background: "var(--ink)", color: "var(--paper)" } }, "Fertig")))));
 }
+/* Termine, die sich zeitlich überschneiden, nebeneinander legen. Vorher
+   lagen sie exakt übereinander und der hintere war schlicht unsichtbar -
+   mit eingebundenem Stundenplan passiert das ständig. */
+function spaltenLegen(blocks) {
+    const sortiert = blocks.slice().sort((a, b) => (a.start - b.start) || (b.dur - a.dur));
+    const gelegt = [];
+    let gruppe = [];
+    const gruppeSchliessen = () => {
+        const breite = gruppe.reduce((m, g) => Math.max(m, g.spalte + 1), 1);
+        for (const g of gruppe)
+            g.spalten = breite;
+        gruppe = [];
+    };
+    for (const b of sortiert) {
+        /* Fängt der Termin an, wenn alle laufenden vorbei sind, beginnt
+           eine neue Gruppe - die vorige darf ihre Breite festlegen */
+        if (gruppe.length && gruppe.every((g) => g.ende <= b.start))
+            gruppeSchliessen();
+        const belegt = gruppe.filter((g) => g.ende > b.start).map((g) => g.spalte);
+        let spalte = 0;
+        while (belegt.indexOf(spalte) > -1)
+            spalte++;
+        const eintrag = { block: b, spalte: spalte, spalten: 1, ende: b.start + b.dur };
+        gruppe.push(eintrag);
+        gelegt.push(eintrag);
+    }
+    if (gruppe.length)
+        gruppeSchliessen();
+    return gelegt;
+}
+/* Sichtfenster des Rasters: 7 bis 22 Uhr, erweitert um alles, was davor
+   oder danach liegt. Leere Randstunden kosten nur Scrollweg. */
+function sichtFenster(visibleDays, blocksFor) {
+    let von = 7, bis = 22;
+    for (const d of visibleDays) {
+        for (const b of blocksFor(dayKey(d))) {
+            if (b.allDay)
+                continue;
+            von = Math.min(von, Math.floor(b.start / 60));
+            bis = Math.max(bis, Math.ceil((b.start + b.dur) / 60));
+        }
+    }
+    von = Math.max(0, von);
+    return [von, Math.min(24, Math.max(bis, von + 6))];
+}
 /* ════════════════ Raster ════════════════ */
 function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, gridRef, ppm, maxH }) {
-    const totalMin = (DAY_END - DAY_START) * 60;
+    const fenster = sichtFenster(visibleDays, blocksFor);
+    const von = fenster[0];
+    const bis = fenster[1];
+    const totalMin = (bis - von) * 60;
     const height = totalMin * ppm;
-    const hours = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i);
+    const hours = Array.from({ length: bis - von + 1 }, (_, i) => von + i);
     const nowMin = now.getHours() * 60 + now.getMinutes();
-    const showNow = nowMin >= DAY_START * 60 && nowMin <= DAY_END * 60;
+    const showNow = nowMin >= von * 60 && nowMin <= bis * 60;
     const labelEvery = ppm < 0.42 ? 2 : 1;
+    /* Halbe Stunden nur andeuten, wenn dafür Platz ist */
+    const halbe = ppm >= 0.7;
+    /* Das Raster scrollt jetzt, also muss es von selbst dorthin springen,
+       wo der Tag gerade steht - sonst schaut man morgens auf leere
+       Stunden und muss erst suchen. Ein Drittel Vorlauf nach oben, damit
+       das eben Gewesene noch zu sehen ist. */
+    const eigenerRef = useRef(null);
+    const scrollRef = gridRef || eigenerRef;
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el)
+            return;
+        const zielMin = (showNow ? nowMin : von * 60 + 120) - von * 60;
+        el.scrollTop = Math.max(0, zielMin * ppm - el.clientHeight / 3);
+        /* nowMin bleibt bewusst draußen: sonst risse es die Ansicht jede
+           Minute zurück, während man scrollt */
+    }, [ppm, von, bis, scrollRef]);
     const n = visibleDays.length;
     const compact = n >= 5;
     const tpl = `${compact ? 26 : 38}px repeat(${n},1fr)`;
@@ -4119,7 +4189,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
         const idx = visibleDays.findIndex((x) => dayKey(x) === d.day);
         const target = Math.max(0, Math.min(n - 1, idx + colShift));
         const minuteShift = Math.round(dy / ppm / SLOT) * SLOT;
-        const start = Math.max(DAY_START * 60, Math.min(DAY_END * 60 - d.dur, d.start + minuteShift));
+        const start = Math.max(von * 60, Math.min(bis * 60 - d.dur, d.start + minuteShift));
         setDrag({ id: d.id, day: dayKey(visibleDays[target]), start: start, dur: d.dur });
     };
     const endDrag = () => {
@@ -4136,9 +4206,9 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
     };
     const handleClick = (e, day) => {
         const rect = e.currentTarget.getBoundingClientRect();
-        const raw = DAY_START * 60 + (e.clientY - rect.top) / ppm;
+        const raw = von * 60 + (e.clientY - rect.top) / ppm;
         const snapped = Math.round(raw / SLOT) * SLOT;
-        onSlot(day, Math.max(DAY_START * 60, Math.min(DAY_END * 60 - 30, snapped)));
+        onSlot(day, Math.max(von * 60, Math.min(bis * 60 - 30, snapped)));
     };
     /* Ganztägige Termine gehören nicht ins Zeitraster. Mehrtägiges wird zu
        EINEM Balken über alle betroffenen Spalten zusammengefasst — als
@@ -4215,9 +4285,9 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                     /* Läuft er von links herein, zeigt ein Pfeil das an */
                     (beginntHier ? "" : "‹ ") + (b.title || "Ohne Titel") + (endetHier ? "" : " ›")));
             }))),
-        React.createElement("div", { ref: gridRef, className: "pl-scroll overflow-y-auto", style: { maxHeight: maxH } },
+        React.createElement("div", { ref: scrollRef, className: "pl-scroll overflow-y-auto", style: { maxHeight: maxH } },
             React.createElement("div", { className: "grid", ref: areaRef, style: { gridTemplateColumns: tpl, touchAction: "pan-y" }, onPointerMove: onAreaMove, onPointerUp: endDrag, onPointerLeave: endDrag },
-                React.createElement(HourRail, { hours: hours, ppm: ppm, every: labelEvery, compact: compact }),
+                React.createElement(HourRail, { hours: hours, ppm: ppm, every: labelEvery, compact: compact, von: von, bis: bis }),
                 visibleDays.map((d) => {
                     const k = dayKey(d);
                     let blocks = blocksFor(k).filter((b) => !b.allDay);
@@ -4233,14 +4303,23 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                     }
                     return (React.createElement("div", { key: k, className: "relative border-l pl-hair", style: { height } },
                         React.createElement("div", { className: "pl-slot absolute inset-0 cursor-copy", onClick: (e) => handleClick(e, k) }),
-                        hours.map((h) => (React.createElement("div", { key: h, className: "absolute left-0 right-0 border-t pl-hair pointer-events-none", style: { top: (h - DAY_START) * 60 * ppm } }))),
-                        blocks.map((b) => {
+                        hours.map((h) => (React.createElement(React.Fragment, { key: h },
+                            React.createElement("div", { className: "absolute left-0 right-0 border-t pl-hair pointer-events-none", style: { top: (h - von) * 60 * ppm } }),
+                            /* Halbe Stunde nur andeuten - sie hilft beim Schätzen,
+                               soll aber nicht wie eine volle Stunde wirken */
+                            halbe && h < bis && (React.createElement("div", { className: "absolute left-0 right-0 pointer-events-none", style: { top: (h - von) * 60 * ppm + 30 * ppm, borderTop: "1px dotted var(--line-soft)", opacity: 0.55 } }))))),
+                        spaltenLegen(blocks).map((e) => {
+                            const b = e.block;
                             const c = blockColor(b);
                             const fill = b.status === "done" ? 0.3 : b.status === "skipped" ? 0.06 : b.status === "moved" ? 0.1 : 0.16;
-                            const h = Math.max(b.dur * ppm - 1, 16);
-                            const roomy = !compact && h >= 36;
-                            const flat = h < 24; // zu flach für zwei Zeilen
-                            const fs = h >= 36 ? 12 : h >= 24 ? 11 : h >= 18 ? 10 : 9;
+                            /* Die Höhe folgt der Dauer, ohne Untergrenze, die sie
+                               beschönigt. Die 3 px sind nur da, damit ein Block
+                               nicht ganz verschwindet. */
+                            const h = Math.max(b.dur * ppm - 1, 3);
+                            const roomy = !compact && h >= 34;
+                            const flat = h < 26; // zu flach für zwei Zeilen
+                            const fs = h >= 34 ? 12 : h >= 24 ? 11 : h >= 15 ? 10 : 9;
+                            const anteil = 100 / e.spalten;
                             const dragged = drag && drag.id === b.id && drag.day === k ? drag : null;
                             return (React.createElement("button", { key: b.id, onPointerDown: (e) => beginDrag(e, b), onClick: (e) => {
                                     e.stopPropagation();
@@ -4248,8 +4327,12 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                                         return;
                                     onBlock(b);
                                 }, className: `pl-block absolute ${b.external ? "pl-ext cursor-default" : ""}`, style: {
-                                    top: (b.start - DAY_START * 60) * ppm,
-                                    height: h, left: 2, right: 2,
+                                    top: (b.start - von * 60) * ppm,
+                                    height: h,
+                                    /* Nebeneinander statt übereinander, wenn sich
+                                       Termine zeitlich überschneiden */
+                                    left: `calc(${e.spalte * anteil}% + 2px)`,
+                                    width: `calc(${anteil}% - 4px)`,
                                     cursor: b.external || b.allDay ? "default" : "grab",
                                     zIndex: dragged ? 20 : undefined,
                                     boxShadow: dragged ? "0 6px 16px -4px rgba(25,29,26,.4)" : undefined,
@@ -4268,7 +4351,9 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                                         roomy && React.createElement("div", { className: "mono text-xs pl-muted" }, minsToLabel(b.start)),
                                         React.createElement("div", { className: "font-medium truncate", style: {
                                                 fontSize: fs,
-                                                lineHeight: flat ? fs + 1 + "px" : fs + 3 + "px",
+                                                /* Nie höher als der Block selbst, sonst
+                                                   ragt die Zeile bei kurzen Terminen heraus */
+                                                lineHeight: Math.min(fs + (flat ? 1 : 3), Math.max(8, h - 1)) + "px",
                                                 color: lift(c),
                                                 textDecoration: b.status === "skipped" ? "line-through" : "none",
                                             } },
@@ -4276,17 +4361,23 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                                             b.title || "—",
                                             b.goesOn ? "▸" : "")))));
                         }),
-                        k === todayKey && showNow && (React.createElement("div", { className: "absolute left-0 right-0 pointer-events-none z-10", style: { top: (nowMin - DAY_START * 60) * ppm } },
+                        k === todayKey && showNow && (React.createElement("div", { className: "absolute left-0 right-0 pointer-events-none z-10", style: { top: (nowMin - von * 60) * ppm } },
+                            /* Punkt am linken Rand: so findet das Auge die
+                               Jetzt-Linie auch in einer vollen Spalte */
+                            React.createElement("div", { style: { position: "absolute", left: -3, top: -3, width: 7, height: 7, borderRadius: "50%", background: "#C2410C" } }),
                             React.createElement("div", { style: { height: 1.5, background: "#C2410C" } })))));
                 })))));
 }
-function HourRail({ hours, ppm, every = 1, compact = false }) {
-    return (React.createElement("div", { className: "relative", style: { height: (DAY_END - DAY_START) * 60 * ppm } }, hours.map((h, i) => (i % every === 0 ? (React.createElement("div", { key: h, className: "absolute mono pl-muted", style: { right: compact ? 3 : 6, top: (h - DAY_START) * 60 * ppm - 6, fontSize: compact ? 9 : 11 } }, compact ? h : pad(h))) : null))));
+function HourRail({ hours, ppm, every = 1, compact = false, von = DAY_START, bis = DAY_END }) {
+    return (React.createElement("div", { className: "relative", style: { height: (bis - von) * 60 * ppm } }, hours.map((h, i) => (i % every === 0 ? (React.createElement("div", { key: h, className: "absolute mono pl-muted", style: { right: compact ? 3 : 6, top: (h - von) * 60 * ppm - 6, fontSize: compact ? 9 : 11 } }, compact ? h : pad(h))) : null))));
 }
 function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, onMove, ppm, todos, todoPlan, onAddTodo, onToggleTodo, onRemoveTodo, onPlanTodo, onOpenBlock, pendingPick, onImportTodoist }) {
     var _a, _b;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const d = new Date(dayK + "T00:00:00");
+    /* Dieselbe Rechnung wie im Raster, damit die Überschrift nicht
+       6-23 Uhr behauptet, während darunter 7-22 steht */
+    const tagFenster = sichtFenster([d], () => blocks);
     const running = isToday
         ? blocks.find((b) => !b.external && nowMin >= b.start && nowMin < b.start + b.dur)
         : null;
@@ -4343,15 +4434,15 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
             React.createElement("div", { className: "flex items-center justify-between mb-1" },
                 React.createElement("span", { className: "mono text-xs pl-muted" },
                     "Tagesplan \u00B7 ",
-                    DAY_START,
+                    tagFenster[0],
                     "\u2013",
-                    DAY_END,
+                    tagFenster[1],
                     " Uhr"),
                 React.createElement("button", { onClick: onAdd, className: "px-2.5 py-1 rounded flex items-center gap-1 mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } },
                     React.createElement(Plus, { size: 12 }),
                     " Termin")),
             React.createElement("div", { className: "pl-card rounded" },
-                React.createElement(Grid, { visibleDays: [new Date(dayK + "T00:00:00")], todayKey: isToday ? dayK : "-", now: now, blocksFor: () => blocks, onSlot: onSlot, onBlock: onBlock, onMove: onMove, ppm: ppm, maxH: ppm * (DAY_END - DAY_START) * 60 + 4 }))),
+                React.createElement(Grid, { visibleDays: [new Date(dayK + "T00:00:00")], todayKey: isToday ? dayK : "-", now: now, blocksFor: () => blocks, onSlot: onSlot, onBlock: onBlock, onMove: onMove, ppm: ppm, maxH: Math.round(Math.max(320, (typeof window !== "undefined" ? window.innerHeight : 800) * 0.62)) }))),
         /* Routinen zuerst — sie werden im Tagesverlauf am häufigsten angetippt */
         routines.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Routinen"),
