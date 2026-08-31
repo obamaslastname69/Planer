@@ -1169,6 +1169,287 @@ async function tdCloseTask(id) {
     await tdFetch("/tasks/" + id + "/close", { method: "POST" });
     return true;
 }
+/* ── Rezept aus eingefügtem Text ────────────────────────────
+   Läuft im Gerät: kein Netz, kein Schlüssel, keine Kosten. Erkannt wird
+   der übliche Aufbau einer Rezeptseite - Titel, irgendwo Portionen und
+   Dauer, eine Zutatenliste mit Mengen, darunter die Schritte.
+
+   Im Zweifel wird übernommen statt weggeworfen: eine Zeile zu viel ist
+   im Editor schnell gelöscht, eine verlorene muss man neu tippen. */
+const BRUCH_ZEICHEN = { "½": 0.5, "¼": 0.25, "¾": 0.75, "⅓": 1 / 3, "⅔": 2 / 3, "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875 };
+/* Schreibweisen, die auf eine der Einheiten in UNITS führen */
+const EINHEIT_ALIAS = {
+    g: "g", gr: "g", gramm: "g",
+    kg: "kg", kilo: "kg", kilogramm: "kg",
+    ml: "ml", milliliter: "ml",
+    l: "l", liter: "l",
+    stk: "Stk", stck: "Stk", st: "Stk", "stück": "Stk", stueck: "Stk", "stücke": "Stk",
+    scheibe: "Scheibe", scheiben: "Scheibe",
+    el: "EL", "esslöffel": "EL", essloeffel: "EL",
+    tl: "TL", "teelöffel": "TL", teeloeffel: "TL",
+    prise: "Prise", prisen: "Prise", msp: "Prise", messerspitze: "Prise",
+    spritzer: "Spritzer", schuss: "Spritzer",
+    bund: "Bund", "bündel": "Bund",
+    dose: "Dose", dosen: "Dose",
+    /* Zählbares, für das es in UNITS keine eigene Einheit gibt */
+    zehe: "Stk", zehen: "Stk", packung: "Stk", packungen: "Stk",
+    "päckchen": "Stk", paeckchen: "Stk", kugel: "Stk", kugeln: "Stk",
+    blatt: "Stk", "blätter": "Stk", zweig: "Stk", zweige: "Stk",
+};
+/* Haushaltsmaße, die erst umgerechnet werden müssen */
+const EINHEIT_FAKTOR = {
+    tasse: [250, "ml"], tassen: [250, "ml"],
+    cup: [240, "ml"], cups: [240, "ml"],
+    tbsp: [1, "EL"], tsp: [1, "TL"], oz: [28, "g"], lb: [454, "g"],
+};
+/* "Becher" fehlt hier mit Absicht: ein Becher Joghurt ist ein Gebinde
+   von 150 bis 200 g, kein Volumenmaß. Lieber unübersetzt lassen und im
+   Namen stehen haben, als eine falsche Zahl eintragen. */
+/* Zeitangabe in Minuten */
+function inMinuten(zahl, einheit) {
+    return /^(std|stunde|stunden|h)$/i.test(einheit) ? Number(zahl) * 60 : Number(zahl);
+}
+/* Zeilen, die zwischen den Zutaten stehen, aber keine sind */
+const KEINE_ZUTAT = /^(zutaten|zubereitung|anleitung|schritte|zubereitungszeit|arbeitszeit|gesamtzeit|kochzeit|backzeit|ruhezeit|portion|portionen|schwierigkeit|nährwerte|kalorien|pro portion|tipp|hinweis|notiz|drucken|teilen|bewertung|kommentare|werbung|anzeige|für (das|die|den) [\wäöüß ]+)\s*:?\s*$/i;
+const RE_ZUTATEN_KOPF = /^\s*(zutaten|ingredients|einkaufsliste)\b/i;
+const RE_SCHRITTE_KOPF = /^\s*(zubereitung|anleitung|schritte|instructions|method|so wird|so geht)/i;
+/* Gewürze, die üblicherweise ohne Menge dastehen */
+const NUR_PRISE = /^(salz|pfeffer|muskat|zimt|paprikapulver|chili|curry|oregano|basilikum|thymian|rosmarin|kreuzkümmel|kümmel|koriander|cayenne)/i;
+/* Menge am Zeilenanfang lesen. Beherrscht 200 / 1,5 / 1/2 / 1 1/2 / ½
+   und Bereiche wie 2-3 - davon die kleinere Zahl, nachwürzen geht immer. */
+function mengeLesen(text) {
+    let s = String(text);
+    let wert = null;
+    const m = s.match(/^(\d+(?:[.,]\d+)?)(?:\s*(?:-|–|—|bis)\s*\d+(?:[.,]\d+)?)?/);
+    if (m) {
+        wert = parseFloat(m[1].replace(",", "."));
+        s = s.slice(m[0].length);
+        const gemischt = s.match(/^\s*(\d+)\s*\/\s*(\d+)/);
+        const gemischtZeichen = s.match(/^\s*([½¼¾⅓⅔⅛⅜⅝⅞])/);
+        const echterBruch = s.match(/^\s*\/\s*(\d+)/);
+        if (gemischt) {
+            wert += Number(gemischt[1]) / Number(gemischt[2]);
+            s = s.slice(gemischt[0].length);
+        }
+        else if (gemischtZeichen) {
+            wert += BRUCH_ZEICHEN[gemischtZeichen[1]];
+            s = s.slice(gemischtZeichen[0].length);
+        }
+        else if (echterBruch) {
+            /* Die gelesene Zahl war der Zähler: "1/2" */
+            wert = wert / Number(echterBruch[1]);
+            s = s.slice(echterBruch[0].length);
+        }
+    }
+    else {
+        const z = s.match(/^([½¼¾⅓⅔⅛⅜⅝⅞])/);
+        if (z) {
+            wert = BRUCH_ZEICHEN[z[1]];
+            s = s.slice(z[0].length);
+        }
+    }
+    return { wert: wert, rest: s.trim() };
+}
+/* Einheit hinter der Menge lesen. Unbekannte Wörter bleiben stehen und
+   werden Teil des Namens - lieber "Handvoll Nüsse" als eine
+   stillschweigend verschluckte Angabe. */
+function einheitLesen(rest, wert) {
+    const m = rest.match(/^([A-Za-zÄÖÜäöüß]+)\.?(?:\s+|$)/);
+    if (!m)
+        return { einheit: null, wert: wert, rest: rest };
+    const wort = m[1].toLowerCase();
+    const danach = rest.slice(m[0].length).trim();
+    if (EINHEIT_FAKTOR[wort]) {
+        const um = EINHEIT_FAKTOR[wort];
+        return { einheit: um[1], wert: wert === null ? null : wert * um[0], rest: danach };
+    }
+    if (EINHEIT_ALIAS[wort])
+        return { einheit: EINHEIT_ALIAS[wort], wert: wert, rest: danach };
+    return { einheit: null, wert: wert, rest: rest };
+}
+/* Menge als deutsche Zahl, so wie sie im Editor steht */
+function mengeSchreiben(z) {
+    if (z === null || !isFinite(z))
+        return "";
+    return String(Math.round(z * 100) / 100).replace(".", ",");
+}
+/* Eine Zeile zu einer Zutat machen. Gibt null, wenn nichts übrig bleibt. */
+function zutatLesen(zeile) {
+    const s = String(zeile).replace(/^[-–—•*▢□·◦]\s*/, "").trim();
+    if (!s || KEINE_ZUTAT.test(s))
+        return null;
+    const gelesen = mengeLesen(s);
+    let wert = gelesen.wert;
+    let name = gelesen.rest;
+    let einheit = null;
+    if (wert !== null) {
+        const e = einheitLesen(name, wert);
+        einheit = e.einheit;
+        wert = e.wert;
+        name = e.rest;
+    }
+    /* "Zwiebel, fein gewürfelt" wird "Zwiebel" - das Schneiden gehört in
+       den Schritt. Nur kappen, wenn hinter dem Komma wirklich eine
+       Zubereitung steht, sonst wäre "Salz, Pfeffer" halbiert. */
+    if (/,\s*(fein|grob|klein|in\s|zerlassen|weich|zimmerwarm|gehackt|gewürfelt|geschnitten|gerieben|gepresst|abgetropft|optional)/i.test(name))
+        name = name.split(",")[0].trim();
+    name = name.replace(/\s+/g, " ").trim();
+    if (!name)
+        return null;
+    if (einheit === null)
+        einheit = wert === null && NUR_PRISE.test(name) ? "Prise" : "Stk";
+    return { id: uid(), amount: mengeSchreiben(wert), unit: einheit, name: name.slice(0, 60) };
+}
+/* Sieht die Zeile nach einer Zutat aus? Für Texte ohne Zutaten-Überschrift. */
+function wirktWieZutat(zeile) {
+    const s = String(zeile).replace(/^[-–—•*▢□·◦]\s*/, "").trim();
+    if (!s || s.length > 70 || KEINE_ZUTAT.test(s))
+        return false;
+    /* Ein Satzzeichen am Ende heißt fast immer: das ist ein Schritt */
+    if (/[.!?]$/.test(s) && s.length > 30)
+        return false;
+    return mengeLesen(s).wert !== null;
+}
+/* Nummerierung und Aufzählungszeichen vom Schritt abziehen */
+function schrittPutzen(zeile) {
+    return String(zeile)
+        .replace(/^[-–—•*▢□·◦]\s*/, "")
+        .replace(/^(schritt\s*)?\d+\s*[.):]\s*/i, "")
+        .trim();
+}
+const REZEPT_STICHWORTE = [
+    ["backen", /(kuchen|torte|keks|plätzchen|muffin|brot|gebäck|strudel|waffel|brownie)/i],
+    ["getraenk", /(smoothie|saft|tee|kaffee|drink|shake|limonade|punsch|cocktail)/i],
+    ["fruehstueck", /(müsli|porridge|frühstück|pancake|palatschinke|granola|overnight oats|rührei)/i],
+    ["snack", /(riegel|snack|dip|aufstrich|cracker|energy ball)/i],
+    ["beilage", /(salat|beilage|dressing|sauce|soße|püree)/i],
+    ["mealprep", /(meal ?prep|vorkochen)/i],
+];
+/* Der eigentliche Umbau: Text rein, Rezept raus. */
+function rezeptAusText(roh) {
+    const text = String(roh || "").replace(/\r/g, "");
+    const zeilen = text.split("\n").map((z) => z.trim());
+    const gefuellt = zeilen.filter((z) => z);
+    if (!gefuellt.length)
+        return null;
+    /* Titel: die erste Zeile, die kein Abschnittskopf und keine Zutat ist */
+    let titel = "";
+    for (const z of gefuellt) {
+        if (RE_ZUTATEN_KOPF.test(z) || RE_SCHRITTE_KOPF.test(z) || KEINE_ZUTAT.test(z) || wirktWieZutat(z))
+            continue;
+        titel = z.replace(/\s*[-–|·]\s*(rezept|recipe).*$/i, "").slice(0, 80);
+        break;
+    }
+    /* Portionen und Dauer stehen irgendwo, nicht an fester Stelle */
+    let portionen = 0;
+    /* Beide Schreibweisen: "für 4 Portionen" und "Portionen: 4" */
+    const mP = text.match(/(?:für\s+)?(\d+)\s*(?:große[nr]?\s+|kleine[nr]?\s+)?(?:portion|portionen|personen|person)\b/i)
+        || text.match(/(?:portionen|portion|personen|ergibt)\s*:?\s*(\d+)\b/i);
+    if (mP)
+        portionen = Number(mP[1]);
+    /* Dauer: "Gesamtzeit" schlägt alles. Sonst Arbeits- und Backzeit
+       zusammenzählen - bei einem Kuchen sind 15 Minuten Rühren ohne die
+       Stunde im Ofen eine irreführende Angabe. Ruhezeit bleibt draußen,
+       die geht über Nacht und würde die Zahl sprengen. */
+    let dauer = 0;
+    const mGesamt = text.match(/gesamtzeit\D{0,15}?(\d+)\s*(min|minuten|std|stunde|stunden|h)\b/i);
+    if (mGesamt) {
+        dauer = inMinuten(mGesamt[1], mGesamt[2]);
+    }
+    else {
+        const re = /(?:zubereitungszeit|arbeitszeit|kochzeit|backzeit|garzeit)\D{0,15}?(\d+)\s*(min|minuten|std|stunde|stunden|h)\b/gi;
+        let t;
+        while ((t = re.exec(text)))
+            dauer += inMinuten(t[1], t[2]);
+    }
+    if (!dauer) {
+        const irgendeine = text.match(/(\d+)\s*(min|minuten)\b/i);
+        if (irgendeine)
+            dauer = inMinuten(irgendeine[1], irgendeine[2]);
+    }
+    /* Abschnitte suchen */
+    const iZutaten = zeilen.findIndex((z) => z && RE_ZUTATEN_KOPF.test(z));
+    const iSchritte = zeilen.findIndex((z, i) => z && RE_SCHRITTE_KOPF.test(z) && i > iZutaten);
+    let zutatZeilen = [];
+    let schrittZeilen = [];
+    if (iZutaten > -1 && iSchritte > iZutaten) {
+        zutatZeilen = zeilen.slice(iZutaten + 1, iSchritte);
+        schrittZeilen = zeilen.slice(iSchritte + 1);
+    }
+    else if (iZutaten > -1) {
+        /* Nur eine Zutaten-Überschrift: alles danach gilt als Zutat, bis
+           zwei Zeilen hintereinander nicht mehr danach aussehen */
+        const nach = zeilen.slice(iZutaten + 1);
+        let daneben = 0;
+        let schnitt = nach.length;
+        for (let i = 0; i < nach.length; i++) {
+            if (!nach[i])
+                continue;
+            if (wirktWieZutat(nach[i]))
+                daneben = 0;
+            else if (++daneben >= 2) {
+                schnitt = Math.max(0, i - 1);
+                break;
+            }
+        }
+        zutatZeilen = nach.slice(0, schnitt);
+        schrittZeilen = nach.slice(schnitt);
+    }
+    else {
+        /* Gar keine Überschriften: Zeile für Zeile entscheiden */
+        for (const z of gefuellt) {
+            if (z === titel)
+                continue;
+            if (wirktWieZutat(z))
+                zutatZeilen.push(z);
+            else if (z.length > 25)
+                schrittZeilen.push(z);
+        }
+    }
+    const zutaten = [];
+    for (const z of zutatZeilen) {
+        if (!z || RE_SCHRITTE_KOPF.test(z))
+            continue;
+        const zu = zutatLesen(z);
+        if (zu)
+            zutaten.push(zu);
+        if (zutaten.length >= 40)
+            break;
+    }
+    let schritte = schrittZeilen
+        .map(schrittPutzen)
+        .filter((s) => s && s.length > 2 && !KEINE_ZUTAT.test(s) && !RE_SCHRITTE_KOPF.test(s));
+    /* Fließtext in Sätze zerlegen. Viele Seiten schreiben die ganze
+       Zubereitung als einen Absatz; ungeteilt stünde sie als ein
+       einziger Schritt da und wäre beim Kochen unbrauchbar. */
+    schritte = schritte.reduce((raus, s) => {
+        const saetze = s.match(/[^.!?]+[.!?]+/g);
+        if (s.length > 120 && saetze && saetze.length > 1)
+            return raus.concat(saetze.map((t) => t.trim()).filter((t) => t.length > 2));
+        raus.push(s);
+        return raus;
+    }, []);
+    schritte = schritte.slice(0, 30);
+    let kategorie = "hauptgericht";
+    const suchraum = titel + " " + text.slice(0, 400);
+    for (const paar of REZEPT_STICHWORTE) {
+        if (paar[1].test(suchraum)) {
+            kategorie = paar[0];
+            break;
+        }
+    }
+    return {
+        id: uid(),
+        title: titel || "Ohne Titel",
+        cat: RECIPE_CATS[kategorie] ? kategorie : "hauptgericht",
+        portions: Math.max(1, Math.min(50, portionen || 2)),
+        timeMin: Math.max(0, Math.min(600, dauer)),
+        ingredients: zutaten,
+        steps: schritte,
+        kcal: "", kh: "", protein: "", fett: "",
+        createdAt: Date.now(),
+    };
+}
 /* ── Rezepte von Claude erzeugen ────────────────────────────
    Der Schlüssel liegt nur im Browser dieses Geräts, nie im Repository —
    das ist öffentlich. Gesendet wird ausschließlich der Kochwunsch, keine
@@ -1595,6 +1876,8 @@ function PlannerApp() {
     const [recipeEdit, setRecipeEdit] = useState(null);
     /* Tagesvers: offen, solange er nicht weggetippt wurde */
     const [versOffen, setVersOffen] = useState(false);
+    /* Rezept aus eingefügtem Text übernehmen */
+    const [recipePaste, setRecipePaste] = useState(false);
     const [recipeFilter, setRecipeFilter] = useState("alle");
     const [recipeQuery, setRecipeQuery] = useState("");
     const [recipeKi, setRecipeKi] = useState(false);
@@ -3269,7 +3552,7 @@ function PlannerApp() {
                 }))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing, minuten: studyMinuten }))),
-            view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true) })),
+            view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true), onEinfuegen: () => setRecipePaste(true) })),
             view === "bibel" && (React.createElement(BibelView, { heute: tagesVers, gelesen: bibel.gelesen || [], onOeffnen: () => setVersOffen(true), gebet: gebet, gebetHeute: gebetHeute, onGebetNeu: gebetNeu, onGebetAendern: gebetAendern, onGebetWeg: gebetWeg })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
@@ -3320,6 +3603,16 @@ function PlannerApp() {
                 persist((prev) => ({ ...prev, recipes: [r, ...(prev.recipes || [])] }));
                 setRecipeKi(false);
                 /* Gleich zum Nachbessern öffnen - Claude rät bei Mengen manchmal */
+                setRecipeEdit(r.id);
+            },
+        })),
+        recipePaste && (React.createElement(RecipePasteSheet, {
+            onClose: () => setRecipePaste(false),
+            onFertig: (r) => {
+                persist((prev) => ({ ...prev, recipes: [r, ...(prev.recipes || [])] }));
+                setRecipePaste(false);
+                /* Gleich zum Nachbessern öffnen - beim Zerlegen bleibt
+                   erfahrungsgemäß eine Zeile schief */
                 setRecipeEdit(r.id);
             },
         })),
@@ -3374,6 +3667,48 @@ function RecipeAiSheet({ onClose, onFertig }) {
                 React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Dein Schlüssel von console.anthropic.com. Er bleibt im Browser dieses Geräts und wandert nie ins Repository — das ist öffentlich. Gesendet wird nur dein Kochwunsch, nichts aus deinem Planer."),
                 schluessel && (React.createElement("button", { onClick: () => { aiSetKey(""); setSchluessel(""); }, className: "pl-btn px-2.5 py-1 rounded mono text-xs self-start", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } }, "Schlüssel löschen")))),
             React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Das Rezept öffnet sich danach zum Nachbessern. Die Nährwerte rechnet der Planer selbst aus den Zutaten."))));
+}
+/* ════════════════ Rezept einfügen ════════════════
+   Der Text wird im Gerät zerlegt - ohne Netz, ohne Schlüssel, ohne
+   Kosten. Was dabei danebengeht, steht danach im Editor zum
+   Geraderücken; deshalb zeigt das Fenster vorher, was erkannt wurde. */
+function RecipePasteSheet({ onClose, onFertig }) {
+    const [text, setText] = useState("");
+    const erkannt = useMemo(() => (text.trim() ? rezeptAusText(text) : null), [text]);
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+    const genug = erkannt && (erkannt.ingredients.length > 0 || erkannt.steps.length > 0);
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.4)" }, onClick: onClose },
+        React.createElement("div", { className: "pl-sheet pl-scroll overscroll-contain w-full md:max-w-md rounded-t-lg md:rounded-lg p-4 flex flex-col gap-3 overflow-y-auto", style: { maxHeight: "88vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                React.createElement("div", { className: "mono text-xs pl-muted" }, "Rezept einfügen"),
+                React.createElement("button", { onClick: onClose, className: "pl-muted p-1", "aria-label": "Schließen" },
+                    React.createElement(X, { size: 18 }))),
+            React.createElement("textarea", { value: text, onChange: (e) => setText(e.target.value), placeholder: "Rezept hier einfügen — Titel, Zutatenliste und Zubereitung. Die ganze Seite kopieren geht auch.", rows: 8, className: "pl-input px-2 py-2 rounded text-sm", style: { resize: "vertical" }, autoFocus: true }),
+            erkannt && (React.createElement("div", { className: "border-t pl-hair pt-3 flex flex-col gap-1" },
+                React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Erkannt"),
+                React.createElement("div", { className: "text-sm font-medium" }, erkannt.title),
+                React.createElement("div", { className: "mono text-xs pl-muted" },
+                    (RECIPE_CATS[erkannt.cat] || {}).label,
+                    " · ",
+                    erkannt.ingredients.length,
+                    erkannt.ingredients.length === 1 ? " Zutat" : " Zutaten",
+                    " · ",
+                    erkannt.steps.length,
+                    erkannt.steps.length === 1 ? " Schritt" : " Schritte",
+                    " · ",
+                    erkannt.portions,
+                    " Portionen",
+                    erkannt.timeMin ? " · " + durLabel(erkannt.timeMin) : ""),
+                erkannt.ingredients.length > 0 && (React.createElement("div", { className: "mono text-xs pl-muted leading-relaxed pt-1" }, erkannt.ingredients.slice(0, 6).map((z) => [z.amount, z.amount ? z.unit : "", z.name].filter(Boolean).join(" ")).join("  ·  ")
+                    + (erkannt.ingredients.length > 6 ? "  ·  …" : ""))))),
+            text.trim() && !genug && (React.createElement("p", { className: "mono text-xs", style: { color: lift("#A03A5E") } }, "Daraus wird nichts erkannt. Braucht es eine Zutatenliste mit Mengen? Sonst lieber über „Neu\" von Hand anlegen.")),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("button", { onClick: () => genug && onFertig(erkannt), disabled: !genug, className: "px-4 py-2 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)", opacity: genug ? 1 : 0.5 } }, "Rezept eintragen")),
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Der Text bleibt im Gerät - nichts wird verschickt, nichts kostet etwas. Das Rezept öffnet sich danach zum Nachbessern; schau die Mengen kurz durch. Die Nährwerte rechnet der Planer selbst aus den Zutaten."))));
 }
 /* ════════════════ Bibelverse ════════════════ */
 const BIBEL_FARBE = "#12657F"; /* dieselbe Farbe wie die Kategorie "Glauben" */
@@ -3509,7 +3844,7 @@ function BibelView({ heute, gelesen, onOeffnen, gebet, gebetHeute, onGebetNeu, o
         heute && frueher.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted py-2 text-center leading-relaxed" }, "Ab morgen sammeln sich die Verse hier - jeden Tag einer, aus dem Buch der Sprüche."))));
 }
 /* ════════════════ Rezepte ════════════════ */
-function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen, onKi }) {
+function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen, onKi, onEinfuegen }) {
     const suche = query.trim().toLowerCase();
     const gefiltert = recipes.filter((r) => {
         if (filter !== "alle" && r.cat !== filter)
@@ -3523,11 +3858,12 @@ function RecipeList({ recipes, filter, query, onFilter, onQuery, onAdd, onOpen, 
     /* Nur Kategorien anbieten, in denen wirklich etwas liegt */
     const belegt = RECIPE_CAT_KEYS.filter((k) => recipes.some((r) => r.cat === k));
     return (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
-        React.createElement("div", { className: "flex items-center gap-2" },
-            React.createElement("input", { value: query, onChange: (e) => onQuery(e.target.value), placeholder: "Rezept oder Zutat suchen", className: "pl-input px-3 py-2 rounded text-sm flex-1" }),
+        React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+            React.createElement("input", { value: query, onChange: (e) => onQuery(e.target.value), placeholder: "Rezept oder Zutat suchen", className: "pl-input px-3 py-2 rounded text-sm flex-1", style: { minWidth: 140 } }),
             React.createElement("button", { onClick: onAdd, className: "pl-btn px-3 py-2 rounded flex items-center gap-1.5 mono text-xs shrink-0" },
                 React.createElement(Plus, { size: 13 }),
                 "Neu"),
+            onEinfuegen && React.createElement("button", { onClick: onEinfuegen, className: "pl-btn px-3 py-2 rounded mono text-xs shrink-0", title: "Rezept aus der Zwischenablage übernehmen" }, "Einfügen"),
             onKi && React.createElement("button", { onClick: onKi, className: "pl-btn px-3 py-2 rounded mono text-xs shrink-0", title: "Rezept von Claude erzeugen lassen" }, "Claude")),
         belegt.length > 0 && (React.createElement("div", { className: "flex flex-wrap gap-1.5" }, [["alle", "alle"], ...belegt.map((k) => [k, RECIPE_CATS[k].label])].map(([k, lbl]) => {
             const an = filter === k;
