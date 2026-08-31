@@ -543,13 +543,24 @@ const MCP_CALENDAR = "https://calendarmcp.googleapis.com/mcp/v1";
    Für jeden Wochentag eine eigene Liste. Beim Öffnen steht der heutige
    Tag da, die anderen sechs sind einen Tipp entfernt. Gezählt wird von
    Montag (0) bis Sonntag (6) - wie DAY_NAMES, nicht wie getDay(). */
+/* Die Reihenfolge ist der Weg durch ein Gebet: erst nach oben, dann
+   zurück auf das Gegebene, dann nach innen, dann zu anderen, zuletzt
+   zu sich selbst. Umsortieren ändert nur die Anzeige - die Einträge
+   hängen am Schlüssel, nicht an der Position. */
 const GEBET_TEILE = [
     {
-        key: "personen",
-        label: "Personen",
-        frage: "Für wen betest du?",
-        hinweis: "Familie, Freunde, jemand aus dem Studium, jemand mit dem es gerade schwierig ist.",
-        platzhalter: "Name",
+        key: "lob",
+        label: "Lob",
+        frage: "Wer ist Gott für dich?",
+        hinweis: "Nicht was er gegeben hat - das steht im Dank. Hier steht, wer er ist: treu, geduldig, gerecht.",
+        platzhalter: "Wer er ist",
+    },
+    {
+        key: "dank",
+        label: "Dank",
+        frage: "Wofür kannst du danke sagen?",
+        hinweis: "Auch das Kleine vom Tag zählt, nicht nur das Große.",
+        platzhalter: "Wofür",
     },
     {
         key: "gedanken",
@@ -560,11 +571,18 @@ const GEBET_TEILE = [
         mitDagegen: true,
     },
     {
-        key: "dank",
-        label: "Dank",
-        frage: "Wofür kannst du danke sagen?",
-        hinweis: "Auch das Kleine vom Tag zählt, nicht nur das Große.",
-        platzhalter: "Wofür",
+        key: "personen",
+        label: "Personen",
+        frage: "Für wen betest du?",
+        hinweis: "Familie, Freunde, jemand aus dem Studium, jemand mit dem es gerade schwierig ist.",
+        platzhalter: "Name",
+    },
+    {
+        key: "bitte",
+        label: "Bitte für mich",
+        frage: "Was brauchst du selbst?",
+        hinweis: "Prüfungen, Entscheidungen, Kraft, Geduld. Das, was du sonst niemandem sagst.",
+        platzhalter: "Was ich brauche",
     },
 ];
 /* Wochentag einer Uhrzeit, Montag = 0 */
