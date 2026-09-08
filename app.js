@@ -4971,6 +4971,7 @@ function RoutinePanel({ routines, checks, days, weekStart, today, onAdd, onRemov
         }
     };
     return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+        React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Routinen"),
         React.createElement("div", { className: "flex gap-2" },
             React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onKeyDown: (e) => { if (e.key === "Enter" && title.trim()) {
                     onAdd(title.trim(), cat);
@@ -5064,6 +5065,7 @@ function ProjectPanel({ projects, stats, onAdd, onRemove, onTarget, onPlan, onTo
         setTitle("");
     };
     return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
+        React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Projekte"),
         React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "F\u00FCr Vorhaben, die nie \u201Efertig\" sind. Setz ein Wochenziel \u2014 dann siehst du, was liegen bleibt."),
         React.createElement("div", { className: "flex flex-col gap-2" },
             React.createElement("input", { value: title, onChange: (e) => setTitle(e.target.value), onKeyDown: (e) => e.key === "Enter" && submit(), placeholder: "z. B. Tutoring aufbauen", className: "pl-input px-2 py-1.5 rounded text-sm" }),
@@ -5115,7 +5117,10 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) 
     const blockiert = recht === "denied";
     const an = notify.an && recht === "granted";
     return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
-        React.createElement("div", { className: "mono text-xs pl-muted leading-relaxed" }, "Erinnert dich kurz vor einem Termin — ohne fremden Dienst, direkt auf diesem Gerät."),
+        React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Erinnerungen"),
+        React.createElement("div", { className: "mono text-xs pl-muted leading-relaxed" }, pushMoeglich()
+            ? "Erinnert dich kurz vor einem Termin — auch dann, wenn der Planer geschlossen ist."
+            : "Erinnert dich kurz vor einem Termin, solange der Planer läuft."),
         nichtMoeglich && (React.createElement("p", { className: "mono text-xs", style: { color: lift("#8A4E1C") } }, "Dieser Browser kann keine Hinweise anzeigen.")),
         blockiert && (React.createElement("p", { className: "mono text-xs", style: { color: lift("#8A4E1C") } }, "Hinweise sind für diese Seite gesperrt. Das lässt sich nur in den Browser-Einstellungen wieder freigeben — beim Schloss-Symbol neben der Adresse.")),
         !nichtMoeglich && !blockiert && (React.createElement(React.Fragment, null,
@@ -5175,7 +5180,7 @@ function CatPanel({ cats, onField, onAdd, onRemove }) {
     const [offen, setOffen] = useState(null);
     const keys = Object.keys(cats);
     return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
-        React.createElement("div", { className: "mono text-xs pl-muted" }, "Kategorien"),
+        React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Kategorien"),
         React.createElement("div", { className: "flex flex-col gap-2" }, keys.map((k) => (React.createElement("div", { key: k },
             React.createElement("div", { className: "flex items-center gap-2" },
                 React.createElement("button", { onClick: () => setOffen(offen === k ? null : k), className: "w-6 h-6 rounded-sm shrink-0", style: { background: cats[k].color, border: "1px solid rgba(0,0,0,.15)" }, "aria-label": "Farbe \u00E4ndern" }),
