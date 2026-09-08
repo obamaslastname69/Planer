@@ -1616,6 +1616,214 @@ async function driveFindFile() {
     driveFileId = data.files && data.files[0] ? data.files[0].id : null;
     return driveFileId;
 }
+/* ── Stände zusammenführen ──────────────────────────────────
+   Früher entschied ein einziger Zeitstempel für die gesamten Daten, wer
+   gewinnt - und der Verlierer war komplett weg. Trug man am selben Tag
+   auf Handy und Tablet etwas ein, löschte das später abgeglichene Gerät
+   die Einträge des anderen.
+
+   Jetzt trägt jeder Eintrag seinen eigenen Zeitstempel (_t), und für
+   gelöschte bleibt eine Notiz in _weg stehen. Ohne diese Notizen kämen
+   gelöschte Einträge beim Zusammenführen vom anderen Gerät zurück. */
+const ID_LISTEN = ["blocks", "todos", "routines", "projects", "recipes"];
+const WEG_FRIST = 60 * 86400000; /* Notizen nach 60 Tagen wegräumen */
+/* Vergleich, der die Reihenfolge der Schlüssel nicht mitzählt und den
+   Zeitstempel selbst ausklammert - sonst gälte jeder Eintrag als geändert. */
+function stabil(o) {
+    if (o === null || typeof o !== "object")
+        return JSON.stringify(o);
+    if (Array.isArray(o))
+        return "[" + o.map(stabil).join(",") + "]";
+    return "{" + Object.keys(o).filter((k) => k !== "_t").sort()
+        .map((k) => JSON.stringify(k) + ":" + stabil(o[k])).join(",") + "}";
+}
+/* Inhaltsvergleich zweier Stände, ohne die Verwaltungsfelder */
+function inhaltGleich(a, b) {
+    const putzen = (o) => {
+        const k = { ...(o || {}) };
+        delete k.updatedAt;
+        return k;
+    };
+    return stabil(putzen(a)) === stabil(putzen(b));
+}
+/* Alle Einträge mit Kennung einsammeln - auch die in der Gebetsliste,
+   die eine Ebene tiefer liegen. */
+function gebetEintraege(gebet) {
+    const raus = [];
+    for (const tag of Object.keys(gebet || {})) {
+        const derTag = gebet[tag] || {};
+        for (const rubrik of Object.keys(derTag)) {
+            for (const e of derTag[rubrik] || [])
+                raus.push(e);
+        }
+    }
+    return raus;
+}
+/* Geänderte Einträge stempeln, entfernte vermerken. Zentral an einer
+   Stelle, damit nicht jede der vielen Änderungsfunktionen daran denken
+   muss - vergäße eine es, ginge genau dort wieder etwas verloren. */
+function stempeln(vorher, nachher, jetzt) {
+    const ergebnis = { ...nachher };
+    const weg = (nachher._weg || []).slice();
+    const wegNach = {};
+    for (const w of weg)
+        wegNach[w.id] = w;
+    const merkeWeg = (id) => {
+        if (!id)
+            return;
+        if (wegNach[id])
+            wegNach[id]._t = jetzt;
+        else {
+            const n = { id: id, _t: jetzt };
+            wegNach[id] = n;
+            weg.push(n);
+        }
+    };
+    const listeStempeln = (alt, neu) => {
+        const altNach = {};
+        for (const e of alt || [])
+            if (e && e.id)
+                altNach[e.id] = e;
+        const gestempelt = (neu || []).map((e) => {
+            if (!e || !e.id)
+                return e;
+            const a = altNach[e.id];
+            if (a && stabil(a) === stabil(e))
+                return a._t ? { ...e, _t: a._t } : e;
+            return { ...e, _t: jetzt };
+        });
+        const neuNach = {};
+        for (const e of neu || [])
+            if (e && e.id)
+                neuNach[e.id] = true;
+        for (const a of alt || [])
+            if (a && a.id && !neuNach[a.id])
+                merkeWeg(a.id);
+        return gestempelt;
+    };
+    for (const feld of ID_LISTEN) {
+        if (!Array.isArray(nachher[feld]))
+            continue;
+        ergebnis[feld] = listeStempeln((vorher || {})[feld], nachher[feld]);
+    }
+    /* Gebetsliste: dieselbe Logik je Wochentag und Rubrik */
+    if (nachher.gebet && typeof nachher.gebet === "object") {
+        const altGebet = (vorher || {}).gebet || {};
+        const neuGebet = {};
+        for (const tag of Object.keys(nachher.gebet)) {
+            const derTag = nachher.gebet[tag] || {};
+            neuGebet[tag] = {};
+            for (const rubrik of Object.keys(derTag)) {
+                neuGebet[tag][rubrik] = listeStempeln(((altGebet[tag] || {})[rubrik]) || [], derTag[rubrik]);
+            }
+        }
+        /* Ganze Tage oder Rubriken, die verschwunden sind, ebenfalls vermerken */
+        for (const e of gebetEintraege(altGebet)) {
+            const nochDa = gebetEintraege(neuGebet).some((n) => n && n.id === e.id);
+            if (e && e.id && !nochDa)
+                merkeWeg(e.id);
+        }
+        ergebnis.gebet = neuGebet;
+    }
+    ergebnis._weg = weg.filter((w) => jetzt - (w._t || 0) < WEG_FRIST);
+    return ergebnis;
+}
+/* Eine Liste aus beiden Ständen: je Kennung der neuere Eintrag, es sei
+   denn, er wurde nachweislich später gelöscht. */
+function listeMischen(la, lb, weg, standA, standB) {
+    const nach = {};
+    const reihe = [];
+    const rein = (liste, standAt) => {
+        for (const e of liste || []) {
+            if (!e || !e.id)
+                continue;
+            const t = e._t || standAt || 0;
+            if (!nach[e.id]) {
+                nach[e.id] = { e: e, t: t };
+                reihe.push(e.id);
+            }
+            else if (t > nach[e.id].t)
+                nach[e.id] = { e: e, t: t };
+        }
+    };
+    rein(la, standA);
+    rein(lb, standB);
+    const raus = [];
+    for (const id of reihe) {
+        const treffer = nach[id];
+        /* Gelöscht gewinnt nur, wenn die Löschung nicht älter ist als der
+           Eintrag - sonst verlöre eine spätere Neuanlage gegen eine alte
+           Notiz. */
+        if (weg[id] !== undefined && weg[id] >= treffer.t)
+            continue;
+        raus.push(treffer.e);
+    }
+    return raus;
+}
+/* Zwei Stände zu einem verschmelzen, ohne dass eine Seite verschwindet */
+function zusammenfuehren(a, b) {
+    const aA = (a && a.updatedAt) || 0;
+    const bA = (b && b.updatedAt) || 0;
+    const neuer = aA >= bA ? a : b;
+    const aelter = aA >= bA ? b : a;
+    /* Einzelwerte wie Erscheinungsbild, Erinnerungen, Lernplan und
+       Trainingsplan: der neuere Stand gewinnt. Die ändern sich selten,
+       und für sie lohnt der Aufwand nicht. */
+    const erg = { ...aelter, ...neuer };
+    const weg = {};
+    for (const quelle of [a, b]) {
+        for (const w of (quelle && quelle._weg) || []) {
+            if (!w || !w.id)
+                continue;
+            if (weg[w.id] === undefined || (w._t || 0) > weg[w.id])
+                weg[w.id] = w._t || 0;
+        }
+    }
+    for (const feld of ID_LISTEN)
+        erg[feld] = listeMischen((a || {})[feld], (b || {})[feld], weg, aA, bA);
+    /* Tageszettel: je Schlüssel, nicht als Ganzes. So überleben ein am
+       Handy und ein am Tablet abgehakter Tag nebeneinander. */
+    for (const feld of ["checks", "materialized", "studyDone"]) {
+        erg[feld] = { ...((aelter || {})[feld] || {}), ...((neuer || {})[feld] || {}) };
+    }
+    /* Gebetsliste je Wochentag und Rubrik */
+    const gebetErg = {};
+    const tage = {};
+    for (const quelle of [a, b])
+        for (const tag of Object.keys((quelle && quelle.gebet) || {}))
+            tage[tag] = true;
+    for (const tag of Object.keys(tage)) {
+        const ta = ((a || {}).gebet || {})[tag] || {};
+        const tb = ((b || {}).gebet || {})[tag] || {};
+        const rubriken = {};
+        for (const r of Object.keys(ta))
+            rubriken[r] = true;
+        for (const r of Object.keys(tb))
+            rubriken[r] = true;
+        gebetErg[tag] = {};
+        for (const r of Object.keys(rubriken))
+            gebetErg[tag][r] = listeMischen(ta[r], tb[r], weg, aA, bA);
+    }
+    erg.gebet = gebetErg;
+    /* Gelesene Tagesverse: je Datum genau einer, beide Seiten behalten */
+    const verse = {};
+    for (const quelle of [a, b])
+        for (const g of ((quelle && quelle.bibel) || {}).gelesen || [])
+            if (g && g.datum)
+                verse[g.datum] = g;
+    const zuletztA = ((a || {}).bibel || {}).zuletzt || "";
+    const zuletztB = ((b || {}).bibel || {}).zuletzt || "";
+    erg.bibel = {
+        zuletzt: zuletztA > zuletztB ? zuletztA : zuletztB,
+        gelesen: Object.keys(verse).sort((x, y) => (x < y ? 1 : -1)).map((d) => verse[d]),
+    };
+    const jetzt = Date.now();
+    erg._weg = Object.keys(weg)
+        .filter((id) => jetzt - weg[id] < WEG_FRIST)
+        .map((id) => ({ id: id, _t: weg[id] }));
+    erg.updatedAt = Math.max(aA, bA);
+    return erg;
+}
 async function driveLoad() {
     const id = await driveFindFile();
     if (!id)
@@ -2035,8 +2243,12 @@ function PlannerApp() {
                     undoRef.current.shift();
                 setCanUndo(true);
             }
+            const jetzt = Date.now();
             const base = typeof nextOrFn === "function" ? nextOrFn(prev) : nextOrFn;
-            const next = { ...base, updatedAt: Date.now() };
+            /* Jeden geänderten Eintrag stempeln und jeden entfernten vermerken,
+               damit der Abgleich später Eintrag für Eintrag zusammenführen kann
+               statt den ganzen Stand des anderen Geräts wegzuwerfen. */
+            const next = { ...stempeln(prev, base, jetzt), updatedAt: jetzt };
             window.storage.set(STORE_KEY, JSON.stringify(next)).catch(() => { });
             if (cloudRef.current.armed) {
                 clearTimeout(cloudRef.current.timer);
@@ -2045,9 +2257,27 @@ function PlannerApp() {
                    fremde Stand über die eigenen frischen Änderungen */
                 cloudRef.current.offen = true;
                 cloudRef.current.timer = setTimeout(() => {
-                    driveSave(next)
-                        .then(() => {
+                    /* Erst lesen, dann zusammenführen, dann schreiben. Ein
+                       blindes Überschreiben würde löschen, was das andere Gerät
+                       in der Zwischenzeit eingetragen hat. */
+                    driveLoad()
+                        .then((fremd) => {
+                        const ziel = fremd
+                            ? zusammenfuehren(next, { ...DEFAULT_STATE, ...fremd })
+                            : next;
+                        return driveSave(ziel).then(() => ziel);
+                    })
+                        .then((ziel) => {
                         cloudRef.current.offen = false;
+                        /* Kam vom anderen Gerät etwas mit, hier hereinnehmen -
+                           gegen den frischesten Stand, nicht gegen den von vorhin. */
+                        if (!inhaltGleich(ziel, next)) {
+                            setState((jetzigerStand) => {
+                                const zusammen = zusammenfuehren(jetzigerStand, ziel);
+                                window.storage.set(STORE_KEY, JSON.stringify(zusammen)).catch(() => { });
+                                return zusammen;
+                            });
+                        }
                         setCloud({ state: "ok", msg: "gesichert " + new Date().toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" }) });
                     })
                         .catch((e) => {
@@ -3019,25 +3249,24 @@ function PlannerApp() {
                 return;
             }
 
-            /* Ist hier praktisch nichts eingetragen, gewinnt immer die Cloud */
-            if (inhaltLeer(state) && !inhaltLeer(remote)) {
-                persistLocal({ ...DEFAULT_STATE, ...remote });
-                setCloud({ state: "ok", msg: "Stand vom " + zeit(remoteAt) + " geladen" });
-                cloudRef.current.armed = true;
-                return;
-            }
-
-            if (remoteAt > localAt) {
-                persistLocal({ ...DEFAULT_STATE, ...remote });
-                setCloud({ state: "ok", msg: "geladen — Stand " + zeit(remoteAt) });
-            }
-            else if (localAt > remoteAt) {
-                await driveSave({ ...state, updatedAt: localAt });
-                setCloud({ state: "ok", msg: "hochgeladen — Cloud war " + zeit(remoteAt) });
-            }
-            else {
-                setCloud({ state: "ok", msg: "gleicher Stand" });
-            }
+            /* Beide Stände zusammenführen, statt einen davon wegzuwerfen.
+               Früher entschied hier allein der jüngere Zeitstempel - wer am
+               selben Tag auf zwei Geräten etwas eintrug, verlor eine Seite. */
+            const fremd = { ...DEFAULT_STATE, ...remote };
+            const gemischt = zusammenfuehren(state, fremd);
+            const hierNeu = !inhaltGleich(gemischt, state);
+            const dortNeu = !inhaltGleich(gemischt, fremd);
+            if (hierNeu)
+                persistLocal(gemischt);
+            if (dortNeu)
+                await driveSave(gemischt);
+            setCloud({
+                state: "ok",
+                msg: hierNeu && dortNeu ? "zusammengeführt — beide Geräte hatten Neues"
+                    : hierNeu ? "geladen — Stand " + zeit(remoteAt)
+                        : dortNeu ? "hochgeladen — Cloud war " + zeit(remoteAt)
+                            : "gleicher Stand",
+            });
             cloudRef.current.armed = true;
         }
         catch (e) {
@@ -3049,8 +3278,17 @@ function PlannerApp() {
        Abgleich sichtbar ausgeführt statt still — der Nutzer hat ihn ja
        angestoßen und wartet darauf. */
     useEffect(() => {
-        if (!loaded || !gcConfigured() || !gcHasToken())
+        if (!loaded || !gcConfigured())
             return;
+        if (!gcHasToken()) {
+            /* Der Google-Zugang gilt nur eine Stunde. Danach wurde früher
+               stillschweigend nichts mehr hochgeladen - alles Eingetragene
+               blieb unbemerkt auf dem Gerät liegen. Von selbst anmelden geht
+               nicht: als installierte App verlässt das die Seite. Also sagen
+               wir es wenigstens deutlich. */
+            setCloud({ state: "schlaeft", msg: "Abgleich schläft — zum Anmelden antippen" });
+            return;
+        }
         const zurueckVonAnmeldung = gcAbsichtNachRueckkehr === "sync";
         gcAbsichtNachRueckkehr = "";
         autoSyncRef.current = Date.now();
@@ -3070,7 +3308,19 @@ function PlannerApp() {
         const versuch = () => {
             if (document.visibilityState !== "visible")
                 return;
-            if (!gcHasToken() || cloudRef.current.offen)
+            if (!gcHasToken()) {
+                /* Zugang abgelaufen: nichts mehr hochladen (das würde die App
+                   zur Google-Anmeldung verlassen), aber sichtbar machen. */
+                cloudRef.current.armed = false;
+                setCloud((c) => (c && c.state === "schlaeft"
+                    ? c
+                    : { state: "schlaeft", msg: "Abgleich schläft — zum Anmelden antippen" }));
+                return;
+            }
+            /* Zugang wieder gültig: Hochladen scharf schalten, damit auch das
+               mitgeht, was in der Zwischenzeit liegen geblieben ist. */
+            cloudRef.current.armed = true;
+            if (cloudRef.current.offen)
                 return;
             const jetzt = Date.now();
             if (jetzt - autoSyncRef.current < MINDESTABSTAND)
@@ -3485,7 +3735,7 @@ function PlannerApp() {
                 React.createElement("button", { onClick: () => syncCloud(false), disabled: cloud.state === "busy", className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
                     React.createElement(RefreshCw, { size: 12, className: cloud.state === "busy" ? "animate-spin" : "" }),
                     "Ger\u00E4te abgleichen"),
-                cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : "var(--muted)" } }, cloud.msg)),
+                cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : cloud.state === "schlaeft" ? lift("#8A4E1C") : "var(--muted)" } }, cloud.msg)),
                 /* Ausweg, falls doch mal ein anderes Konto gebraucht wird —
                    sonst käme man am gemerkten nicht mehr vorbei */
                 kontoName && (React.createElement("button", {

@@ -245,6 +245,96 @@ window.PLANER_CLIENT_ID = "";
   gleich("Montag ist Tag 0", gebetTagNr(new Date(2026, 7, 31)), 0);
   gleich("Sonntag ist Tag 6", gebetTagNr(new Date(2026, 8, 6)), 6);
 
+  /* ── Stände zusammenführen ──
+     Der heikelste Teil der App: hier kann echter Datenverlust entstehen.
+     Deshalb wird jeder Fall geprüft, der schon einmal schiefging. */
+  gruppe("Stände zusammenführen");
+
+  /* Handy und Tablet tragen am selben Tag je ein To-do ein. Früher
+     gewann der jüngere Zeitstempel und löschte das andere mit. */
+  var handy = {
+    updatedAt: 1000,
+    todos: [{ id: "a", title: "vom Handy", _t: 1000 }],
+    blocks: [], routines: [], projects: [], recipes: [], gebet: {}, _weg: [],
+  };
+  var tablet = {
+    updatedAt: 2000,
+    todos: [{ id: "b", title: "vom Tablet", _t: 2000 }],
+    blocks: [], routines: [], projects: [], recipes: [], gebet: {}, _weg: [],
+  };
+  var beide = zusammenfuehren(handy, tablet);
+  gleich("beide To-dos überleben", beide.todos.length, 2);
+  pruefe("das ältere ist noch da",
+    beide.todos.some(function (t) { return t.id === "a"; }),
+    "genau das ging vorher verloren");
+  pruefe("das neuere ist auch da",
+    beide.todos.some(function (t) { return t.id === "b"; }));
+  pruefe("Zusammenführen ist richtungsunabhängig",
+    JSON.stringify(zusammenfuehren(tablet, handy).todos.map(function (t) { return t.id; }).sort())
+    === JSON.stringify(["a", "b"]));
+
+  /* Derselbe Eintrag auf beiden Seiten geändert: der neuere gewinnt */
+  var linksNeu = { updatedAt: 5000, todos: [{ id: "x", title: "neu", _t: 5000 }], _weg: [] };
+  var rechtsAlt = { updatedAt: 9000, todos: [{ id: "x", title: "alt", _t: 1000 }], _weg: [] };
+  gleich("jüngerer Eintrag gewinnt, nicht der jüngere Stand",
+    zusammenfuehren(linksNeu, rechtsAlt).todos[0].title, "neu");
+
+  /* Löschen muss halten - sonst kommt Gelöschtes vom anderen Gerät zurück */
+  var geloescht = { updatedAt: 3000, todos: [], _weg: [{ id: "a", _t: 3000 }] };
+  gleich("Gelöschtes kommt nicht zurück",
+    zusammenfuehren(geloescht, handy).todos.length, 0);
+  var neuAngelegt = { updatedAt: 9000, todos: [{ id: "a", title: "wieder da", _t: 9000 }], _weg: [] };
+  gleich("später neu angelegt schlägt alte Löschnotiz",
+    zusammenfuehren(geloescht, neuAngelegt).todos.length, 1);
+
+  /* Tageszettel je Schlüssel, nicht als Ganzes */
+  var checksA = { updatedAt: 1000, checks: { "2026-08-31": ["r1"] }, _weg: [] };
+  var checksB = { updatedAt: 2000, checks: { "2026-09-01": ["r2"] }, _weg: [] };
+  var checksBeide = zusammenfuehren(checksA, checksB).checks;
+  pruefe("abgehakte Tage beider Geräte überleben",
+    checksBeide["2026-08-31"] && checksBeide["2026-09-01"],
+    "bekommen: " + JSON.stringify(checksBeide));
+
+  /* Gebetsliste liegt eine Ebene tiefer */
+  var gebetA = { updatedAt: 1000, gebet: { 0: { dank: [{ id: "g1", text: "A", _t: 1000 }] } }, _weg: [] };
+  var gebetB = { updatedAt: 2000, gebet: { 0: { dank: [{ id: "g2", text: "B", _t: 2000 }] } }, _weg: [] };
+  gleich("Gebetseinträge beider Geräte überleben",
+    zusammenfuehren(gebetA, gebetB).gebet[0].dank.length, 2);
+
+  /* Gelesene Verse: je Datum einer, nichts doppelt */
+  var verseA = { updatedAt: 1000, bibel: { zuletzt: "2026-08-30", gelesen: [{ datum: "2026-08-30", kap: 1, vers: 1, text: "A" }] }, _weg: [] };
+  var verseB = { updatedAt: 2000, bibel: { zuletzt: "2026-08-31", gelesen: [{ datum: "2026-08-31", kap: 2, vers: 2, text: "B" }] }, _weg: [] };
+  var verseBeide = zusammenfuehren(verseA, verseB).bibel;
+  gleich("beide Tagesverse bleiben", verseBeide.gelesen.length, 2);
+  gleich("zuletzt ist der spätere Tag", verseBeide.zuletzt, "2026-08-31");
+
+  /* Alte Daten ohne Stempel dürfen nicht stolpern */
+  var altA = { updatedAt: 1000, todos: [{ id: "alt1", title: "ohne Stempel" }] };
+  var altB = { updatedAt: 2000, todos: [{ id: "alt2", title: "auch ohne" }] };
+  gleich("Daten ohne Zeitstempel funktionieren weiter",
+    zusammenfuehren(altA, altB).todos.length, 2);
+  pruefe("leere Seite übernimmt die volle",
+    zusammenfuehren({ updatedAt: 0 }, tablet).todos.length === 1);
+
+  /* Stempeln: geändert bekommt neue Zeit, unverändert behält die alte */
+  var vorher = { todos: [{ id: "s1", title: "eins", _t: 100 }, { id: "s2", title: "zwei", _t: 100 }], _weg: [] };
+  var nachher = { todos: [{ id: "s1", title: "eins", _t: 100 }, { id: "s2", title: "zwei geändert", _t: 100 }], _weg: [] };
+  var gestempelt = stempeln(vorher, nachher, 500);
+  gleich("unveränderter Eintrag behält seinen Stempel", gestempelt.todos[0]._t, 100);
+  gleich("geänderter Eintrag bekommt den neuen", gestempelt.todos[1]._t, 500);
+  var entfernt = stempeln(vorher, { todos: [{ id: "s1", title: "eins", _t: 100 }], _weg: [] }, 700);
+  pruefe("entfernter Eintrag hinterlässt eine Notiz",
+    (entfernt._weg || []).some(function (w) { return w.id === "s2" && w._t === 700; }),
+    "bekommen: " + JSON.stringify(entfernt._weg));
+
+  /* Inhaltsvergleich darf sich an Verwaltungsfeldern nicht stören */
+  pruefe("inhaltGleich ignoriert updatedAt",
+    inhaltGleich({ todos: [], updatedAt: 1 }, { todos: [], updatedAt: 999 }));
+  pruefe("inhaltGleich erkennt echten Unterschied",
+    !inhaltGleich({ todos: [{ id: "a" }] }, { todos: [] }));
+  pruefe("stabil ignoriert die Reihenfolge der Schlüssel",
+    stabil({ a: 1, b: 2 }) === stabil({ b: 2, a: 1 }));
+
   /* ── Ausgabe ── */
   var html = "";
   gruppen.forEach(function (g) {
