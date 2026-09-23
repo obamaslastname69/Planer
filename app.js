@@ -502,6 +502,59 @@ async function pushAbmelden() {
     }
     catch (e) { }
 }
+/* Eine Nachricht über den Dienst anfordern. Prüft die ganze Kette: ob dieses
+   Gerät angemeldet ist, ob der Schlüssel stimmt und ob die Zustellung klappt.
+   "Hinweis ausprobieren" daneben zeigt nur lokal etwas an und berührt den
+   Dienst gar nicht - deshalb braucht es beides. */
+async function pushDienstTesten() {
+    if (!pushMoeglich())
+        return { ok: false, grund: "Kein Push-Dienst hinterlegt" };
+    /* serviceWorker.ready löst nie auf, wenn der Hintergrunddienst nicht
+       startet - ohne Frist drehte sich der Knopf dann ewig und sagte nichts. */
+    const reg = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, ab) => setTimeout(() => ab(new Error("Zeit abgelaufen")), 5000)),
+    ]).catch(() => null);
+    if (!reg)
+        return { ok: false, grund: "Der Hintergrunddienst der App ist nicht bereit — App einmal ganz schließen und neu öffnen" };
+    const sub = await reg.pushManager.getSubscription().catch(() => null);
+    if (!sub)
+        return { ok: false, grund: "Dieses Gerät ist nicht angemeldet — Erinnerungen aus- und wieder einschalten" };
+    let antwort;
+    try {
+        antwort = await fetch(PUSH_DIENST.replace(/\/$/, "") + "/test", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+    }
+    catch (e) {
+        return { ok: false, grund: "Dienst nicht erreichbar" };
+    }
+    let daten = null;
+    try {
+        daten = await antwort.json();
+    }
+    catch (e) { }
+    if (antwort.status === 404)
+        return { ok: false, grund: "Beim Dienst nicht angemeldet — Erinnerungen aus- und wieder einschalten" };
+    if (!antwort.ok || (daten && daten.ok === false))
+        return { ok: false, grund: (daten && daten.grund) || ("Dienst antwortet mit " + antwort.status) };
+    return { ok: true };
+}
+/* Auskunft des Dienstes holen - sagt vor allem, ob der Cron-Auslöser läuft */
+async function pushDienstStatus() {
+    if (!PUSH_DIENST)
+        return null;
+    try {
+        const a = await fetch(PUSH_DIENST.replace(/\/$/, "") + "/status");
+        if (!a.ok)
+            return null;
+        return await a.json();
+    }
+    catch (e) {
+        return null;
+    }
+}
 function klingel(mal) {
     try {
         tonFreischalten();
@@ -5366,6 +5419,42 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) 
     const nichtMoeglich = recht === "unsupported";
     const blockiert = recht === "denied";
     const an = notify.an && recht === "granted";
+    const [pruefung, setPruefung] = useState("");
+    const [befund, setBefund] = useState(null);
+    /* Geht den ganzen Weg durch: erst fragen, ob der Dienst überhaupt
+       nachsieht (ohne Cron-Auslöser kann nie etwas kommen), dann eine
+       echte Nachricht anfordern. */
+    const dienstPruefen = async () => {
+        setPruefung("laeuft");
+        setBefund(null);
+        const status = await pushDienstStatus();
+        if (status && status.cronLaeuft === false) {
+            setPruefung("");
+            setBefund({
+                gut: false,
+                text: "Der Dienst läuft, sieht aber nie nach: Der Cron-Auslöser fehlt. "
+                    + "In Cloudflare unter Settings → Trigger Events → Add → Cron Trigger "
+                    + "mit „* * * * *“ anlegen. Ohne ihn kann keine Erinnerung ankommen.",
+            });
+            return;
+        }
+        if (status && !status.schluesselHinterlegt) {
+            setPruefung("");
+            setBefund({ gut: false, text: "Beim Dienst fehlt der private Schlüssel (VAPID_JWK)." });
+            return;
+        }
+        const e = await pushDienstTesten();
+        setPruefung("");
+        if (!e.ok) {
+            setBefund({ gut: false, text: e.grund });
+            return;
+        }
+        setBefund({
+            gut: true,
+            text: "Abgeschickt. Kommt gleich nichts an, ist die Zustellung das Problem — "
+                + "nicht die Einrichtung.",
+        });
+    };
     return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
         React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Erinnerungen"),
         React.createElement("div", { className: "mono text-xs pl-muted leading-relaxed" }, pushMoeglich()
@@ -5388,7 +5477,12 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) 
                                 border: `1px solid ${gewaehlt ? "var(--ink)" : "var(--line)"}`,
                             } }, m === 0 ? "punktgenau" : m + " min"));
                     }))),
-                React.createElement("button", { onClick: onTest, className: "pl-btn px-3 py-2 rounded mono text-xs self-start" }, "Hinweis ausprobieren"),
+                React.createElement("div", { className: "flex flex-wrap gap-2" },
+                    React.createElement("button", { onClick: onTest, className: "pl-btn px-3 py-2 rounded mono text-xs" }, "Hinweis ausprobieren"),
+                    pushMoeglich() && (React.createElement("button", { onClick: dienstPruefen, disabled: pruefung === "laeuft", className: "pl-btn px-3 py-2 rounded mono text-xs" }, pruefung === "laeuft" ? "prüft…" : "Dienst prüfen"))),
+                /* Der lokale Hinweis sagt nichts über den Dienst aus. Diese
+                   Prüfung geht den ganzen Weg: Anmeldung, Schlüssel, Cron. */
+                befund && (React.createElement("p", { className: "mono text-xs leading-relaxed", style: { color: befund.gut ? lift("#1E6E5A") : lift("#8A4E1C") } }, befund.text)),
                 /* Was die Technik hergibt, offen gesagt - damit niemand auf
                    einen Weckruf wartet, der nicht kommen kann */
                 pushMoeglich()

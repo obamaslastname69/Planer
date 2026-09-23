@@ -102,6 +102,60 @@ export default {
         { headers: { ...cors, "content-type": "application/json" } });
     }
 
+    /* Auskunft zur Fehlersuche. Verrät bewusst keine Endpunkte — die sind
+       so gut wie ein Schlüssel: wer sie hat, kann Nachrichten schicken.
+       Die wichtigste Zeile ist "cronLaeuft": steht dort false, wurde der
+       Cron-Auslöser nie eingerichtet, und dann kann nie etwas ankommen. */
+    if (pfad === "/status") {
+      const liste = await env.PLANER.list();
+      const geraete = liste.keys.filter((k) => !k.name.startsWith("_"));
+      let offeneZeiten = 0;
+      let naechste = null;
+      for (const eintrag of geraete) {
+        const roh = await env.PLANER.get(eintrag.name);
+        if (!roh) continue;
+        let satz;
+        try { satz = JSON.parse(roh); } catch (e) { continue; }
+        const zeiten = satz.zeiten || [];
+        offeneZeiten += zeiten.length;
+        for (const z of zeiten)
+          if (z > Date.now() && (naechste === null || z < naechste)) naechste = z;
+      }
+      const letzterLauf = Number(await env.PLANER.get("_letzterLauf")) || 0;
+      const her = letzterLauf ? Math.round((Date.now() - letzterLauf) / 1000) : null;
+      return new Response(JSON.stringify({
+        angemeldeteGeraete: geraete.length,
+        offeneWeckzeiten: offeneZeiten,
+        naechsteWeckzeitIn: naechste ? Math.round((naechste - Date.now()) / 60000) + " Minuten" : null,
+        cronLaeuft: her !== null && her < 300,
+        letzterCronLaufVorSekunden: her,
+        schluesselHinterlegt: !!env.VAPID_JWK,
+        oeffentlicherSchluesselHinterlegt: !!env.VAPID_PUBLIC,
+      }, null, 2), { headers: { ...cors, "content-type": "application/json" } });
+    }
+
+    /* Sofort eine Nachricht schicken, ohne auf eine Weckzeit zu warten.
+       Verlangt den eigenen Endpunkt — nur wer ihn kennt, also das Gerät
+       selbst, kann sich damit eine Nachricht schicken. */
+    if (pfad === "/test" && anfrage.method === "POST") {
+      const daten = await anfrage.json().catch(() => null);
+      if (!daten || !daten.endpoint)
+        return new Response("Endpunkt fehlt", { status: 400, headers: cors });
+      const id = await kennung(daten.endpoint);
+      if (!(await env.PLANER.get(id)))
+        return new Response(JSON.stringify({ ok: false, grund: "Dieses Gerät ist nicht angemeldet" }),
+          { status: 404, headers: { ...cors, "content-type": "application/json" } });
+      let antwort;
+      try {
+        antwort = await pushSenden(daten.endpoint, env);
+      } catch (e) {
+        return new Response(JSON.stringify({ ok: false, grund: String(e && e.message || e) }),
+          { status: 500, headers: { ...cors, "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ ok: antwort.ok, status: antwort.status }),
+        { headers: { ...cors, "content-type": "application/json" } });
+    }
+
     return new Response("Push-Dienst des Wochenplaners", { headers: cors });
   },
 
@@ -109,8 +163,12 @@ export default {
   async scheduled(ereignis, env, ctx) {
     ctx.waitUntil((async () => {
       const jetzt = Date.now();
+      /* Festhalten, dass der Cron läuft — sonst lässt sich von außen nicht
+         unterscheiden, ob nichts fällig war oder ob nie jemand nachsieht. */
+      await env.PLANER.put("_letzterLauf", String(jetzt), { expirationTtl: 7 * 86400 });
       const liste = await env.PLANER.list();
       for (const eintrag of liste.keys) {
+        if (eintrag.name.startsWith("_")) continue; /* Verwaltungseinträge */
         const roh = await env.PLANER.get(eintrag.name);
         if (!roh) continue;
         let satz;
