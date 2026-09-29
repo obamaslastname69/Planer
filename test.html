@@ -327,6 +327,40 @@ window.PLANER_CLIENT_ID = "";
     (entfernt._weg || []).some(function (w) { return w.id === "s2" && w._t === 700; }),
     "bekommen: " + JSON.stringify(entfernt._weg));
 
+  /* Die zwei Fälle, die nach der Umstellung schiefgingen. Beide hatten
+     dieselbe Ursache: ein Eintrag ohne eigenen Zeitstempel erbte den
+     Zeitstempel des ganzen Datenstands - und der steigt bei jeder
+     beliebigen Änderung am Gerät. */
+  var handyHakt = {
+    updatedAt: 6000,
+    todos: [{ id: "t1", title: "Milch kaufen", done: true, _t: 6000 }],
+    _weg: [],
+  };
+  var tabletAlt = {
+    /* Hat denselben Eintrag unangetastet, aber sonst später etwas gespeichert */
+    updatedAt: 9000,
+    todos: [{ id: "t1", title: "Milch kaufen", done: false }],
+    _weg: [],
+  };
+  var nachMischen = zusammenfuehren(handyHakt, tabletAlt).todos[0];
+  pruefe("abgehaktes To-do bleibt abgehakt",
+    nachMischen.done === true,
+    "der unangetastete alte Eintrag vom anderen Gerät hat gewonnen");
+
+  var handyLoescht = { updatedAt: 6000, todos: [], _weg: [{ id: "t1", _t: 6000 }] };
+  gleich("gelöschtes To-do taucht nicht wieder auf",
+    zusammenfuehren(handyLoescht, tabletAlt).todos.length, 0);
+
+  var handyAendert = {
+    updatedAt: 6000,
+    todos: [{ id: "t1", title: "Milch und Brot kaufen", done: false, _t: 6000 }],
+    _weg: [],
+  };
+  gleich("Änderung schlägt den unangetasteten Eintrag des anderen Geräts",
+    zusammenfuehren(handyAendert, tabletAlt).todos[0].title, "Milch und Brot kaufen");
+  gleich("und andersherum genauso",
+    zusammenfuehren(tabletAlt, handyAendert).todos[0].title, "Milch und Brot kaufen");
+
   /* Inhaltsvergleich darf sich an Verwaltungsfeldern nicht stören */
   pruefe("inhaltGleich ignoriert updatedAt",
     inhaltGleich({ todos: [], updatedAt: 1 }, { todos: [], updatedAt: 999 }));

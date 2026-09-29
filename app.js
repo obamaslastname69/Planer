@@ -1783,14 +1783,23 @@ function stempeln(vorher, nachher, jetzt) {
 }
 /* Eine Liste aus beiden Ständen: je Kennung der neuere Eintrag, es sei
    denn, er wurde nachweislich später gelöscht. */
-function listeMischen(la, lb, weg, standA, standB) {
+/* Ein Eintrag ohne eigenen Zeitstempel zählt als uralt (0), NICHT als so
+   jung wie der Datenstand, in dem er liegt. Genau das war der Fehler: Der
+   Stand-Zeitstempel steigt bei jeder beliebigen Änderung am Gerät. Ein
+   unangetasteter alter Eintrag auf dem Tablet bekam so eine jüngere Zeit
+   als der frisch abgehakte auf dem Handy - und gewann. Abgehaktes kam
+   ungehakt zurück, Gelöschtes tauchte wieder auf, echte Änderungen vom
+   anderen Gerät verschwanden.
+   Fehlender Stempel heißt: kein Hinweis, dass hier je etwas geändert
+   wurde. Das muss gegen jede echte Änderung und jede Löschung verlieren. */
+function listeMischen(la, lb, weg) {
     const nach = {};
     const reihe = [];
-    const rein = (liste, standAt) => {
+    const rein = (liste) => {
         for (const e of liste || []) {
             if (!e || !e.id)
                 continue;
-            const t = e._t || standAt || 0;
+            const t = e._t || 0;
             if (!nach[e.id]) {
                 nach[e.id] = { e: e, t: t };
                 reihe.push(e.id);
@@ -1799,8 +1808,8 @@ function listeMischen(la, lb, weg, standA, standB) {
                 nach[e.id] = { e: e, t: t };
         }
     };
-    rein(la, standA);
-    rein(lb, standB);
+    rein(la);
+    rein(lb);
     const raus = [];
     for (const id of reihe) {
         const treffer = nach[id];
@@ -1833,7 +1842,7 @@ function zusammenfuehren(a, b) {
         }
     }
     for (const feld of ID_LISTEN)
-        erg[feld] = listeMischen((a || {})[feld], (b || {})[feld], weg, aA, bA);
+        erg[feld] = listeMischen((a || {})[feld], (b || {})[feld], weg);
     /* Tageszettel: je Schlüssel, nicht als Ganzes. So überleben ein am
        Handy und ein am Tablet abgehakter Tag nebeneinander. */
     for (const feld of ["checks", "materialized", "studyDone"]) {
@@ -1855,7 +1864,7 @@ function zusammenfuehren(a, b) {
             rubriken[r] = true;
         gebetErg[tag] = {};
         for (const r of Object.keys(rubriken))
-            gebetErg[tag][r] = listeMischen(ta[r], tb[r], weg, aA, bA);
+            gebetErg[tag][r] = listeMischen(ta[r], tb[r], weg);
     }
     erg.gebet = gebetErg;
     /* Gelesene Tagesverse: je Datum genau einer, beide Seiten behalten */
