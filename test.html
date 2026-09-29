@@ -369,6 +369,63 @@ window.PLANER_CLIENT_ID = "";
   pruefe("stabil ignoriert die Reihenfolge der Schlüssel",
     stabil({ a: 1, b: 2 }) === stabil({ b: 2, a: 1 }));
 
+  /* ── Gewohnheiten und Abendplanung ── */
+  gruppe("Gewohnheiten");
+  gleich("07:00 sind 420 Minuten", zeitInMinuten("07:00"), 420);
+  gleich("7:05 geht auch einstellig", zeitInMinuten("7:05"), 425);
+  gleich("Mitternacht ist 0", zeitInMinuten("00:00"), 0);
+  gleich("Unsinn ergibt null", zeitInMinuten("halb acht"), null);
+  gleich("leer ergibt null", zeitInMinuten(""), null);
+  gleich("25:00 gibt es nicht", zeitInMinuten("25:00"), null);
+  gleich("07:70 gibt es auch nicht", zeitInMinuten("07:70"), null);
+
+  pruefe("taeglich macht eine Gewohnheit", istGewohnheit({ taeglich: true }));
+  pruefe("ohne taeglich ist es eine Routine", !istGewohnheit({ weekTarget: 2 }));
+
+  var heuteK = dayKey(new Date());
+  var hRoutinen = [
+    { id: "h1", title: "Stille Zeit", cat: "glaube", taeglich: true, zeit: "07:00" },
+    { id: "h2", title: "Sport", cat: "training", taeglich: true },
+    { id: "h3", title: "Bouldern", cat: "training", weekTarget: 2 },
+  ];
+  var standOhne = gewohnheitStand(hRoutinen, {}, heuteK);
+  gleich("zwei Gewohnheiten, keine erledigt", [standOhne.alle.length, standOhne.offen], [2, 2]);
+  var standEine = gewohnheitStand(hRoutinen, (function () { var o = {}; o[heuteK] = ["h1"]; return o; })(), heuteK);
+  gleich("eine erledigt, eine offen", [standEine.fertig.length, standEine.offen], [1, 1]);
+  pruefe("die Wochen-Routine zaehlt nicht als Gewohnheit",
+    standOhne.alle.every(function (r) { return r.id !== "h3"; }));
+
+  /* Weckzeiten: nur Gewohnheiten mit Uhrzeit, und nur fuer offene Tage */
+  var weck = gewohnheitWeckzeiten(hRoutinen, {}, 3);
+  pruefe("nur die Gewohnheit mit Uhrzeit weckt",
+    weck.every(function (w) { return w.id.indexOf("gewohnheit-h1-") === 0; }),
+    "bekommen: " + JSON.stringify(weck.map(function (w) { return w.id; })));
+  pruefe("Weckzeiten liegen in der Zukunft",
+    weck.every(function (w) { return w.weckzeit > Date.now(); }));
+  pruefe("der Titel der Gewohnheit steht drin",
+    weck.length === 0 || weck[0].titel === "Stille Zeit");
+  var checksHeute = {};
+  checksHeute[heuteK] = ["h1"];
+  var weckNachHaken = gewohnheitWeckzeiten(hRoutinen, checksHeute, 3);
+  pruefe("ein abgehakter Tag weckt nicht mehr",
+    weckNachHaken.every(function (w) { return w.id !== "gewohnheit-h1-" + heuteK; }),
+    "abgehakt und trotzdem erinnert");
+  gleich("ohne Uhrzeit keine Weckzeit",
+    gewohnheitWeckzeiten([{ id: "x", title: "A", taeglich: true }], {}, 3).length, 0);
+  gleich("Wochen-Routine weckt nicht",
+    gewohnheitWeckzeiten([{ id: "x", title: "A", weekTarget: 3, zeit: "07:00" }], {}, 3).length, 0);
+
+  gleich("Abendplanung beginnt um 18 Uhr", ABEND_AB, 1080);
+
+  /* Die Abendplanung wird je Tag gemerkt und muss sich zusammenfuehren
+     lassen wie die anderen Tageszettel */
+  var abendA = { updatedAt: 1000, abend: { "2026-10-01": { fertig: true, vorsatz: "früh los" } }, _weg: [] };
+  var abendB = { updatedAt: 2000, abend: { "2026-10-02": { fertig: true, vorsatz: "ruhig bleiben" } }, _weg: [] };
+  var abendBeide = zusammenfuehren(abendA, abendB).abend;
+  pruefe("Abendplanungen beider Geraete ueberleben",
+    abendBeide["2026-10-01"] && abendBeide["2026-10-02"],
+    "bekommen: " + JSON.stringify(abendBeide));
+
   /* ── Ausgabe ── */
   var html = "";
   gruppen.forEach(function (g) {

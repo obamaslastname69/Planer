@@ -768,6 +768,61 @@ function weekHits(routine, checks, weekStartDate) {
     return Array.from({ length: 7 }, (_, d) => dayKey(addDays(weekStartDate, d)))
         .filter((k) => (checks[k] || []).includes(routine.id)).length;
 }
+/* ── Gewohnheiten und Abendplanung ──────────────────────────
+   Eine Routine mit taeglich:true ist eine Gewohnheit: jeden Tag dran,
+   nicht x-mal die Woche. Steht zusätzlich eine zeit darin, erinnert sie
+   von selbst - das ist der Unterschied zwischen "ich sollte mal" und
+   "es meldet sich".
+
+   Abgehakt wird weiterhin über checks[Tag] = [RoutineId]. Damit zählen
+   die vorhandenen Serien- und Wochenrechnungen unverändert weiter. */
+const istGewohnheit = (r) => !!(r && r.taeglich);
+/* Minuten seit Mitternacht aus "07:00". null, wenn nichts Brauchbares. */
+function zeitInMinuten(s) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
+    if (!m)
+        return null;
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (h > 23 || min > 59)
+        return null;
+    return h * 60 + min;
+}
+/* Ab 18 Uhr fragt der Planer nach dem morgigen Tag */
+const ABEND_AB = 18 * 60;
+/* Wie viele der heute fälligen Gewohnheiten schon stehen */
+function gewohnheitStand(routines, checks, tagK) {
+    const alle = (routines || []).filter(istGewohnheit);
+    const fertig = alle.filter((r) => (checks[tagK] || []).includes(r.id));
+    return { alle: alle, fertig: fertig, offen: alle.length - fertig.length };
+}
+/* Erinnerungen für Gewohnheiten der nächsten Tage. Ein bereits abgehakter
+   Tag erzeugt keine - sonst mahnt die App etwas an, das längst steht. */
+function gewohnheitWeckzeiten(routines, checks, tage) {
+    const raus = [];
+    const jetzt = Date.now();
+    for (const r of (routines || []).filter(istGewohnheit)) {
+        const min = zeitInMinuten(r.zeit);
+        if (min === null)
+            continue;
+        for (let i = 0; i < tage; i++) {
+            const d = addDays(new Date(), i);
+            const k = dayKey(d);
+            if ((checks[k] || []).includes(r.id))
+                continue;
+            const weckzeit = new Date(k + "T00:00:00").getTime() + min * 60000;
+            if (weckzeit <= jetzt + 30000)
+                continue;
+            raus.push({
+                id: "gewohnheit-" + r.id + "-" + k,
+                weckzeit: weckzeit,
+                titel: r.title,
+                text: "Gewohnheit · " + minsToLabel(min),
+            });
+        }
+    }
+    return raus;
+}
 /* ── Google Calendar über OAuth ────────────────────────────
    Client-ID unten eintragen — Anleitung in SETUP.md.
    Ohne ID läuft alles außer der Kalenderanbindung.
@@ -1845,7 +1900,7 @@ function zusammenfuehren(a, b) {
         erg[feld] = listeMischen((a || {})[feld], (b || {})[feld], weg);
     /* Tageszettel: je Schlüssel, nicht als Ganzes. So überleben ein am
        Handy und ein am Tablet abgehakter Tag nebeneinander. */
-    for (const feld of ["checks", "materialized", "studyDone"]) {
+    for (const feld of ["checks", "materialized", "studyDone", "abend"]) {
         erg[feld] = { ...((aelter || {})[feld] || {}), ...((neuer || {})[feld] || {}) };
     }
     /* Gebetsliste je Wochentag und Rubrik */
@@ -2124,6 +2179,8 @@ const DEFAULT_STATE = {
     bibel: { zuletzt: "", gelesen: [] },
     /* Gebetsliste je Wochentag, Montag = "0" bis Sonntag = "6" */
     gebet: {},
+    /* Abendplanung, je geplantem Tag: { fertig, vorsatz, habits: [id] } */
+    abend: {},
     updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
@@ -2154,6 +2211,8 @@ function PlannerApp() {
     const [recipeEdit, setRecipeEdit] = useState(null);
     /* Tagesvers: offen, solange er nicht weggetippt wurde */
     const [versOffen, setVersOffen] = useState(false);
+    /* Abendplanung für morgen */
+    const [abendOffen, setAbendOffen] = useState(false);
     /* Rezept aus eingefügtem Text übernehmen */
     const [recipePaste, setRecipePaste] = useState(false);
     /* Suche über alle Tabs */
@@ -2955,6 +3014,10 @@ function PlannerApp() {
                     });
                 }
             }
+            /* Gewohnheiten mit fester Uhrzeit melden sich ebenso - sonst
+               bliebe es beim guten Vorsatz ohne Anstupser. */
+            for (const g of gewohnheitWeckzeiten(state.routines, state.checks, 14))
+                eintraege.push(g);
             eintraege.sort((a, b) => a.weckzeit - b.weckzeit);
             const knapp = eintraege.slice(0, 200);
             try {
@@ -2970,7 +3033,7 @@ function PlannerApp() {
         /* Kurz warten, damit nicht jede Tasteneingabe eine Meldung auslöst */
         const wecker = setTimeout(melden, 3000);
         return () => { abgebrochen = true; clearTimeout(wecker); };
-    }, [loaded, notify.an, notify.vorlauf, notifyRecht, state.blocks, blocksFor]);
+    }, [loaded, notify.an, notify.vorlauf, notifyRecht, state.blocks, state.routines, state.checks, blocksFor]);
     /* Freie Lücken eines Tages */
     const gapsFor = useCallback((key) => {
         const bs = blocksFor(key);
@@ -3635,6 +3698,30 @@ function PlannerApp() {
     const removeTodo = (id) => persist({ ...state, todos: state.todos.filter((t) => t.id !== id) });
     /* Routinen */
     const addRoutine = (title, cat) => persist({ ...state, routines: [...state.routines, { id: uid(), title, cat }] });
+    /* ── Gewohnheiten und Abendplanung ──────────────────── */
+    const setRoutineFeld = (id, patch) => persist((prev) => ({
+        ...prev,
+        routines: (prev.routines || []).map((r) => (r.id === id ? { ...r, ...patch } : r)),
+    }));
+    const morgenKey = dayKey(addDays(now, 1));
+    const abendAlle = state.abend || {};
+    const abendMorgen = abendAlle[morgenKey] || { fertig: false, vorsatz: "", habits: [] };
+    const setAbend = (tagK, patch) => persist((prev) => {
+        const alle = prev.abend || {};
+        const alt = alle[tagK] || { fertig: false, vorsatz: "", habits: [] };
+        return { ...prev, abend: { ...alle, [tagK]: { ...alt, ...patch } } };
+    });
+    /* Vornehmen und wieder verwerfen - für Gewohnheiten wie für To-dos */
+    const abendListe = (tagK, feld, id) => {
+        const bisher = ((abendAlle[tagK] || {})[feld]) || [];
+        setAbend(tagK, {
+            [feld]: bisher.includes(id) ? bisher.filter((x) => x !== id) : [...bisher, id],
+        });
+    };
+    /* Am Abend nach morgen fragen - aber nur einmal und nur, wenn der Tag
+       noch nicht steht. Wer abends plant, fängt morgens nicht bei null an. */
+    const jetztMin = now.getHours() * 60 + now.getMinutes();
+    const abendFaellig = jetztMin >= ABEND_AB && !abendMorgen.fertig;
     const dark = (state.theme || "dark") === "dark";
     DARK = dark;
     const toggleTheme = () => {
@@ -3824,7 +3911,11 @@ function PlannerApp() {
                         const nd = addDays(new Date(selectedDay + "T00:00:00"), dir);
                         setSelectedDay(dayKey(nd));
                         setWeekStart(mondayOf(nd));
-                    }, onBackToToday: () => { setSelectedDay(todayKey); setWeekStart(mondayOf(new Date())); } }))),
+                    }, onBackToToday: () => { setSelectedDay(todayKey); setWeekStart(mondayOf(new Date())); },
+                    vorgemerkt: (abendAlle[selectedDay] || {}).habits || [],
+                    vorsatz: (abendAlle[selectedDay] || {}).vorsatz || "",
+                    abendFaellig: abendFaellig && selectedDay === todayKey,
+                    onAbend: () => setAbendOffen(true) }))),
             view === "woche" && (React.createElement(React.Fragment, null,
                 React.createElement("header", { className: "px-4 pb-3 md:px-6" },
                     React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
@@ -3935,8 +4026,20 @@ function PlannerApp() {
                     onTest: () => zeigeHinweis({ id: "test", title: "So sieht ein Hinweis aus", start: now.getHours() * 60 + now.getMinutes(), dur: 60 }),
                 }),
                 React.createElement(CatPanel, { cats: catsNow, onField: setCatField, onAdd: addCat, onRemove: removeCat }),
-                React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
+                React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onFeld: setRoutineFeld, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
         timer && (React.createElement(FocusTimer, { timer: timer, beat: beat, onPause: pauseFocus, onSkip: advanceFocus, onStop: () => stopFocus(false), onDone: () => stopFocus(true), tonAn: (state.notify || {}).ton !== false, onTon: () => setNotify({ ton: (state.notify || {}).ton === false }) })),
+        abendOffen && (React.createElement(AbendSheet, {
+            tagK: morgenKey,
+            blocks: blocksFor(morgenKey),
+            todos: state.todos || [],
+            routines: state.routines || [],
+            plan: abendMorgen,
+            onVorsatz: (v) => setAbend(morgenKey, { vorsatz: v }),
+            onHabit: (id) => abendListe(morgenKey, "habits", id),
+            onTodo: (id) => abendListe(morgenKey, "todos", id),
+            onFertig: () => { setAbend(morgenKey, { fertig: true }); setAbendOffen(false); buzz(12); },
+            onClose: () => setAbendOffen(false),
+        })),
         versOffen && tagesVers && (React.createElement(VersSheet, {
             vers: tagesVers, onClose: () => setVersOffen(false),
             onAlle: () => { setVersOffen(false); goView("bibel"); },
@@ -4068,6 +4171,117 @@ function RecipePasteSheet({ onClose, onFertig }) {
             React.createElement("div", { className: "flex items-center gap-2" },
                 React.createElement("button", { onClick: () => genug && onFertig(erkannt), disabled: !genug, className: "px-4 py-2 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)", opacity: genug ? 1 : 0.5 } }, "Rezept eintragen")),
             React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Der Text bleibt im Gerät - nichts wird verschickt, nichts kostet etwas. Das Rezept öffnet sich danach zum Nachbessern; schau die Mengen kurz durch. Die Nährwerte rechnet der Planer selbst aus den Zutaten."))));
+}
+/* ════════════════ Abendplanung ════════════════
+   Abends fünf Minuten für morgen: Was steht schon, was nehme ich mir vor,
+   welche Gewohnheiten will ich halten. Am nächsten Morgen steht das dann
+   im Tag statt eines leeren Blatts. */
+function AbendSheet({ tagK, blocks, todos, routines, plan, onVorsatz, onHabit, onTodo, onFertig, onClose }) {
+    const c = lift("#5B3FA0");
+    const habits = (routines || []).filter(istGewohnheit);
+    const offeneTodos = (todos || []).filter((t) => !t.done);
+    const vorgemerkt = plan.habits || [];
+    const vorgemerkteTodos = plan.todos || [];
+    const termine = (blocks || [])
+        .filter((b) => !b.allDay)
+        .slice()
+        .sort((a, b) => a.start - b.start);
+    const ganztags = (blocks || []).filter((b) => b.allDay);
+    return (React.createElement("div", { onClick: onClose, className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.42)" } },
+        React.createElement("div", { className: "pl-sheet pl-rise pl-scroll overscroll-contain w-full md:max-w-md rounded-t-lg md:rounded-lg p-4 flex flex-col gap-4 overflow-y-auto", style: { maxHeight: "90vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                React.createElement("div", { className: "flex flex-col" },
+                    React.createElement("span", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, "Morgen planen"),
+                    React.createElement("span", { className: "text-base font-medium" }, datumLang(tagK))),
+                React.createElement("button", { onClick: onClose, className: "pl-muted p-1 shrink-0", "aria-label": "Schließen" },
+                    React.createElement(X, { size: 18 }))),
+
+            /* 1. Was ohnehin schon feststeht */
+            React.createElement("div", { className: "flex flex-col gap-1.5" },
+                React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Steht schon"),
+                ganztags.map((b) => (React.createElement("div", { key: b.id, className: "mono text-xs pl-muted" }, "ganztägig · ", b.title))),
+                termine.length === 0 && ganztags.length === 0
+                    ? React.createElement("p", { className: "mono text-xs pl-muted" }, "Noch nichts. Der Tag gehört dir.")
+                    : termine.map((b) => {
+                        const k = CATS[b.cat];
+                        return (React.createElement("div", { key: b.id, className: "flex items-center gap-2" },
+                            React.createElement("span", { className: "w-1 h-4 rounded-full shrink-0", style: { background: (k && k.color) || "#6F7A72" } }),
+                            React.createElement("span", { className: "mono text-xs pl-muted shrink-0" }, minsToLabel(b.start)),
+                            React.createElement("span", { className: "text-sm truncate" }, b.title)));
+                    })),
+
+            /* 2. Gewohnheiten, die morgen stehen sollen */
+            habits.length > 0 && (React.createElement("div", { className: "flex flex-col gap-1.5" },
+                React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Gewohnheiten"),
+                React.createElement("div", { className: "flex flex-wrap gap-1.5" }, habits.map((r) => {
+                    const an = vorgemerkt.includes(r.id);
+                    const rc = (CATS[r.cat] && CATS[r.cat].color) || "#6F7A72";
+                    return (React.createElement("button", { key: r.id, onClick: () => onHabit(r.id), className: "px-2.5 py-1.5 rounded-full mono text-xs", style: {
+                            background: an ? rc : "transparent",
+                            color: an ? "#FFF" : "var(--muted)",
+                            border: `1px solid ${an ? rc : "var(--line)"}`,
+                        } },
+                        r.title,
+                        r.zeit ? " · " + r.zeit : ""));
+                })))),
+
+            /* 3. Was ich mir aus den offenen Aufgaben vornehme */
+            offeneTodos.length > 0 && (React.createElement("div", { className: "flex flex-col gap-1.5" },
+                React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Morgen anpacken"),
+                React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Lieber zwei, die du wirklich schaffst, als zehn auf der Liste."),
+                offeneTodos.slice(0, 12).map((t) => {
+                    const an = vorgemerkteTodos.includes(t.id);
+                    const k = CATS[t.cat];
+                    return (React.createElement("button", { key: t.id, onClick: () => onTodo(t.id), className: "pl-card rounded p-2 text-left flex items-center gap-2", style: an ? { borderLeft: `3px solid ${(k && k.color) || "#6F7A72"}` } : {} },
+                        React.createElement("span", { className: "shrink-0", style: { color: an ? lift((k && k.color) || "#6F7A72") : "var(--muted)" } }, an ? React.createElement(Check, { size: 13 }) : React.createElement(Plus, { size: 13 })),
+                        React.createElement("span", { className: "text-sm truncate flex-1" }, t.title)));
+                }))),
+
+            /* 4. Ein Satz, der morgen trägt */
+            React.createElement("div", { className: "flex flex-col gap-1.5" },
+                React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Vorsatz"),
+                React.createElement("input", { value: plan.vorsatz || "", onChange: (e) => onVorsatz(e.target.value), placeholder: "Worauf kommt es morgen an?", className: "pl-input px-3 py-2 rounded text-sm" })),
+
+            React.createElement("button", { onClick: onFertig, className: "py-2.5 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" } }, "Morgen steht"))));
+}
+/* Die Gewohnheiten des Tages: abhaken, Serie sehen, Uhrzeit sehen.
+   Steht bewusst weit oben im Tag - was man nicht sieht, tut man nicht. */
+function GewohnheitLeiste({ routines, checks, tagK, vorgemerkt, onToggle }) {
+    const habits = (routines || []).filter(istGewohnheit);
+    const andere = (routines || []).filter((r) => !istGewohnheit(r));
+    if (!habits.length && !andere.length)
+        return null;
+    const heuteDatum = new Date(tagK + "T00:00:00");
+    const stand = gewohnheitStand(routines, checks, tagK);
+    const knopf = (r, alsGewohnheit) => {
+        const an = (checks[tagK] || []).includes(r.id);
+        const rc = (CATS[r.cat] && CATS[r.cat].color) || "#6F7A72";
+        const serie = alsGewohnheit ? dayStreak(r.id, checks, heuteDatum) : 0;
+        const geplant = alsGewohnheit && (vorgemerkt || []).includes(r.id);
+        return (React.createElement("button", { key: r.id, onClick: () => { if (!an)
+                buzz(12); onToggle(r.id, tagK); }, className: `px-3 py-2 rounded flex items-center gap-1.5 text-sm ${an ? "pl-pop" : ""}`, style: {
+                background: an ? rc : "transparent",
+                color: an ? "#FFF" : "var(--ink)",
+                border: `1px solid ${an ? rc : geplant ? rc : "var(--line)"}`,
+                borderStyle: !an && geplant ? "dashed" : "solid",
+            } },
+            an && React.createElement(Check, { size: 13 }),
+            r.title,
+            alsGewohnheit && r.zeit && !an && (React.createElement("span", { className: "mono text-xs", style: { opacity: 0.7 } }, r.zeit)),
+            serie > 1 && (React.createElement("span", { className: "mono text-xs flex items-center gap-0.5", style: { color: an ? "#FFF" : lift("#8A4E1C"), opacity: an ? 0.85 : 1 } },
+                React.createElement(Flame, { size: 11 }),
+                serie))));
+    };
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2" },
+        habits.length > 0 && (React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
+                React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Gewohnheiten"),
+                React.createElement("span", { className: "mono text-xs", style: { color: stand.offen === 0 ? lift("#1E6E5A") : "var(--muted)" } },
+                    stand.fertig.length, "/", stand.alle.length)),
+            React.createElement("div", { className: "flex flex-wrap gap-1.5" }, habits.map((r) => knopf(r, true))))),
+        andere.length > 0 && (React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" + (habits.length ? " pt-1" : "") }, "Routinen"),
+            React.createElement("div", { className: "flex flex-wrap gap-1.5" }, andere.map((r) => knopf(r, false)))))));
 }
 /* ════════════════ Bibelverse ════════════════ */
 const BIBEL_FARBE = "#12657F"; /* dieselbe Farbe wie die Kategorie "Glauben" */
@@ -4864,7 +5078,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
 function HourRail({ hours, ppm, every = 1, compact = false, von = DAY_START, bis = DAY_END }) {
     return (React.createElement("div", { className: "relative", style: { height: (bis - von) * 60 * ppm } }, hours.map((h, i) => (i % every === 0 ? (React.createElement("div", { key: h, className: "absolute mono pl-muted", style: { right: compact ? 3 : 6, top: (h - von) * 60 * ppm - 6, fontSize: compact ? 9 : 11 } }, compact ? h : pad(h))) : null))));
 }
-function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, onMove, ppm, todos, todoPlan, onAddTodo, onToggleTodo, onRemoveTodo, onPlanTodo, onOpenBlock, pendingPick, onImportTodoist }) {
+function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, onMove, ppm, todos, todoPlan, onAddTodo, onToggleTodo, onRemoveTodo, onPlanTodo, onOpenBlock, pendingPick, onImportTodoist, vorgemerkt, vorsatz, abendFaellig, onAbend }) {
     var _a, _b;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const d = new Date(dayK + "T00:00:00");
@@ -4889,6 +5103,16 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
             React.createElement("button", { onClick: () => onShiftDay(1), className: "pl-btn p-2 rounded", "aria-label": "Tag vor" },
                 React.createElement(ChevronRight, { size: 16 }))),
         !isToday && (React.createElement("button", { onClick: onBackToToday, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-center" }, "zur\u00FCck zu heute")),
+        /* Was du dir gestern Abend f\u00FCr heute vorgenommen hast */
+        isToday && vorsatz && (React.createElement("div", { className: "pl-card rounded p-3", style: { borderLeft: `3px solid ${lift("#5B3FA0")}` } },
+            React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: lift("#5B3FA0") } }, "Vorsatz f\u00FCr heute"),
+            React.createElement("div", { className: "text-base mt-1 leading-snug" }, vorsatz))),
+        /* Abends nach morgen fragen - danach f\u00E4ngt der Tag nicht bei null an */
+        isToday && abendFaellig && (React.createElement("button", { onClick: onAbend, className: "pl-card rounded p-3 text-left flex items-center gap-3", style: { borderLeft: `3px solid ${lift("#5B3FA0")}` } },
+            React.createElement("span", { className: "flex-1" },
+                React.createElement("span", { className: "mono text-xs uppercase tracking-widest block", style: { color: lift("#5B3FA0") } }, "Abendplanung"),
+                React.createElement("span", { className: "text-sm block mt-0.5" }, "F\u00FCnf Minuten f\u00FCr morgen \u2014 dann steht der Tag schon, bevor er anf\u00E4ngt.")),
+            React.createElement(ArrowRight, { size: 16, className: "shrink-0 pl-muted" }))),
         isToday && (React.createElement("div", { className: "pl-card rounded p-4" },
             running ? (React.createElement(React.Fragment, null,
                 React.createElement("div", { className: "mono text-xs pl-muted mb-1" }, "l\u00E4uft gerade"),
@@ -4936,22 +5160,12 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
                     " Termin")),
             React.createElement("div", { className: "pl-card rounded" },
                 React.createElement(Grid, { visibleDays: [new Date(dayK + "T00:00:00")], todayKey: isToday ? dayK : "-", now: now, blocksFor: () => blocks, onSlot: onSlot, onBlock: onBlock, onMove: onMove, ppm: ppm, maxH: Math.round(Math.max(320, (typeof window !== "undefined" ? window.innerHeight : 800) * 0.62)) }))),
-        /* Routinen zuerst — sie werden im Tagesverlauf am häufigsten angetippt */
-        routines.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3" },
-            React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Routinen"),
-            React.createElement("div", { className: "flex flex-wrap gap-1.5" }, routines.map((r) => {
-                var _c;
-                const an = (checks[dayK] || []).includes(r.id);
-                const rc = ((_c = CATS[r.cat]) === null || _c === void 0 ? void 0 : _c.color) || "#6F7A72";
-                return (React.createElement("button", { key: r.id, onClick: () => { if (!an)
-                        buzz(12); onToggleCheck(r.id, dayK); }, className: `px-3 py-2 rounded flex items-center gap-1.5 text-sm ${an ? "pl-pop" : ""}`, style: {
-                        background: an ? rc : "transparent",
-                        color: an ? "#FFF" : "var(--ink)",
-                        border: `1px solid ${an ? rc : "var(--line)"}`,
-                    } },
-                    an && React.createElement(Check, { size: 13 }),
-                    r.title));
-            })))),
+        /* Gewohnheiten und Routinen zuerst — sie werden im Tagesverlauf am
+           häufigsten angetippt, und was oben steht, wird auch getan */
+        React.createElement(GewohnheitLeiste, {
+            routines: routines, checks: checks, tagK: dayK,
+            vorgemerkt: vorgemerkt, onToggle: onToggleCheck,
+        }),
         onAddTodo && (React.createElement(TodoPanel, { todos: todos || [], plan: todoPlan, onAdd: onAddTodo, onToggle: onToggleTodo, onRemove: onRemoveTodo, onPlan: onPlanTodo, onOpenBlock: onOpenBlock, pending: pendingPick, onImportTodoist: onImportTodoist })),
         React.createElement("div", { className: "pl-card rounded p-3" },
             React.createElement("div", { className: "mono text-xs pl-muted mb-2" }, "Als Liste"),
@@ -5269,7 +5483,7 @@ function TodoPanel({ todos, plan, onAdd, onToggle, onRemove, onPlan, onOpenBlock
                         React.createElement(Trash2, { size: 13 }))))))))));
 }
 
-function RoutinePanel({ routines, checks, days, weekStart, today, onAdd, onRemove, onToggle, onTarget, onPlan }) {
+function RoutinePanel({ routines, checks, days, weekStart, today, onAdd, onRemove, onToggle, onTarget, onPlan, onFeld }) {
     const [title, setTitle] = useState("");
     const [cat, setCat] = useState("training");
     const [popped, setPopped] = useState(null);
@@ -5340,7 +5554,19 @@ function RoutinePanel({ routines, checks, days, weekStart, today, onAdd, onRemov
                             " ",
                             ds === 1 ? "Tag" : "Tage",
                             " am St\u00FCck"),
-                        ws.jokerUsed && React.createElement("span", null, "Joker"))));
+                        ws.jokerUsed && React.createElement("span", null, "Joker")),
+                    /* Aus einer Routine eine t\u00E4gliche Gewohnheit machen - mit
+                       Uhrzeit meldet sie sich von selbst, statt auf gutes
+                       Ged\u00E4chtnis zu hoffen. */
+                    React.createElement("div", { className: "flex items-center gap-2 mt-1.5" },
+                        React.createElement("button", { onClick: () => onFeld(r.id, { taeglich: !istGewohnheit(r) }), className: "px-2 py-1 rounded-full mono text-xs", style: istGewohnheit(r)
+                                ? { background: c, color: "#FFF", border: `1px solid ${c}` }
+                                : { background: "transparent", color: "var(--muted)", border: "1px solid var(--line)" } }, "t\u00E4glich"),
+                        istGewohnheit(r) && (React.createElement(React.Fragment, null,
+                            React.createElement("input", { type: "time", value: r.zeit || "", onChange: (e) => onFeld(r.id, { zeit: e.target.value }), className: "pl-input px-2 py-1 rounded mono text-xs", "aria-label": "Uhrzeit der Erinnerung" }),
+                            r.zeit
+                                ? React.createElement("button", { onClick: () => onFeld(r.id, { zeit: "" }), className: "mono text-xs pl-muted px-1" }, "ohne Uhrzeit")
+                                : React.createElement("span", { className: "mono text-xs pl-muted" }, "erinnert nicht"))))));
             }))));
 }
 function TemplatePanel({ template, onApply, onSaveWeek, onRemove, onToggleAuto }) {
