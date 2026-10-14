@@ -1,0 +1,82 @@
+name: App bauen
+
+# Baut die Android-App in der Cloud und legt die fertige APK ins Repo,
+# damit sie sich am Handy ueber eine kurze Adresse laden laesst. Lokal
+# laesst sie sich nicht bauen - dafuer fehlen die Android-Werkzeuge.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  bauen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stand holen
+        uses: actions/checkout@v4
+
+      - name: Java einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Gradle einrichten
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Signierschluessel bereitlegen
+        id: schluessel
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PLANER_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Kein Schluessel hinterlegt - es wird unsigniert gebaut."
+            echo "vorhanden=nein" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/signing.keystore"
+          echo "vorhanden=ja" >> "$GITHUB_OUTPUT"
+
+      - name: Bauen
+        working-directory: android
+        env:
+          PLANER_KEYSTORE_PFAD: ${{ steps.schluessel.outputs.vorhanden == 'ja' && format('{0}/signing.keystore', runner.temp) || '' }}
+          PLANER_KEYSTORE_PASSWORT: ${{ secrets.PLANER_KEYSTORE_PASSWORT }}
+          PLANER_KEY_ALIAS: ${{ secrets.PLANER_KEY_ALIAS }}
+          PLANER_KEY_PASSWORT: ${{ secrets.PLANER_KEY_PASSWORT }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: Ergebnis zeigen
+        run: find android/app/build/outputs -name "*.apk" -print0 | xargs -0 ls -la
+
+      - name: APK zum Herunterladen ablegen
+        if: steps.schluessel.outputs.vorhanden == 'ja'
+        run: |
+          APK=$(find android/app/build/outputs -name "*-release.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "Keine signierte APK gefunden."
+            exit 1
+          fi
+          cp "$APK" app.apk
+          if git diff --quiet -- app.apk; then
+            echo "APK unveraendert - nichts zu tun."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.apk
+          git commit -m "App neu gebaut (Lauf ${{ github.run_number }})"
+          git push
+
+      - name: APK auch als Anhang des Laufs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Planer-App
+          path: android/app/build/outputs/**/*.apk
+          if-no-files-found: error

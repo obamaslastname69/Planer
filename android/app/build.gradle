@@ -1,0 +1,46 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "io.github.obamaslastname69.twa"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "io.github.obamaslastname69.twa"
+        minSdk 24
+        targetSdk 34
+        /* Muss bei jeder neuen Fassung steigen, sonst verweigert Android
+           die Installation ueber die vorhandene App. */
+        versionCode 2
+        versionName "2.0"
+    }
+
+    /* Der Signierschluessel kommt aus der Umgebung - er gehoert nicht ins
+       Repo. Fehlt er, wird unsigniert gebaut. */
+    signingConfigs {
+        freigabe {
+            def laden = System.getenv("PLANER_KEYSTORE_PFAD")
+            if (laden) {
+                storeFile file(laden)
+                storePassword System.getenv("PLANER_KEYSTORE_PASSWORT")
+                keyAlias System.getenv("PLANER_KEY_ALIAS")
+                keyPassword System.getenv("PLANER_KEY_PASSWORT")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv("PLANER_KEYSTORE_PFAD")) {
+                signingConfig signingConfigs.freigabe
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
