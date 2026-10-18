@@ -64,13 +64,16 @@ jobs:
             exit 1
           fi
           cp "$APK" app.apk
-          if git diff --quiet -- app.apk; then
-            echo "APK unveraendert - nichts zu tun."
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app.apk
+          # Erst vormerken, dann vergleichen: Bei einer noch unbekannten
+          # Datei meldet "git diff" keine Aenderung, und der Schritt haette
+          # sie als unveraendert abgetan statt sie abzulegen.
+          if git diff --cached --quiet -- app.apk; then
+            echo "APK unveraendert - nichts abzulegen."
+            exit 0
+          fi
           git commit -m "App neu gebaut (Lauf ${{ github.run_number }})"
           git push
 
