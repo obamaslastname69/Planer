@@ -901,6 +901,39 @@ const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
    zurück. Dafür muss die Adresse in der Google Cloud Console unter
    "Autorisierte Weiterleitungs-URIs" stehen. */
 const GC_REDIRECT_KEY = "planer:gcweiter";
+/* ── Anmelde-Protokoll ──────────────────────────────────────
+   Die Anmeldung läuft über drei Programme hinweg: App, Browser, Google.
+   Geht dabei etwas verloren, sieht man von außen nur "es passiert
+   nichts". Deshalb schreibt jeder Schritt hier mit - im dauerhaften
+   Speicher, damit das Protokoll App-Neustarts übersteht.
+   Das Token selbst wird NIE mitgeschrieben, nur ob eines da war. */
+const PROTO_KEY = "planer:anmeldeprotokoll";
+function protokoll(was, zusatz) {
+    try {
+        const alt = JSON.parse(localStorage.getItem(PROTO_KEY) || "[]");
+        const z = new Date();
+        alt.push(Object.assign({
+            zeit: pad(z.getHours()) + ":" + pad(z.getMinutes()) + ":" + pad(z.getSeconds()),
+            was: was,
+        }, zusatz || {}));
+        localStorage.setItem(PROTO_KEY, JSON.stringify(alt.slice(-40)));
+    }
+    catch (e) { }
+}
+function protokollLesen() {
+    try {
+        return JSON.parse(localStorage.getItem(PROTO_KEY) || "[]");
+    }
+    catch (e) {
+        return [];
+    }
+}
+function protokollLeeren() {
+    try {
+        localStorage.removeItem(PROTO_KEY);
+    }
+    catch (e) { }
+}
 /* Ging bei der Rückkehr von Google etwas schief, steht es hier und wird
    beim Start angezeigt, statt kommentarlos zu verpuffen. */
 let gcRueckkehrHinweis = "";
@@ -956,6 +989,7 @@ function gcStarteWeiterleitung(absicht) {
         }));
     }
     catch (e) { }
+    protokoll("gehe zu Google", { zieladresse: gcRedirectUri(), kennung: nonce.slice(0, 6) });
     const p = new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
         redirect_uri: gcRedirectUri(),
@@ -981,6 +1015,13 @@ let gcWunschNachRueckkehr = "";
 /* Kommen wir gerade von Google zurück? Dann Token übernehmen. */
 (function gcRueckkehrPruefen() {
     try {
+        /* Jeder Seitenstart wird vermerkt. Daran lässt sich ablesen, ob die
+           App nach dem Ausflug in den Browser überhaupt neu geladen hat -
+           ohne Neuladen kann das Token gar nicht ankommen. */
+        protokoll("Seite geladen", {
+            alsApp: inPlanerApp(),
+            tokenInAdresse: location.hash.indexOf("access_token") > -1,
+        });
         if (!location.hash || location.hash.indexOf("access_token") === -1)
             return;
         const rohHash = location.hash.slice(1);
@@ -1002,11 +1043,19 @@ let gcWunschNachRueckkehr = "";
            gewöhnliche https-Adresse, und die bleibt im Browser hängen.
            Über ein eigenes Schema nimmt die App sie entgegen; dort liegt
            auch der Merker, mit dem sich das Token prüfen lässt. */
+        protokoll("Rückkehr angekommen", {
+            alsApp: inPlanerApp(),
+            tokenDa: !!token,
+            merkerDa: !!merk,
+            merkerAlter: merk && merk.zeit ? Math.round((Date.now() - merk.zeit) / 1000) + "s" : "—",
+            kennungPasst: !!(merk && merk.nonce === state),
+        });
         if (token && !merk && !inPlanerApp()) {
             try {
                 history.replaceState(null, "", location.pathname + location.search);
             }
             catch (e) { }
+            protokoll("reiche an die App weiter (planer://)");
             location.href = "planer://auth#" + rohHash;
             return;
         }
@@ -1029,8 +1078,10 @@ let gcWunschNachRueckkehr = "";
                 gcRueckkehrHinweis = "Anmeldung kam zurück, aber der Merker dazu fehlte";
             else if (token)
                 gcRueckkehrHinweis = "Anmeldung kam zurück, aber die Kennung passte nicht";
+            protokoll("Token ABGEWIESEN", { grund: gcRueckkehrHinweis || "kein Token in der Adresse" });
             return;
         }
+        protokoll("Token angenommen", { gueltigSek: Number(f.get("expires_in")) || 3600 });
         gcStoreToken(token, Number(f.get("expires_in")) || 3600);
         gcAbsichtNachRueckkehr = merk.absicht || "";
     }
@@ -1072,6 +1123,10 @@ function gcAuth(silent) {
         /* Als installierte App über die Weiterleitung gehen — das Fenster
            käme dort nie zurück. Die Seite verlässt den Planer, das Versprechen
            bleibt also offen; nach der Rückkehr geht es von vorn weiter. */
+        protokoll("Anmeldung nötig", {
+            weg: gcBrauchtWeiterleitung() ? "Weiterleitung" : "Popup",
+            alsApp: inPlanerApp(), android: istAndroid(),
+        });
         if (gcBrauchtWeiterleitung()) {
             gcStarteWeiterleitung(gcWunschNachRueckkehr);
             /* Im Browser verlässt die Seite jetzt den Planer - dort bleibt
@@ -4106,6 +4161,7 @@ function PlannerApp() {
                     onVorlauf: (m) => setNotify({ vorlauf: m }),
                     onTest: () => zeigeHinweis({ id: "test", title: "So sieht ein Hinweis aus", start: now.getHours() * 60 + now.getMinutes(), dur: 60 }),
                 }),
+                React.createElement(ProtokollPanel, null),
                 React.createElement(CatPanel, { cats: catsNow, onField: setCatField, onAdd: addCat, onRemove: removeCat }),
                 React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onFeld: setRoutineFeld, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
         timer && (React.createElement(FocusTimer, { timer: timer, beat: beat, onPause: pauseFocus, onSkip: advanceFocus, onStop: () => stopFocus(false), onDone: () => stopFocus(true), tonAn: (state.notify || {}).ton !== false, onTon: () => setNotify({ ton: (state.notify || {}).ton === false }) })),
@@ -5804,6 +5860,60 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) 
                 pushMoeglich()
                     ? React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Dein Push-Dienst ist eingerichtet — Hinweise kommen auch bei geschlossener App. Dorthin gehen nur die Uhrzeiten; was ansteht, bleibt auf diesem Gerät.")
                     : React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Die Hinweise kommen, solange der Planer läuft — auch im Hintergrund. Ist er ganz geschlossen, bleibt es still: Ohne eigenen Dienst kann niemand die Seite wecken. Der Push-Dienst dafür liegt im Ordner push-worker.")))))));
+}
+/* Zeigt, was bei der Anmeldung tatsächlich passiert ist. Die Anmeldung
+   läuft über App, Browser und Google hinweg - geht unterwegs etwas
+   verloren, sieht man von außen nur "es tut sich nichts". */
+function ProtokollPanel() {
+    const [offen, setOffen] = useState(false);
+    const [zeilen, setZeilen] = useState([]);
+    const [kopiert, setKopiert] = useState(false);
+    const laden = () => setZeilen(protokollLesen());
+    useEffect(() => { if (offen) laden(); }, [offen]);
+    const alsText = () => zeilen.map((z) => {
+        const rest = Object.keys(z)
+            .filter((k) => k !== "zeit" && k !== "was")
+            .map((k) => k + "=" + z[k]).join(" ");
+        return z.zeit + "  " + z.was + (rest ? "  " + rest : "");
+    }).join("\n");
+    const kopieren = async () => {
+        const text = alsText();
+        try {
+            await navigator.clipboard.writeText(text);
+        }
+        catch (e) {
+            /* In mancher Umgebung gibt es die Zwischenablage nicht - dann
+               wenigstens markierbar anzeigen statt kommentarlos scheitern. */
+            try {
+                const feld = document.createElement("textarea");
+                feld.value = text;
+                document.body.appendChild(feld);
+                feld.select();
+                document.execCommand("copy");
+                feld.remove();
+            }
+            catch (e2) { return; }
+        }
+        setKopiert(true);
+        setTimeout(() => setKopiert(false), 1800);
+    };
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2" },
+        React.createElement("div", { className: "flex items-center justify-between gap-2" },
+            React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Anmelde-Protokoll"),
+            React.createElement("button", { onClick: () => setOffen(!offen), className: "mono text-xs pl-muted" }, offen ? "▾ zu" : "▸ zeigen")),
+        !offen && (React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Hält fest, was bei der Anmeldung passiert. Nur nötig, wenn etwas klemmt. Das Token selbst steht nie darin.")),
+        offen && (React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "flex gap-2" },
+                React.createElement("button", { onClick: kopieren, className: "pl-btn px-3 py-1.5 rounded mono text-xs" }, kopiert ? "kopiert ✓" : "Alles kopieren"),
+                React.createElement("button", { onClick: laden, className: "pl-btn px-3 py-1.5 rounded mono text-xs" }, "neu lesen"),
+                React.createElement("button", { onClick: () => { protokollLeeren(); laden(); }, className: "pl-btn px-3 py-1.5 rounded mono text-xs" }, "leeren")),
+            zeilen.length === 0
+                ? React.createElement("p", { className: "mono text-xs pl-muted" }, "Noch nichts aufgezeichnet. Tippe auf „Geräte abgleichen“ und schau dann hier nach.")
+                : React.createElement("pre", { className: "mono text-xs pl-scroll", style: {
+                        whiteSpace: "pre-wrap", wordBreak: "break-word",
+                        background: "var(--line-soft)", padding: 10, borderRadius: 4,
+                        maxHeight: 280, overflowY: "auto", margin: 0,
+                    } }, alsText())))));
 }
 function YearGrid({ weeks, onPick }) {
     const shade = (q) => {
