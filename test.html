@@ -453,6 +453,16 @@ window.PLANER_CLIENT_ID = "";
     !androidMuster.test("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"));
   pruefe("istAndroid gibt es und laeuft ohne Fehler",
     typeof istAndroid === "function" && typeof istAndroid() === "boolean");
+  /* Der Merker der Anmeldung muss den dauerhaften Speicher benutzen.
+     Im Sitzungsspeicher war er weg, sobald Android die App im Hintergrund
+     abraeumte waehrend der Browser vorne stand - und das zurueckkommende
+     Token galt dann als unerwartet und wurde verworfen. */
+  pruefe("Anmeldung merkt sich die Kennung dauerhaft, nicht nur fuer die Sitzung",
+    /localStorage\.setItem\(GC_REDIRECT_KEY/.test(gcStarteWeiterleitung.toString()),
+    "steht wieder im Sitzungsspeicher - dann geht die Anmeldung in der App verloren");
+  pruefe("und merkt sich den Zeitpunkt dazu",
+    /zeit:\s*Date\.now\(\)/.test(gcStarteWeiterleitung.toString()));
+
   pruefe("gcBrauchtWeiterleitung richtet sich danach",
     typeof gcBrauchtWeiterleitung === "function"
     && gcBrauchtWeiterleitung() === (inPlanerApp() || istAndroid()

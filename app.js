@@ -901,6 +901,9 @@ const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
    zurück. Dafür muss die Adresse in der Google Cloud Console unter
    "Autorisierte Weiterleitungs-URIs" stehen. */
 const GC_REDIRECT_KEY = "planer:gcweiter";
+/* Ging bei der Rückkehr von Google etwas schief, steht es hier und wird
+   beim Start angezeigt, statt kommentarlos zu verpuffen. */
+let gcRueckkehrHinweis = "";
 const gcRedirectUri = () => location.origin + location.pathname.replace(/index\.html$/, "");
 /* Laufen wir in der eigenen Android-App? Die setzt dieses Kennzeichen in
    ihre Browserkennung. Eine WebView meldet sich NICHT als "standalone" -
@@ -941,8 +944,16 @@ function gcBrauchtWeiterleitung() {
 }
 function gcStarteWeiterleitung(absicht) {
     const nonce = uid() + uid();
+    /* Bewusst im dauerhaften Speicher, nicht im Sitzungsspeicher: Waehrend
+       der Anmeldung steht der Browser vorne, und Android raeumt die App im
+       Hintergrund gern ab. Danach ist der Sitzungsspeicher leer, der Merker
+       weg - und das zurueckkommende Token galt als unerwartet und wurde
+       verworfen. Genau daran scheiterte die Anmeldung in der App.
+       Die Zeit begrenzt, wie lange der Merker gilt. */
     try {
-        sessionStorage.setItem(GC_REDIRECT_KEY, JSON.stringify({ nonce: nonce, absicht: absicht || "" }));
+        localStorage.setItem(GC_REDIRECT_KEY, JSON.stringify({
+            nonce: nonce, absicht: absicht || "", zeit: Date.now(),
+        }));
     }
     catch (e) { }
     const p = new URLSearchParams({
@@ -978,9 +989,13 @@ let gcWunschNachRueckkehr = "";
         const state = f.get("state");
         let merk = null;
         try {
-            merk = JSON.parse(sessionStorage.getItem(GC_REDIRECT_KEY) || "null");
+            merk = JSON.parse(localStorage.getItem(GC_REDIRECT_KEY)
+                || sessionStorage.getItem(GC_REDIRECT_KEY) || "null");
         }
         catch (e) { }
+        /* Ein Merker von vorgestern gehoert nicht zu dieser Anmeldung */
+        if (merk && merk.zeit && Date.now() - merk.zeit > 10 * 60000)
+            merk = null;
         /* Im Browser gelandet, obwohl die Anfrage aus der App kam: Dann
            fehlt hier der Merker, denn den hat die App in ihrem eigenen
            Speicher abgelegt. Google antwortet nun einmal auf eine
@@ -1001,12 +1016,21 @@ let gcWunschNachRueckkehr = "";
         }
         catch (e) { }
         try {
+            localStorage.removeItem(GC_REDIRECT_KEY);
             sessionStorage.removeItem(GC_REDIRECT_KEY);
         }
         catch (e) { }
-        /* Nur annehmen, wenn die Kennung zu unserer Anfrage passt */
-        if (!token || !merk || merk.nonce !== state)
+        /* Nur annehmen, wenn die Kennung zu unserer Anfrage passt.
+           Schlaegt das fehl, nicht stillschweigend aufgeben: Ein stummer
+           Fehlschlag sieht von aussen genauso aus wie "nichts passiert"
+           und kostete uns schon mehrere Anläufe. */
+        if (!token || !merk || merk.nonce !== state) {
+            if (token && !merk)
+                gcRueckkehrHinweis = "Anmeldung kam zurück, aber der Merker dazu fehlte";
+            else if (token)
+                gcRueckkehrHinweis = "Anmeldung kam zurück, aber die Kennung passte nicht";
             return;
+        }
         gcStoreToken(token, Number(f.get("expires_in")) || 3600);
         gcAbsichtNachRueckkehr = merk.absicht || "";
     }
@@ -3448,6 +3472,11 @@ function PlannerApp() {
     useEffect(() => {
         if (!loaded || !gcConfigured())
             return;
+        if (gcRueckkehrHinweis) {
+            setCloud({ state: "error", msg: gcRueckkehrHinweis });
+            gcRueckkehrHinweis = "";
+            return;
+        }
         if (!gcHasToken()) {
             /* Der Google-Zugang gilt nur eine Stunde. Danach wurde früher
                stillschweigend nichts mehr hochgeladen - alles Eingetragene
