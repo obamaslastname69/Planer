@@ -188,8 +188,29 @@ public class MainActivity extends Activity {
         super.onNewIntent(absicht);
         setIntent(absicht);
         if (web != null && absicht != null && absicht.getData() != null) {
-            web.loadUrl(adresseAusIntent(absicht));
+            wirklichNeuLaden(adresseAusIntent(absicht));
         }
+    }
+
+    /**
+     * Eine Adresse laden und dabei sicherstellen, dass die Seite auch
+     * wirklich neu startet.
+     *
+     * Unterscheidet sich die neue Adresse nur hinter dem Rautezeichen,
+     * laedt eine WebView die Seite NICHT neu - sie springt nur innerhalb
+     * des bestehenden Dokuments. Genau das passiert bei der Rueckkehr von
+     * der Anmeldung, denn dort steht das Token. Der Code, der es
+     * entgegennimmt, laeuft aber nur beim Laden der Seite und kam so nie
+     * an die Reihe. Deshalb erst das Dokument wechseln.
+     */
+    private void wirklichNeuLaden(final String ziel) {
+        web.loadUrl("about:blank");
+        web.post(new Runnable() {
+            @Override
+            public void run() {
+                web.loadUrl(ziel);
+            }
+        });
     }
 
     @Override

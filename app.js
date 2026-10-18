@@ -1074,6 +1074,15 @@ function gcAuth(silent) {
            bleibt also offen; nach der Rückkehr geht es von vorn weiter. */
         if (gcBrauchtWeiterleitung()) {
             gcStarteWeiterleitung(gcWunschNachRueckkehr);
+            /* Im Browser verlässt die Seite jetzt den Planer - dort bleibt
+               das Versprechen zu Recht offen, es wird ohnehin nie wieder
+               gebraucht. In der eigenen App bleibt die Seite dagegen
+               stehen, weil die Anmeldung nach draußen in den Browser
+               gereicht wird. Bliebe es auch dort offen, drehte sich
+               "Abgleich läuft" bis in alle Ewigkeit. */
+            if (inPlanerApp()) {
+                setTimeout(() => reject(new Error("Anmeldung im Browser geöffnet — komm danach hierher zurück")), 1500);
+            }
             return;
         }
         if (!(window.google && window.google.accounts && window.google.accounts.oauth2))

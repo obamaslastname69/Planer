@@ -463,6 +463,17 @@ window.PLANER_CLIENT_ID = "";
   pruefe("und merkt sich den Zeitpunkt dazu",
     /zeit:\s*Date\.now\(\)/.test(gcStarteWeiterleitung.toString()));
 
+  /* Auf dem Weiterleitungsweg bleibt das Versprechen offen, weil die
+     Seite den Planer verlaesst. In der eigenen App bleibt sie aber
+     stehen - die Anmeldung wird nur nach draussen gereicht. Ohne Abbruch
+     drehte sich dort "Abgleich laeuft" endlos. */
+  var authQuelle = gcAuth.toString();
+  pruefe("in der App endet der Anmeldeversuch statt endlos zu laufen",
+    /inPlanerApp\(\)/.test(authQuelle) && /reject\(/.test(authQuelle),
+    "ohne Abbruch haengt der Abgleich in der App fuer immer");
+  pruefe("im Browser bleibt es bewusst offen (Abbruch nur in der App)",
+    authQuelle.indexOf("inPlanerApp()") < authQuelle.indexOf("Anmeldung im Browser ge"));
+
   pruefe("gcBrauchtWeiterleitung richtet sich danach",
     typeof gcBrauchtWeiterleitung === "function"
     && gcBrauchtWeiterleitung() === (inPlanerApp() || istAndroid()
