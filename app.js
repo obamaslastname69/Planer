@@ -3065,6 +3065,12 @@ function PlannerApp() {
         exams: [...(st.exams || []), { id: uid(), title: "Neue Prüfung", date: dayKey(addDays(new Date(), 30)) }],
     }));
     const deleteExam = (id) => updateStudy((st) => ({ ...st, exams: (st.exams || []).filter((e) => e.id !== id) }));
+    /* Alle vorbei auf einmal - einzeln wegzutippen ist mühsam, und als ein
+       Schritt lässt es sich mit "Rückgängig" auch wieder zurückholen. */
+    const deleteExamsVorbei = () => updateStudy((st) => ({
+        ...st,
+        exams: (st.exams || []).filter((e) => e.date >= dayKey(new Date())),
+    }));
     const resetStudyPlan = () => persist((prev) => ({ ...prev, study: initStudy() }));
     /* Ausprobieren */
     const loadDemo = () => {
@@ -4222,7 +4228,7 @@ function PlannerApp() {
                     }),
                 }))),
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
-                React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing, minuten: studyMinuten }))),
+                React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onDeleteVorbei: deleteExamsVorbei, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing, minuten: studyMinuten }))),
             view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true), onEinfuegen: () => setRecipePaste(true) })),
             view === "bibel" && (React.createElement(BibelView, { heute: tagesVers, gelesen: bibel.gelesen || [], onOeffnen: () => setVersOffen(true), gebet: gebet, gebetHeute: gebetHeute, onGebetNeu: gebetNeu, onGebetAendern: gebetAendern, onGebetWeg: gebetWeg })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
@@ -5453,15 +5459,22 @@ function StudyRow({ task, kind, done, edit, weekIdx, onEditTask, onDeleteTask, o
         !on && task.t && (React.createElement("button", { onClick: () => onPlanTask(task), className: "pl-btn mono text-xs px-2 py-1 rounded shrink-0" },
             geschafft > 0 ? "weiter" : "einplanen"))));
 }
-function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onAddExam, onDeleteExam, onReset, lernProjekte = [], projectStats, onPlanProject, minuten = {} }) {
+function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, weekIdx, setWeekIdx, today, onWeekField, onAddTask, onEditTask, onDeleteTask, onExamField, onAddExam, onDeleteExam, onDeleteVorbei, onReset, lernProjekte = [], projectStats, onPlanProject, minuten = {} }) {
     const [openSubject, setOpenSubject] = useState(null);
     const [showInfo, setShowInfo] = useState(false);
     const [edit, setEdit] = useState(false);
     const [confirmReset, setConfirmReset] = useState(false);
+    const [vorbeiOffen, setVorbeiOffen] = useState(false);
     const wk = weeks[weekIdx];
     if (!wk)
         return React.createElement("p", { className: "mono text-xs pl-muted" }, "Kein Lernplan vorhanden.");
-    const exams = [...(examsRaw || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const alleExams = [...(examsRaw || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+    /* Vorbei ist vorbei. Vorher standen vergangene Prüfungen obenan - sie
+       sind ja die ältesten - und die erste trug das Etikett "nächste
+       Prüfung", während sie in Minustagen herunterzählte. */
+    const heuteK = dayKey(today);
+    const exams = alleExams.filter((e) => e.date >= heuteK);
+    const vorbei = alleExams.filter((e) => e.date < heuteK).reverse();
     /* Alle Fächer mit Beschreibung, Reihenfolge nach Prüfungsdatum */
     const fachListe = useMemo(() => {
         const reihen = {};
@@ -5505,7 +5518,9 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
                     onPlanProject && React.createElement("button", { onClick: () => onPlanProject({ title: p.title, cat: p.cat, est: 90, projectId: p.id }), className: "pl-btn mono text-xs px-1.5 py-0.5 rounded mt-1.5" }, "einplanen")));
             }))),
         React.createElement("div", { className: "pl-card rounded p-4 flex flex-col gap-3" },
-            exams.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Keine Pr\u00FCfung eingetragen.")),
+            exams.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, alleExams.length === 0
+                ? "Keine Pr\u00FCfung eingetragen."
+                : "Keine Pr\u00FCfung mehr vor dir. " + (vorbei.length === 1 ? "Eine liegt" : vorbei.length + " liegen") + " hinter dir.")),
             exams.map((ex, idx) => {
                 const d = new Date(ex.date + "T00:00:00");
                 const left = Math.ceil((d - new Date(dayKey(today) + "T00:00:00")) / 86400000);
@@ -5526,7 +5541,27 @@ function LearnView({ weeks, exams: examsRaw, done, onToggleTask, onPlanTask, wee
                             React.createElement("div", { className: naechste ? "mono text-4xl font-semibold leading-none" : "mono text-2xl font-medium leading-none", style: { color: left <= 14 ? "#A03A5E" : left <= 30 ? "#8A4E1C" : "#2B4B8F" } }, left),
                             React.createElement("div", { className: "mono text-xs pl-muted" }, "Tage")))));
             }),
-            edit && (React.createElement("button", { onClick: onAddExam, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-start" }, "+ Pr\u00FCfung"))),
+            edit && (React.createElement("button", { onClick: onAddExam, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-start" }, "+ Pr\u00FCfung")),
+            /* Vergangenes zusammengeklappt - da, falls man nachsehen will,
+               aber nicht im Weg. */
+            vorbei.length > 0 && (React.createElement("div", { className: "border-t pl-hair pt-3 flex flex-col gap-2" },
+                React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                    React.createElement("button", { onClick: () => setVorbeiOffen(!vorbeiOffen), className: "mono text-xs pl-muted text-left" },
+                        (vorbeiOffen ? "\u25BE" : "\u25B8") + " vorbei (" + vorbei.length + ")"),
+                    React.createElement("button", { onClick: () => { onDeleteVorbei(); setVorbeiOffen(false); }, className: "pl-btn px-2.5 py-1 rounded mono text-xs", style: { color: lift("#A03A5E"), borderColor: "#A03A5E" } }, "alle entfernen")),
+                vorbeiOffen && vorbei.map((ex) => {
+                    const d = new Date(ex.date + "T00:00:00");
+                    const her = Math.round((new Date(heuteK + "T00:00:00") - d) / 86400000);
+                    return (React.createElement("div", { key: ex.id, className: "flex items-center gap-2 pl-rise" },
+                        React.createElement("span", { className: "text-sm truncate flex-1", style: { opacity: 0.65 } }, ex.title),
+                        React.createElement("span", { className: "mono text-xs pl-muted shrink-0" },
+                            d.toLocaleDateString("de-AT", { day: "numeric", month: "short" }),
+                            " \u00B7 vor ",
+                            her,
+                            her === 1 ? " Tag" : " Tagen"),
+                        React.createElement("button", { onClick: () => onDeleteExam(ex.id), className: "pl-muted shrink-0", "aria-label": "Pr\u00FCfung l\u00F6schen" },
+                            React.createElement(Trash2, { size: 13 }))));
+                })))),
         React.createElement("div", { className: "flex items-center gap-2" },
             React.createElement("button", { onClick: () => setEdit(!edit), className: "pl-btn px-3 py-1.5 rounded mono text-xs", style: edit ? { background: "var(--ink)", color: "var(--paper)", borderColor: "var(--ink)" } : {} }, edit ? "Fertig" : "Plan bearbeiten"),
             edit && (React.createElement("button", { onClick: () => { if (confirmReset) {

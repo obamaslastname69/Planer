@@ -515,6 +515,35 @@ window.PLANER_CLIENT_ID = "";
   window.PlanerWecker = undefined;
   pruefe("danach ist wieder keiner da", weckerNativ() === null);
 
+  /* ── Pruefungen: vorbei von kommend trennen ──
+     Vorher standen vergangene Pruefungen obenan - sie sind ja die
+     aeltesten - und die erste trug das Etikett "naechste Pruefung",
+     waehrend sie in Minustagen herunterzaehlte. */
+  gruppe("Prüfungen");
+  var heuteP = dayKey(new Date());
+  var pruefungen = [
+    { id: "a", title: "Molekularbiologie 2", date: "2026-09-23" },
+    { id: "b", title: "Biochemie", date: "2026-09-28" },
+    { id: "c", title: "Thermodynamik", date: "2099-01-15" }
+  ];
+  var sortiert = pruefungen.slice().sort(function (x, y) { return x.date < y.date ? -1 : 1; });
+  var kommend = sortiert.filter(function (e) { return e.date >= heuteP; });
+  var vorbeiP = sortiert.filter(function (e) { return e.date < heuteP; });
+  gleich("zwei liegen hinter uns", vorbeiP.length, 2);
+  gleich("eine steht noch an", kommend.length, 1);
+  gleich("die naechste ist die kommende, nicht die aelteste",
+    kommend[0].title, "Thermodynamik");
+  pruefe("keine kommende Pruefung liegt in der Vergangenheit",
+    kommend.every(function (e) { return e.date >= heuteP; }));
+  pruefe("heute zaehlt noch als kommend, nicht als vorbei",
+    [{ id: "h", date: heuteP }].filter(function (e) { return e.date >= heuteP; }).length === 1,
+    "am Pruefungstag selbst darf sie nicht verschwinden");
+
+  /* Das Wegraeumen trifft genau die vergangenen */
+  var nachAufraeumen = pruefungen.filter(function (e) { return e.date >= heuteP; });
+  gleich("alle entfernen loescht nur Vergangenes", nachAufraeumen.length, 1);
+  gleich("und laesst die kommende stehen", nachAufraeumen[0].title, "Thermodynamik");
+
   /* ── Ausgabe ── */
   var html = "";
   gruppen.forEach(function (g) {
