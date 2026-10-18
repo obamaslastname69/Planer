@@ -40,6 +40,20 @@
                     android:host="obamaslastname69.github.io"
                     android:pathPrefix="/Planer" />
             </intent-filter>
+
+            <!--
+              Eigenes Schema fuer die Rueckkehr von der Google-Anmeldung.
+              Google antwortet auf eine gewoehnliche https-Adresse, und die
+              bleibt im Browser haengen - ein fremder Browser reicht sie
+              nicht an eine App weiter. Ein eigenes Schema dagegen reicht er
+              weiter, also bringt die Seite das Token darueber zu uns.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="planer" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

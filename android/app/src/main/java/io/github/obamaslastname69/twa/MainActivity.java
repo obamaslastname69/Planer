@@ -63,6 +63,12 @@ public class MainActivity extends Activity {
         /* Der Weckton soll ohne vorheriges Antippen kommen duerfen */
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        /* Kennzeichen, an dem die Seite merkt, dass sie in dieser App laeuft.
+           Noetig, weil eine WebView sich nicht als "standalone" meldet: Ohne
+           das hielte der Planer sich fuer eine Webseite und wuerde die
+           Anmeldung ueber ein Popup-Fenster versuchen. Popups gibt es hier
+           nicht - das Ergebnis war eine weisse Seite. */
+        s.setUserAgentString(s.getUserAgentString() + " PlanerApp/1");
 
         CookieManager.getInstance().setAcceptCookie(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -80,6 +86,22 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView ansicht, String adresse) {
                 return nachDraussen(Uri.parse(adresse));
+            }
+
+            /* Statt einer weissen Flaeche sagen, was nicht ging. Eine leere
+               Seite ohne Hinweis ist das Schlimmste, was eine App tun kann. */
+            @Override
+            public void onReceivedError(WebView ansicht, WebResourceRequest anfrage,
+                                        android.webkit.WebResourceError fehler) {
+                if (anfrage != null && !anfrage.isForMainFrame()) return;
+                String text = fehler != null ? String.valueOf(fehler.getDescription()) : "unbekannt";
+                zeigeFehler(text, anfrage != null ? anfrage.getUrl().toString() : "");
+            }
+
+            @SuppressWarnings("deprecation")
+            @Override
+            public void onReceivedError(WebView ansicht, int code, String beschreibung, String adresse) {
+                zeigeFehler(beschreibung, adresse);
             }
         });
 
@@ -109,13 +131,49 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    /** Die volle Adresse inklusive allem hinter dem Rautezeichen */
+    /**
+     * Die volle Adresse inklusive allem hinter dem Rautezeichen.
+     *
+     * Kommt die Anmeldung zurueck, geschieht das ueber planer://auth#...
+     * und nicht ueber die normale Adresse: Google schickt die Antwort an
+     * eine gewoehnliche https-Adresse, die im Browser landet, und ein
+     * fremder Browser reicht so eine Adresse nicht an uns weiter. Ein
+     * eigenes Schema dagegen reicht er weiter - deshalb bringt die Seite
+     * das Token auf diesem Weg zu uns.
+     */
     private String adresseAusIntent(Intent absicht) {
-        if (absicht != null && absicht.getData() != null) {
-            Uri d = absicht.getData();
-            if (HOST.equals(d.getHost())) return d.toString();
+        if (absicht == null || absicht.getData() == null) return START;
+        Uri d = absicht.getData();
+        if ("planer".equals(d.getScheme())) {
+            String rest = d.getEncodedFragment();
+            return (rest == null || rest.isEmpty()) ? START : START + "#" + rest;
         }
+        if (HOST.equals(d.getHost())) return d.toString();
         return START;
+    }
+
+    /** Eine lesbare Seite statt weisser Leere */
+    private void zeigeFehler(String grund, String adresse) {
+        String html = "<!DOCTYPE html><html lang=de><meta charset=utf-8>"
+                + "<meta name=viewport content='width=device-width,initial-scale=1'>"
+                + "<body style=\"background:#E4E6E1;color:#191D1A;margin:0;padding:24px;"
+                + "font-family:ui-monospace,monospace;font-size:13px;line-height:1.6\">"
+                + "<div style=\"max-width:40ch;margin:0 auto;background:#FAFAF8;"
+                + "border:1px solid #191D1A;border-radius:6px;padding:18px\">"
+                + "<div style=\"font-weight:600;font-size:15px;margin-bottom:8px\">"
+                + "Die Seite konnte nicht geladen werden</div>"
+                + "<p>Meist fehlt nur das Netz. Der Planer selbst ist nicht kaputt — "
+                + "deine Daten liegen auf dem Gerät.</p>"
+                + "<pre style=\"white-space:pre-wrap;background:#EDEEEA;padding:10px;"
+                + "border-radius:4px;font-size:12px\">" + escape(grund) + "\n" + escape(adresse) + "</pre>"
+                + "<p><a href=\"" + START + "\" style=\"color:#12657F\">Nochmal versuchen</a></p>"
+                + "</div></body></html>";
+        if (web != null) web.loadDataWithBaseURL(START, html, "text/html", "utf-8", null);
+    }
+
+    private static String escape(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     /** Rueckkehr von der Google-Anmeldung */

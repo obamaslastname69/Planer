@@ -426,6 +426,22 @@ window.PLANER_CLIENT_ID = "";
     abendBeide["2026-10-01"] && abendBeide["2026-10-02"],
     "bekommen: " + JSON.stringify(abendBeide));
 
+  /* ── Erkennung der eigenen App ──
+     Die WebView meldet sich nicht als "standalone". Erkennt der Planer
+     die App nicht, versucht er die Anmeldung ueber ein Popup - das es
+     dort nicht gibt, und die Seite bleibt weiss. */
+  gruppe("Eigene App erkennen");
+  var appMuster = / PlanerApp\//;
+  pruefe("Kennzeichen der App wird erkannt",
+    appMuster.test("Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile Safari/537.36 PlanerApp/1"));
+  pruefe("ein gewoehnlicher Browser nicht",
+    !appMuster.test("Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile Safari/537.36"));
+  pruefe("ein aehnlich benannter Fremdbrowser auch nicht",
+    !appMuster.test("Mozilla/5.0 MeinPlanerApp/9"));
+  pruefe("inPlanerApp gibt es und es laeuft ohne Fehler",
+    typeof inPlanerApp === "function" && typeof inPlanerApp() === "boolean");
+  pruefe("im Selbsttest-Browser meldet es korrekt 'keine App'", inPlanerApp() === false);
+
   /* ── Ausgabe ── */
   var html = "";
   gruppen.forEach(function (g) {

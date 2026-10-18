@@ -902,9 +902,23 @@ const gcConfigured = () => GOOGLE_CLIENT_ID.length > 0;
    "Autorisierte Weiterleitungs-URIs" stehen. */
 const GC_REDIRECT_KEY = "planer:gcweiter";
 const gcRedirectUri = () => location.origin + location.pathname.replace(/index\.html$/, "");
+/* Laufen wir in der eigenen Android-App? Die setzt dieses Kennzeichen in
+   ihre Browserkennung. Eine WebView meldet sich NICHT als "standalone" -
+   ohne diese Abfrage hielte der Planer sich dort für eine Webseite und
+   versuchte die Anmeldung über ein Popup-Fenster. Popups gibt es in einer
+   WebView nicht, und das Ergebnis war eine weiße Seite. */
+const inPlanerApp = () => {
+    try {
+        return / PlanerApp\//.test(navigator.userAgent || "");
+    }
+    catch (e) {
+        return false;
+    }
+};
 function gcBrauchtWeiterleitung() {
     try {
-        return window.matchMedia("(display-mode: standalone)").matches
+        return inPlanerApp()
+            || window.matchMedia("(display-mode: standalone)").matches
             || window.navigator.standalone === true;
     }
     catch (e) {
@@ -944,7 +958,8 @@ let gcWunschNachRueckkehr = "";
     try {
         if (!location.hash || location.hash.indexOf("access_token") === -1)
             return;
-        const f = new URLSearchParams(location.hash.slice(1));
+        const rohHash = location.hash.slice(1);
+        const f = new URLSearchParams(rohHash);
         const token = f.get("access_token");
         const state = f.get("state");
         let merk = null;
@@ -952,6 +967,20 @@ let gcWunschNachRueckkehr = "";
             merk = JSON.parse(sessionStorage.getItem(GC_REDIRECT_KEY) || "null");
         }
         catch (e) { }
+        /* Im Browser gelandet, obwohl die Anfrage aus der App kam: Dann
+           fehlt hier der Merker, denn den hat die App in ihrem eigenen
+           Speicher abgelegt. Google antwortet nun einmal auf eine
+           gewöhnliche https-Adresse, und die bleibt im Browser hängen.
+           Über ein eigenes Schema nimmt die App sie entgegen; dort liegt
+           auch der Merker, mit dem sich das Token prüfen lässt. */
+        if (token && !merk && !inPlanerApp()) {
+            try {
+                history.replaceState(null, "", location.pathname + location.search);
+            }
+            catch (e) { }
+            location.href = "planer://auth#" + rohHash;
+            return;
+        }
         /* Adresse sofort säubern, damit das Token nicht im Verlauf landet */
         try {
             history.replaceState(null, "", location.pathname + location.search);
