@@ -915,9 +915,23 @@ const inPlanerApp = () => {
         return false;
     }
 };
+const istAndroid = () => {
+    try {
+        return /Android/i.test(navigator.userAgent || "");
+    }
+    catch (e) {
+        return false;
+    }
+};
+/* Auf dem Handy immer über die Weiterleitung anmelden, nie über ein
+   Popup-Fenster. Das Popup ist nur am Rechner angenehm: In der eigenen
+   App gibt es gar keines, und selbst im mobilen Browser ist es
+   unzuverlässig. Sich dafür allein auf das App-Kennzeichen zu verlassen
+   war zu knapp - wer eine ältere Fassung der App installiert hat, landete
+   sonst wieder im Popup und damit auf einer weißen Seite. */
 function gcBrauchtWeiterleitung() {
     try {
-        return inPlanerApp()
+        return inPlanerApp() || istAndroid()
             || window.matchMedia("(display-mode: standalone)").matches
             || window.navigator.standalone === true;
     }
@@ -5918,7 +5932,12 @@ function ReviewPanel({ stats, routines, yearGrid = [], onPickWeek, onStatus, onO
         React.createElement("div", { className: "border-t pl-hair pt-3" },
             React.createElement("div", { className: "flex items-baseline justify-between mb-2" },
                 React.createElement("span", { className: "mono text-xs pl-muted" }, "Ausprobieren"),
-                React.createElement("span", { className: "mono text-xs pl-muted", style: { opacity: 0.7 } }, APP_VERSION)),
+                React.createElement("span", { className: "mono text-xs pl-muted", style: { opacity: 0.7 } },
+                    APP_VERSION,
+                    /* Damit sich ohne Raten sagen lässt, ob die eigene App
+                       läuft oder doch der Browser - genau daran hing die
+                       Anmeldung. */
+                    inPlanerApp() ? " · als App" : istAndroid() ? " · im Browser" : "")),
             React.createElement("div", { className: "flex flex-wrap gap-1" },
                 React.createElement("button", { onClick: onConfetti, className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Konfetti"),
                 React.createElement("button", { onClick: () => setConfirm(confirm === "demo" ? null : "demo"), className: "pl-btn px-2 py-1 rounded mono text-xs" }, "Beispieldaten"),

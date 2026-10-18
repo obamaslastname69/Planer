@@ -79,7 +79,13 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView ansicht, WebResourceRequest anfrage) {
-                return nachDraussen(anfrage.getUrl());
+                /* Nur die Hauptseite nach draussen reichen. Rahmen im
+                   Inneren gehoeren der Seite: Googles Anmeldebibliothek
+                   laedt darin eigene Adressen, und die hier hinauszuwerfen
+                   riss den Nutzer mitten im Vorgang in den Browser - auf
+                   eine leere Seite, die nie zum Anschauen gedacht war. */
+                if (anfrage != null && !anfrage.isForMainFrame()) return false;
+                return nachDraussen(anfrage == null ? null : anfrage.getUrl());
             }
 
             @SuppressWarnings("deprecation")

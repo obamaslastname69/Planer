@@ -442,6 +442,23 @@ window.PLANER_CLIENT_ID = "";
     typeof inPlanerApp === "function" && typeof inPlanerApp() === "boolean");
   pruefe("im Selbsttest-Browser meldet es korrekt 'keine App'", inPlanerApp() === false);
 
+  /* Auf dem Handy muss immer die Weiterleitung greifen, nie das Popup.
+     Sich allein auf das App-Kennzeichen zu verlassen war zu knapp: Wer
+     eine aeltere Fassung der App hatte, landete wieder im Popup - und
+     damit auf einer weissen Seite. */
+  var androidMuster = /Android/i;
+  pruefe("Android wird an der Browserkennung erkannt",
+    androidMuster.test("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36"));
+  pruefe("ein Rechner nicht",
+    !androidMuster.test("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"));
+  pruefe("istAndroid gibt es und laeuft ohne Fehler",
+    typeof istAndroid === "function" && typeof istAndroid() === "boolean");
+  pruefe("gcBrauchtWeiterleitung richtet sich danach",
+    typeof gcBrauchtWeiterleitung === "function"
+    && gcBrauchtWeiterleitung() === (inPlanerApp() || istAndroid()
+      || window.matchMedia("(display-mode: standalone)").matches
+      || window.navigator.standalone === true));
+
   /* ── Ausgabe ── */
   var html = "";
   gruppen.forEach(function (g) {
