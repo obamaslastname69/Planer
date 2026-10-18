@@ -3156,7 +3156,9 @@ function PlannerApp() {
                 notifyRef.current = { tag: todayKey, gemeldet: {} };
             const gemeldet = notifyRef.current.gemeldet;
             for (const b of blocksFor(todayKey)) {
-                if (b.allDay || b.external || b.status || !b.title)
+                if (b.allDay || b.status || !b.title)
+                    continue;
+                if (b.external && notify.kalender === false)
                     continue;
                 const beginn = new Date(b.day + "T00:00:00").getTime() + b.start * 60000;
                 const wann = beginn - (Number(notify.vorlauf) || 0) * 60000;
@@ -3176,7 +3178,7 @@ function PlannerApp() {
             wecker.forEach(clearTimeout);
             document.removeEventListener("visibilitychange", beiRueckkehr);
         };
-    }, [loaded, notify.an, notify.vorlauf, notifyRecht, blocksFor, todayKey, zeigeHinweis]);
+    }, [loaded, notify.an, notify.vorlauf, notify.kalender, notifyRecht, blocksFor, todayKey, zeigeHinweis]);
     /* Für die geschlossene App: die nächsten Tage an den Push-Dienst melden.
        Dorthin gehen nur Zeitpunkte; Titel und Text bleiben im Gerät. */
     useEffect(() => {
@@ -3195,7 +3197,12 @@ function PlannerApp() {
             for (let i = 0; i < 14; i++) {
                 const tag = dayKey(addDays(new Date(), i));
                 for (const b of blocksFor(tag)) {
-                    if (b.allDay || b.external || b.status || !b.title)
+                    if (b.allDay || b.status || !b.title)
+                        continue;
+                    /* Kalender-Termine erinnern mit, sofern gewünscht. Sie
+                       liegen allerdings nur für die geladene Woche vor -
+                       weiter voraus weiß der Planer nichts von ihnen. */
+                    if (b.external && notify.kalender === false)
                         continue;
                     const beginn = new Date(b.day + "T00:00:00").getTime() + b.start * 60000;
                     const weckzeit = beginn - vorlauf;
@@ -3240,7 +3247,7 @@ function PlannerApp() {
         /* Kurz warten, damit nicht jede Tasteneingabe eine Meldung auslöst */
         const wecker = setTimeout(melden, 3000);
         return () => { abgebrochen = true; clearTimeout(wecker); };
-    }, [loaded, notify.an, notify.vorlauf, notifyRecht, state.blocks, state.routines, state.checks, blocksFor]);
+    }, [loaded, notify.an, notify.vorlauf, notify.kalender, notifyRecht, state.blocks, state.routines, state.checks, blocksFor]);
     /* Freie Lücken eines Tages */
     const gapsFor = useCallback((key) => {
         const bs = blocksFor(key);
@@ -4079,7 +4086,10 @@ function PlannerApp() {
                     : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
                 lbl,
                 k === "auswerten" && weekStats.pending.length > 0 && (React.createElement("span", { className: "ml-1.5", style: { color: view === k ? "#F0B429" : "#A03A5E" } }, weekStats.pending.length)))))),
-            React.createElement("div", { className: "mt-2 flex items-center gap-2" },
+            /* Umbrechen statt überlaufen: Auf dem Handy passten Konto,
+               laden und sichern nicht mehr in die Zeile, schoben sich nach
+               rechts hinaus und zogen eine weiße Fläche hinter sich her. */
+            React.createElement("div", { className: "mt-2 flex flex-wrap items-center gap-2" },
                 canUndo && (React.createElement("button", { onClick: undo, className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
                     React.createElement(Undo2, { size: 12 }),
                     " R\u00FCckg\u00E4ngig")),
@@ -4096,7 +4106,9 @@ function PlannerApp() {
                 React.createElement("button", { onClick: () => syncCloud(false), disabled: cloud.state === "busy", className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
                     React.createElement(RefreshCw, { size: 12, className: cloud.state === "busy" ? "animate-spin" : "" }),
                     "Ger\u00E4te abgleichen"),
-                cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : cloud.state === "schlaeft" ? lift("#8A4E1C") : "var(--muted)" } }, cloud.msg)),
+                /* maxWidth, weil die Meldung nicht umbricht: Eine lange
+                   Zeile schob sonst die ganze Leiste nach rechts hinaus. */
+                cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { maxWidth: "100%", color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : cloud.state === "schlaeft" ? lift("#8A4E1C") : "var(--muted)" } }, cloud.msg)),
                 /* Ausweg, falls doch mal ein anderes Konto gebraucht wird —
                    sonst käme man am gemerkten nicht mehr vorbei */
                 kontoName && (React.createElement("button", {
@@ -4235,6 +4247,7 @@ function PlannerApp() {
                     onAnschalten: notifyAnschalten,
                     onAus: () => setNotify({ an: false }),
                     onVorlauf: (m) => setNotify({ vorlauf: m }),
+                    onKalender: (an) => setNotify({ kalender: an }),
                     onTest: () => zeigeHinweis({ id: "test", title: "So sieht ein Hinweis aus", start: now.getHours() * 60 + now.getMinutes(), dur: 60 }),
                 }),
                 React.createElement(ProtokollPanel, null),
@@ -5863,7 +5876,7 @@ function ProjectPanel({ projects, stats, onAdd, onRemove, onTarget, onPlan, onTo
                             React.createElement(Trash2, { size: 12 })))));
             }))));
 }
-function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) {
+function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest, onKalender }) {
     const nichtMoeglich = recht === "unsupported";
     const blockiert = recht === "denied";
     const an = notify.an && recht === "granted";
@@ -5925,6 +5938,15 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) 
                                 border: `1px solid ${gewaehlt ? "var(--ink)" : "var(--line)"}`,
                             } }, m === 0 ? "punktgenau" : m + " min"));
                     }))),
+                /* Termine aus dem Google-Kalender erinnern mit, wenn
+                   gewünscht. Abschaltbar, weil ein voller Stundenplan
+                   sonst den ganzen Tag klingelt. */
+                React.createElement("button", { onClick: () => onKalender(notify.kalender === false), className: "flex items-center gap-2 text-left" },
+                    React.createElement("span", { className: "w-4 h-4 rounded-sm shrink-0 flex items-center justify-center", style: {
+                            background: notify.kalender === false ? "transparent" : lift("#1E6E5A"),
+                            border: `1.5px solid ${notify.kalender === false ? "var(--line)" : lift("#1E6E5A")}`,
+                        } }, notify.kalender === false ? null : React.createElement(Check, { size: 11, color: "#FFF" })),
+                    React.createElement("span", { className: "mono text-xs pl-muted leading-relaxed" }, "auch Termine aus dem Google-Kalender")),
                 React.createElement("div", { className: "flex flex-wrap gap-2" },
                     React.createElement("button", { onClick: onTest, className: "pl-btn px-3 py-2 rounded mono text-xs" }, "Hinweis ausprobieren"),
                     /* In der App prüft der eigene Wecker, im Browser der
