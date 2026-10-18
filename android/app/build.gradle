@@ -15,7 +15,7 @@ android {
            angesetzt: Falls die alte TWA noch auf dem Geraet liegt, ist
            ihre Nummer mit Sicherheit kleiner und die Installation gilt
            als Aktualisierung statt als Konflikt. */
-        versionCode 103
+        versionCode 104
         versionName "2.0"
     }
 

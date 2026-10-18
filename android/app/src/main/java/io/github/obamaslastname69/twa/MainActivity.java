@@ -40,8 +40,61 @@ public class MainActivity extends Activity {
 
     private static final String START = "https://obamaslastname69.github.io/Planer/";
     private static final String HOST = "obamaslastname69.github.io";
+    private static final int WUNSCH_HINWEISE = 7001;
 
     private WebView web;
+
+    /**
+     * Die Bruecke, ueber die der Planer Erinnerungen stellen kann.
+     *
+     * In einer WebView gibt es weder Push noch die Notification-
+     * Schnittstelle des Browsers. Stattdessen reicht die Seite ihre
+     * naechsten Weckzeiten hier herein, und Android weckt - auch bei
+     * geschlossener App. Was ansteht, verlaesst das Geraet dabei nicht.
+     *
+     * Achtung: Diese Methoden laufen auf einem eigenen Faden, nicht auf
+     * dem der Oberflaeche. Alles, was die Oberflaeche anfasst, muss
+     * deshalb dorthin geschickt werden.
+     */
+    private class Bruecke {
+
+        @android.webkit.JavascriptInterface
+        public boolean vorhanden() {
+            return true;
+        }
+
+        @android.webkit.JavascriptInterface
+        public boolean erlaubt() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true;
+            return checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+
+        @android.webkit.JavascriptInterface
+        public void erlaubnisAnfragen() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    requestPermissions(
+                            new String[]{ android.Manifest.permission.POST_NOTIFICATIONS },
+                            WUNSCH_HINWEISE);
+                }
+            });
+        }
+
+        /** Liste als JSON: [{weckzeit, titel, text}, ...] */
+        @android.webkit.JavascriptInterface
+        public int stellen(String json) {
+            return Wecker.stellen(MainActivity.this, json);
+        }
+
+        @android.webkit.JavascriptInterface
+        public void testen() {
+            Wecker.zeigen(MainActivity.this, "Wochenplaner",
+                    "So sieht eine Erinnerung aus.", 999);
+        }
+    }
 
     @Override
     protected void onCreate(Bundle zustand) {
@@ -74,6 +127,9 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
         }
+
+        Wecker.kanalAnlegen(this);
+        web.addJavascriptInterface(new Bruecke(), "PlanerWecker");
 
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient() {

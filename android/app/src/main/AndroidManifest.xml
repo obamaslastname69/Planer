@@ -4,6 +4,18 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Erinnerungen. In einer WebView gibt es weder Push noch die
+         Notification-Schnittstelle des Browsers, also stellt Android
+         die Wecker selbst. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Damit eine Erinnerung zur gedachten Minute kommt und nicht
+         irgendwann, wenn das System gerade Lust hat. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Nach einem Neustart sind alle Alarme des Systems weg und muessen
+         neu gestellt werden, sonst herrscht ab dann Stille. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -55,5 +67,17 @@
                 <data android:scheme="planer" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".WeckerEmpfaenger"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.obamaslastname69.twa.WECKEN" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

@@ -480,6 +480,41 @@ window.PLANER_CLIENT_ID = "";
       || window.matchMedia("(display-mode: standalone)").matches
       || window.navigator.standalone === true));
 
+  /* ── Erinnerungen ueber Android ──
+     In einer WebView gibt es weder Push noch die Notification-
+     Schnittstelle des Browsers. Die App bringt deshalb einen eigenen
+     Wecker mit; die Seite muss ihn erkennen und bevorzugen. */
+  gruppe("Wecker der App");
+  pruefe("ohne App ist kein Wecker da", weckerNativ() === null);
+  pruefe("und dann meldet er auch keine Erlaubnis", weckerErlaubt() === false);
+
+  var gestellt = null, getestet = false;
+  window.PlanerWecker = {
+    vorhanden: function () { return true; },
+    erlaubt: function () { return true; },
+    erlaubnisAnfragen: function () {},
+    stellen: function (j) { gestellt = j; return JSON.parse(j).length; },
+    testen: function () { getestet = true; }
+  };
+  pruefe("mit App wird der Wecker erkannt", weckerNativ() !== null);
+  pruefe("und die Erlaubnis durchgereicht", weckerErlaubt() === true);
+  gleich("der Wecker nimmt mehrere Erinnerungen an",
+    weckerNativ().stellen(JSON.stringify([
+      { weckzeit: Date.now() + 3600000, titel: "Thermo", text: "14:00" },
+      { weckzeit: Date.now() + 7200000, titel: "Stille Zeit", text: "07:00" }
+    ])), 2);
+  gleich("und bekommt genau die drei noetigen Felder",
+    Object.keys(JSON.parse(gestellt)[0]).sort().join(","), "text,titel,weckzeit");
+  weckerNativ().testen();
+  pruefe("der Probewecker laesst sich ausloesen", getestet === true);
+
+  /* Ein kaputter Wecker darf die Seite nicht mitreissen */
+  window.PlanerWecker = { stellen: function () { throw new Error("kaputt"); } };
+  pruefe("ein Wecker ohne erlaubt() meldet schlicht keine Erlaubnis",
+    weckerErlaubt() === false);
+  window.PlanerWecker = undefined;
+  pruefe("danach ist wieder keiner da", weckerNativ() === null);
+
   /* ── Ausgabe ── */
   var html = "";
   gruppen.forEach(function (g) {

@@ -436,6 +436,30 @@ function tonFreischalten() {
 const PUSH_DIENST = (typeof window !== "undefined" && window.PLANER_PUSH_URL) || "";
 const PUSH_KEY = (typeof window !== "undefined" && window.PLANER_PUSH_KEY) || "";
 const pushMoeglich = () => !!(PUSH_DIENST && PUSH_KEY && "serviceWorker" in navigator && "PushManager" in window);
+/* ── Erinnerungen in der eigenen App ────────────────────────
+   Eine WebView kennt weder Push noch die Notification-Schnittstelle des
+   Browsers. Die App bringt deshalb einen eigenen Wecker mit und stellt
+   ihn über Android. Vorteil nebenbei: Dabei verlässt überhaupt nichts
+   das Gerät - nicht einmal die Uhrzeiten, die sonst zum Push-Dienst
+   gehen. */
+function weckerNativ() {
+    try {
+        const w = window.PlanerWecker;
+        return w && typeof w.stellen === "function" ? w : null;
+    }
+    catch (e) {
+        return null;
+    }
+}
+const weckerErlaubt = () => {
+    const w = weckerNativ();
+    try {
+        return !!(w && w.erlaubt());
+    }
+    catch (e) {
+        return false;
+    }
+};
 function b64urlZuBytes(s) {
     const roh = atob(String(s).replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4));
     return Uint8Array.from(roh, (c) => c.charCodeAt(0));
@@ -2744,8 +2768,43 @@ function PlannerApp() {
         ...prev,
         notify: { ...DEFAULT_STATE.notify, ...(prev.notify || {}), ...patch },
     }));
-    const [notifyRecht, setNotifyRecht] = useState(() => (typeof Notification !== "undefined" ? Notification.permission : "unsupported"));
+    /* In der eigenen App entscheidet der Android-Wecker, nicht der
+       Browser: Dort gibt es die Notification-Schnittstelle gar nicht,
+       und ohne diese Abfrage stünde hier "Dieser Browser kann keine
+       Hinweise anzeigen" - obwohl er es über Android sehr wohl kann. */
+    const rechtLesen = () => weckerNativ()
+        ? (weckerErlaubt() ? "granted" : "default")
+        : (typeof Notification !== "undefined" ? Notification.permission : "unsupported");
+    const [notifyRecht, setNotifyRecht] = useState(rechtLesen);
+    /* Die Erlaubnis erteilt Android in einem eigenen Fenster. Wenn wir
+       danach zurückkommen, noch einmal nachsehen. */
+    useEffect(() => {
+        if (!weckerNativ())
+            return;
+        const nachsehen = () => {
+            if (document.visibilityState === "visible")
+                setNotifyRecht(weckerErlaubt() ? "granted" : "default");
+        };
+        document.addEventListener("visibilitychange", nachsehen);
+        return () => document.removeEventListener("visibilitychange", nachsehen);
+    }, []);
     const notifyAnschalten = useCallback(async () => {
+        const w = weckerNativ();
+        if (w) {
+            try {
+                if (!w.erlaubt())
+                    w.erlaubnisAnfragen();
+            }
+            catch (e) { }
+            /* Android antwortet nicht sofort - kurz später nachsehen */
+            setTimeout(() => {
+                const ok = weckerErlaubt();
+                setNotifyRecht(ok ? "granted" : "default");
+                if (ok)
+                    setNotify({ an: true });
+            }, 600);
+            return;
+        }
         if (typeof Notification === "undefined")
             return;
         let recht = Notification.permission;
@@ -3121,7 +3180,11 @@ function PlannerApp() {
     /* Für die geschlossene App: die nächsten Tage an den Push-Dienst melden.
        Dorthin gehen nur Zeitpunkte; Titel und Text bleiben im Gerät. */
     useEffect(() => {
-        if (!loaded || !notify.an || notifyRecht !== "granted" || !pushMoeglich())
+        if (!loaded || !notify.an || notifyRecht !== "granted")
+            return;
+        /* Entweder der eigene Wecker in der App oder der Push-Dienst im
+           Browser - eines von beidem muss es geben. */
+        if (!weckerNativ() && !pushMoeglich())
             return;
         let abgebrochen = false;
         const melden = async () => {
@@ -3153,12 +3216,25 @@ function PlannerApp() {
             const knapp = eintraege.slice(0, 200);
             try {
                 await hinweiseAblegen(knapp);
-                if (!abgebrochen)
+                if (abgebrochen)
+                    return;
+                const w = weckerNativ();
+                if (w) {
+                    /* In der App stellt Android die Wecker selbst. Dabei
+                       bleibt auch der Inhalt hier - zum Push-Dienst gingen
+                       immerhin noch die Uhrzeiten. */
+                    const gestellt = w.stellen(JSON.stringify(knapp.map((e) => ({
+                        weckzeit: e.weckzeit, titel: e.titel, text: e.text,
+                    }))));
+                    protokoll("Wecker gestellt", { anzahl: gestellt });
+                }
+                else {
                     await pushZeitenMelden(knapp.map((e) => e.weckzeit));
+                }
             }
             catch (e) {
                 if (!abgebrochen)
-                    console.warn("Push-Dienst nicht erreicht:", e.message);
+                    console.warn("Erinnerungen nicht gestellt:", e.message);
             }
         };
         /* Kurz warten, damit nicht jede Tasteneingabe eine Meldung auslöst */
@@ -5829,7 +5905,7 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) 
     };
     return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-3" },
         React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Erinnerungen"),
-        React.createElement("div", { className: "mono text-xs pl-muted leading-relaxed" }, pushMoeglich()
+        React.createElement("div", { className: "mono text-xs pl-muted leading-relaxed" }, (weckerNativ() || pushMoeglich())
             ? "Erinnert dich kurz vor einem Termin — auch dann, wenn der Planer geschlossen ist."
             : "Erinnert dich kurz vor einem Termin, solange der Planer läuft."),
         nichtMoeglich && (React.createElement("p", { className: "mono text-xs", style: { color: lift("#8A4E1C") } }, "Dieser Browser kann keine Hinweise anzeigen.")),
@@ -5851,14 +5927,24 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest }) 
                     }))),
                 React.createElement("div", { className: "flex flex-wrap gap-2" },
                     React.createElement("button", { onClick: onTest, className: "pl-btn px-3 py-2 rounded mono text-xs" }, "Hinweis ausprobieren"),
-                    pushMoeglich() && (React.createElement("button", { onClick: dienstPruefen, disabled: pruefung === "laeuft", className: "pl-btn px-3 py-2 rounded mono text-xs" }, pruefung === "laeuft" ? "prüft…" : "Dienst prüfen"))),
+                    /* In der App prüft der eigene Wecker, im Browser der
+                       Push-Dienst - beides führt denselben Beweis: Kommt
+                       eine echte Nachricht an? */
+                    weckerNativ()
+                        ? React.createElement("button", { onClick: () => { try {
+                                weckerNativ().testen();
+                            }
+                            catch (e) { } }, className: "pl-btn px-3 py-2 rounded mono text-xs" }, "Wecker ausprobieren")
+                        : pushMoeglich() && (React.createElement("button", { onClick: dienstPruefen, disabled: pruefung === "laeuft", className: "pl-btn px-3 py-2 rounded mono text-xs" }, pruefung === "laeuft" ? "prüft…" : "Dienst prüfen"))),
                 /* Der lokale Hinweis sagt nichts über den Dienst aus. Diese
                    Prüfung geht den ganzen Weg: Anmeldung, Schlüssel, Cron. */
                 befund && (React.createElement("p", { className: "mono text-xs leading-relaxed", style: { color: befund.gut ? lift("#1E6E5A") : lift("#8A4E1C") } }, befund.text)),
                 /* Was die Technik hergibt, offen gesagt - damit niemand auf
                    einen Weckruf wartet, der nicht kommen kann */
-                pushMoeglich()
-                    ? React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Dein Push-Dienst ist eingerichtet — Hinweise kommen auch bei geschlossener App. Dorthin gehen nur die Uhrzeiten; was ansteht, bleibt auf diesem Gerät.")
+                weckerNativ()
+                    ? React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Die App stellt die Wecker über Android — Hinweise kommen auch bei geschlossener App und nach einem Neustart. Dabei verlässt nichts das Gerät, nicht einmal die Uhrzeiten.")
+                    : pushMoeglich()
+                        ? React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Dein Push-Dienst ist eingerichtet — Hinweise kommen auch bei geschlossener App. Dorthin gehen nur die Uhrzeiten; was ansteht, bleibt auf diesem Gerät.")
                     : React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Die Hinweise kommen, solange der Planer läuft — auch im Hintergrund. Ist er ganz geschlossen, bleibt es still: Ohne eigenen Dienst kann niemand die Seite wecken. Der Push-Dienst dafür liegt im Ordner push-worker.")))))));
 }
 /* Zeigt, was bei der Anmeldung tatsächlich passiert ist. Die Anmeldung
