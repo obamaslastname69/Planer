@@ -11,8 +11,11 @@ android {
         minSdk 24
         targetSdk 34
         /* Muss bei jeder neuen Fassung steigen, sonst verweigert Android
-           die Installation ueber die vorhandene App. */
-        versionCode 2
+           die Installation ueber die vorhandene App. Bewusst hoch
+           angesetzt: Falls die alte TWA noch auf dem Geraet liegt, ist
+           ihre Nummer mit Sicherheit kleiner und die Installation gilt
+           als Aktualisierung statt als Konflikt. */
+        versionCode 100
         versionName "2.0"
     }
 
