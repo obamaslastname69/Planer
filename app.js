@@ -1862,6 +1862,88 @@ async function postfachHolen() {
     const d = await a.json();
     return Array.isArray(d.mails) ? d.mails : [];
 }
+/* ── Schach: Taktikaufgaben ─────────────────────────────────
+   Die Aufgaben kommen von Lichess (offen, ohne Anmeldung, CC0). Selbst
+   ausgedachte Stellungen waeren zu fehleranfaellig - eine Aufgabe ohne
+   saubere Loesung ist schlimmer als gar keine.
+
+   Zum Format, weil es leicht misszuverstehen ist: Die Stellung enthaelt
+   den letzten Zug des Gegners bereits. Wer in der Stellung am Zug ist,
+   ist der Loeser, und der erste Zug der Loesung ist seiner. An drei
+   Aufgaben gegengeprueft.
+
+   Die Regeln rechnet chess.js - Rochade, en passant und Fesselungen
+   selbst zu schreiben waere viel Code und viel Risiko. */
+const SCHACH_API = "https://lichess.org/api/puzzle/next";
+
+/* Unicode statt Bilddateien: funktioniert offline und braucht nichts
+   nachzuladen. Grossbuchstaben sind Weiss. */
+const FIGUREN = {
+    K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
+    k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
+};
+const LINIEN = ["a", "b", "c", "d", "e", "f", "g", "h"];
+
+const schachMoeglich = () => typeof Chess === "function";
+
+/* Ein Zug in der Schreibweise der Aufgaben: "e2e4", bei Umwandlung
+   "e7e8q". Genau so vergleichen wir, was gespielt wurde. */
+function zugAlsText(zug) {
+    return zug.from + zug.to + (zug.promotion ? zug.promotion : "");
+}
+
+async function aufgabeHolen() {
+    let a;
+    try {
+        a = await fetch(SCHACH_API);
+    }
+    catch (e) {
+        throw new Error("Keine Verbindung zu Lichess");
+    }
+    if (!a.ok)
+        throw new Error("Lichess antwortet mit " + a.status);
+    const d = await a.json();
+    const p = d && d.puzzle;
+    if (!p || !p.fen || !Array.isArray(p.solution))
+        throw new Error("Aufgabe unvollständig");
+    return {
+        id: p.id,
+        fen: p.fen,
+        loesung: p.solution,
+        wertung: p.rating || 0,
+        themen: Array.isArray(p.themes) ? p.themes : [],
+    };
+}
+
+/* Themen lesbar machen - die englischen Schlagworte sagen wenig */
+const THEMA_NAMEN = {
+    mateIn1: "Matt in 1", mateIn2: "Matt in 2", mateIn3: "Matt in 3",
+    mate: "Matt", fork: "Gabel", pin: "Fesselung", skewer: "Spieß",
+    discoveredAttack: "Abzug", doubleCheck: "Doppelschach",
+    sacrifice: "Opfer", deflection: "Ablenkung", attraction: "Hinlenkung",
+    clearance: "Räumung", interference: "Unterbrechung",
+    hangingPiece: "Figur steht ein", trappedPiece: "Figur gefangen",
+    backRankMate: "Grundreihenmatt", smotheredMate: "Ersticktes Matt",
+    promotion: "Umwandlung", endgame: "Endspiel", middlegame: "Mittelspiel",
+    opening: "Eröffnung", advantage: "Vorteil", crushing: "Entscheidend",
+    kingsideAttack: "Königsangriff", queensideAttack: "Damenflügel",
+    defensiveMove: "Verteidigung", quietMove: "Stiller Zug",
+    zugzwang: "Zugzwang", exposedKing: "Offener König",
+};
+const themaName = (t) => THEMA_NAMEN[t] || "";
+/* Laenge und Phase sagen beim Ueben wenig - die fliegen raus */
+const THEMA_EGAL = ["short", "long", "veryLong", "oneMove", "master", "masterVsMaster", "superGM"];
+function themenLesbar(themen) {
+    const raus = [];
+    for (const t of themen || []) {
+        if (THEMA_EGAL.indexOf(t) > -1)
+            continue;
+        const n = themaName(t);
+        if (n && raus.indexOf(n) === -1)
+            raus.push(n);
+    }
+    return raus.slice(0, 3);
+}
 /* ── Assistent ──────────────────────────────────────────────
    Claude im Planer, mit Händen statt nur Mund: Er sieht, was ansteht,
    und kann Termine, Aufgaben, Gewohnheiten und Prüfungen anlegen.
@@ -2515,6 +2597,8 @@ const DEFAULT_STATE = {
     bibel: { zuletzt: "", gelesen: [] },
     /* Abendplanung, je geplantem Tag: { fertig, vorsatz, habits: [id] } */
     abend: {},
+    /* Taktikaufgaben: gelöst, versucht, laufende und beste Serie */
+    schach: { geloest: 0, versucht: 0, serie: 0, besteSerie: 0 },
     updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
@@ -3075,6 +3159,23 @@ function PlannerApp() {
             };
         }, { undo: false });
     }, [loaded, tagesVers, bibelTag, bibel.zuletzt, persist]);
+    /* ── Schach ─────────────────────────────────────────── */
+    const schachStand = state.schach || { geloest: 0, versucht: 0, serie: 0, besteSerie: 0 };
+    /* sauber = ohne falschen Zug und ohne gezeigte Lösung. Nur das
+       zählt für die Serie - sonst wäre sie geschenkt. */
+    const schachErgebnis = (sauber) => persist((prev) => {
+        const alt = prev.schach || { geloest: 0, versucht: 0, serie: 0, besteSerie: 0 };
+        const serie = sauber ? alt.serie + 1 : 0;
+        return {
+            ...prev,
+            schach: {
+                geloest: alt.geloest + (sauber ? 1 : 0),
+                versucht: alt.versucht + 1,
+                serie: serie,
+                besteSerie: Math.max(alt.besteSerie || 0, serie),
+            },
+        };
+    }, { undo: false });
     /* ── Postfach ───────────────────────────────────────── */
     /* Zählt hoch, wenn der Schlüssel gesetzt wird - sonst müsste man die
        App neu starten, damit das Abfragen anläuft. */
@@ -3710,7 +3811,7 @@ function PlannerApp() {
         addBlock(day, minutes);
     };
     /* Wischen zwischen den Ansichten */
-    const VIEWS = ["heute", "woche", "lernen", "training", "auswerten", "rezepte", "bibel"];
+    const VIEWS = ["heute", "woche", "lernen", "training", "auswerten", "rezepte", "bibel", "schach"];
     const goView = (k, dir) => {
         if (k === view)
             return;
@@ -4339,9 +4440,15 @@ function PlannerApp() {
         @keyframes pl-roll-down{from{transform:translateY(-105%);opacity:0}to{transform:translateY(0);opacity:1}}
         .pl-roll-up{animation:pl-roll-up .2s cubic-bezier(.2,.9,.3,1);}
         .pl-roll-down{animation:pl-roll-down .2s cubic-bezier(.2,.9,.3,1);}
+        /* Acht Tabs passen auf dem Handy nicht in eine Zeile - "Schach"
+           hing rechts hinaus. Zwei Reihen zu vier, am grossen Schirm
+           wieder eine. Raster statt Umbruch, damit die Reihen gleich
+           lang sind und nicht 5 und 3 entstehen. */
+        .pl-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;}
+        @media(min-width:768px){.pl-tabs{grid-template-columns:repeat(8,1fr);}}
       `),
         React.createElement("div", { className: "px-4 pt-4 pb-2 md:px-6" },
-            React.createElement("div", { className: "flex gap-1" }, [["heute", "Heute"], ["woche", "Woche"], ["lernen", "Lernen"], ["training", "Training"], ["auswerten", "Bilanz"], ["rezepte", "Rezepte"], ["bibel", "Bibel"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "flex-1 py-2.5 rounded mono text-xs", style: view === k
+            React.createElement("div", { className: "pl-tabs" }, [["heute", "Heute"], ["woche", "Woche"], ["lernen", "Lernen"], ["training", "Training"], ["auswerten", "Bilanz"], ["rezepte", "Rezepte"], ["bibel", "Bibel"], ["schach", "Schach"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "py-2.5 rounded mono text-xs", style: view === k
                     ? { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" }
                     : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
                 lbl,
@@ -4491,6 +4598,7 @@ function PlannerApp() {
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onDeleteVorbei: deleteExamsVorbei, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing, minuten: studyMinuten }))),
             view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true), onEinfuegen: () => setRecipePaste(true) })),
             view === "bibel" && (React.createElement(BibelView, { heute: tagesVers, gelesen: bibel.gelesen || [], onOeffnen: () => setVersOffen(true) })),
+            view === "schach" && (React.createElement(SchachView, { stand: schachStand, onErgebnis: schachErgebnis })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -4585,6 +4693,229 @@ function PlannerApp() {
             onSave: (patch) => updateRecipe(bearbeitetesRezept.id, patch),
             onDelete: () => { removeRecipe(bearbeitetesRezept.id); setRecipeEdit(null); },
         }))));
+}
+/* ════════════════ Schach ════════════════ */
+/* Das Brett. Gedreht, wenn Schwarz zieht - man loest eine Aufgabe von
+   seiner eigenen Seite aus, sonst muss man im Kopf spiegeln. */
+function Brett({ stellung, unten, gewaehlt, ziele, letzter, onFeld }) {
+    const reihen = unten === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8];
+    const linien = unten === "w" ? LINIEN : LINIEN.slice().reverse();
+    return (React.createElement("div", { className: "pl-card rounded overflow-hidden", style: {
+            display: "grid",
+            gridTemplateColumns: "repeat(8, 1fr)",
+            aspectRatio: "1 / 1",
+            width: "100%",
+        } }, reihen.map((r) => linien.map((l) => {
+        const feld = l + r;
+        const stueck = stellung[feld];
+        const hell = (LINIEN.indexOf(l) + r) % 2 === 1;
+        const istZiel = ziele.indexOf(feld) > -1;
+        const istGewaehlt = gewaehlt === feld;
+        const warBeteiligt = letzter && (letzter.from === feld || letzter.to === feld);
+        return (React.createElement("button", { key: feld, onClick: () => onFeld(feld), className: "relative flex items-center justify-center", style: {
+                background: istGewaehlt ? lift("#C8A24A")
+                    : warBeteiligt ? hexA(lift("#C8A24A"), 0.35)
+                        : hell ? surf("#E8E4D9", "#4A4A46") : surf("#B4A98C", "#2E2E2C"),
+                border: "none", padding: 0, lineHeight: 1,
+                fontSize: "min(7.6vw, 34px)",
+                color: stueck && stueck === stueck.toUpperCase() ? "#FAFAF8" : "#191D1A",
+                textShadow: stueck && stueck === stueck.toUpperCase() ? "0 1px 2px rgba(0,0,0,.45)" : "none",
+                cursor: "pointer",
+            } },
+            stueck ? FIGUREN[stueck] : "",
+            /* Punkt fuer ein moegliches Ziel; auf besetzten Feldern ein
+               Ring, sonst verdeckt der Punkt die Figur, die dort steht. */
+            istZiel && (React.createElement("span", { className: "absolute", style: stueck
+                    ? { inset: 2, borderRadius: "50%", border: "3px solid " + hexA(lift("#1E6E5A"), 0.8) }
+                    : { width: "26%", height: "26%", borderRadius: "50%", background: hexA(lift("#1E6E5A"), 0.75) } }))));
+    }))));
+}
+
+function SchachView({ stand, onErgebnis }) {
+    const [aufgabe, setAufgabe] = useState(null);
+    const [spiel, setSpiel] = useState(null);
+    const [schritt, setSchritt] = useState(0);
+    const [gewaehlt, setGewaehlt] = useState(null);
+    const [letzter, setLetzter] = useState(null);
+    const [lage, setLage] = useState("laedt");
+    const [fehler, setFehler] = useState("");
+    const [gezeigt, setGezeigt] = useState(false);
+    const [patzer, setPatzer] = useState(false);
+
+    const laden = useCallback(() => {
+        setLage("laedt");
+        setFehler("");
+        setGewaehlt(null);
+        setLetzter(null);
+        setGezeigt(false);
+        setPatzer(false);
+        setSchritt(0);
+        aufgabeHolen()
+            .then((a) => {
+            const s = new Chess(a.fen);
+            setAufgabe(a);
+            setSpiel(s);
+            setLage("laeuft");
+        })
+            .catch((e) => { setFehler(e.message); setLage("fehler"); });
+    }, []);
+
+    useEffect(() => { if (schachMoeglich())
+        laden(); }, [laden]);
+
+    if (!schachMoeglich())
+        return (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-md md:mx-auto" },
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Die Schach-Bibliothek wurde nicht geladen. Die Datei „chess.min.js\" muss im selben Ordner wie „app.js\" liegen.")));
+
+    /* Stellung als Feld→Figur, damit das Brett nicht rechnen muss */
+    const stellung = {};
+    if (spiel) {
+        const reihen = spiel.board();
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const f = reihen[r][c];
+                if (f)
+                    stellung[LINIEN[c] + (8 - r)] = f.color === "w" ? f.type.toUpperCase() : f.type;
+            }
+        }
+    }
+    const meineFarbe = aufgabe ? new Chess(aufgabe.fen).turn() : "w";
+    const fertig = aufgabe && schritt >= aufgabe.loesung.length;
+
+    const ziele = (!gewaehlt || !spiel || fertig) ? [] : spiel
+        .moves({ square: gewaehlt, verbose: true })
+        .map((m) => m.to);
+
+    const antwortSpielen = (s, naechsterSchritt) => {
+        /* Der Gegenzug steht fest - er gehoert zur Loesung und wird
+           gespielt, damit man weiterrechnen kann. */
+        const gegen = aufgabe.loesung[naechsterSchritt];
+        if (!gegen) {
+            setSchritt(naechsterSchritt);
+            setLage("geloest");
+            onErgebnis(!patzer);
+            return;
+        }
+        setTimeout(() => {
+            const z = s.move({ from: gegen.slice(0, 2), to: gegen.slice(2, 4), promotion: gegen[4] || "q" });
+            setLetzter(z ? { from: z.from, to: z.to } : null);
+            setSpiel(nachbauen(s));
+            setSchritt(naechsterSchritt + 1);
+        }, 420);
+    };
+
+    /* chess.js gibt kein neues Objekt zurueck; React braucht aber eines,
+       sonst merkt es die Aenderung nicht. */
+    const nachbauen = (s) => {
+        const neu = new Chess(s.fen());
+        return neu;
+    };
+
+    const feldTippen = (feld) => {
+        if (!spiel || lage !== "laeuft" || fertig)
+            return;
+        if (gewaehlt && ziele.indexOf(feld) > -1) {
+            const soll = aufgabe.loesung[schritt];
+            const versuch = gewaehlt + feld;
+            /* Umwandlung: Lichess schreibt die Figur dazu. Wir wandeln
+               immer in eine Dame um, ausser die Loesung sagt etwas
+               anderes - Unterverwandlung ist selten und dann Teil der
+               Pointe. */
+            const umwandlung = soll && soll.length === 5 && soll.slice(0, 4) === versuch ? soll[4] : "q";
+            const probe = new Chess(spiel.fen());
+            const z = probe.move({ from: gewaehlt, to: feld, promotion: umwandlung });
+            if (!z)
+                return;
+            setGewaehlt(null);
+            if (zugAlsText(z) !== soll) {
+                /* Falscher Zug: Stellung bleibt, nur ein Hinweis. Wer die
+                   Aufgabe danach loest, bekommt sie nicht als sauber
+                   geloest angerechnet. */
+                setPatzer(true);
+                setLage("daneben");
+                setTimeout(() => setLage("laeuft"), 900);
+                return;
+            }
+            const s = probe;
+            setSpiel(s);
+            setLetzter({ from: z.from, to: z.to });
+            antwortSpielen(s, schritt + 1);
+            return;
+        }
+        const stueck = stellung[feld];
+        if (stueck && (stueck === stueck.toUpperCase() ? "w" : "b") === spiel.turn()) {
+            setGewaehlt(feld === gewaehlt ? null : feld);
+            return;
+        }
+        setGewaehlt(null);
+    };
+
+    const loesungZeigen = () => {
+        if (!aufgabe || fertig)
+            return;
+        setGezeigt(true);
+        setPatzer(true);
+        const s = new Chess(spiel.fen());
+        let i = schritt;
+        const weiter = () => {
+            const zug = aufgabe.loesung[i];
+            if (!zug) {
+                setLage("geloest");
+                onErgebnis(false);
+                return;
+            }
+            const z = s.move({ from: zug.slice(0, 2), to: zug.slice(2, 4), promotion: zug[4] || "q" });
+            setLetzter(z ? { from: z.from, to: z.to } : null);
+            setSpiel(new Chess(s.fen()));
+            i++;
+            setSchritt(i);
+            setTimeout(weiter, 650);
+        };
+        weiter();
+    };
+
+    const themen = aufgabe ? themenLesbar(aufgabe.themen) : [];
+    const offen = aufgabe ? Math.ceil((aufgabe.loesung.length - schritt) / 2) : 0;
+
+    return (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-md md:mx-auto" },
+        React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
+            React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Taktik"),
+            React.createElement("span", { className: "mono text-xs pl-muted" },
+                stand.serie > 0 ? "Serie " + stand.serie + " · " : "",
+                stand.geloest,
+                " von ",
+                stand.versucht,
+                " gelöst")),
+
+        lage === "fehler"
+            ? React.createElement("div", { className: "pl-card rounded p-5 flex flex-col gap-3" },
+                React.createElement("p", { className: "text-sm leading-relaxed" }, fehler),
+                React.createElement("button", { onClick: laden, className: "pl-btn px-3 py-2 rounded mono text-xs self-start" }, "Nochmal versuchen"))
+            : !spiel
+                ? React.createElement("p", { className: "mono text-xs pl-muted py-8 text-center" }, "Aufgabe wird geholt…")
+                : React.createElement(React.Fragment, null,
+                    React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
+                        React.createElement("span", { className: "text-sm font-medium" }, meineFarbe === "w" ? "Weiß am Zug" : "Schwarz am Zug"),
+                        React.createElement("span", { className: "mono text-xs pl-muted" }, aufgabe.wertung ? aufgabe.wertung : "")),
+                    React.createElement(Brett, {
+                        stellung: stellung, unten: meineFarbe, gewaehlt: gewaehlt,
+                        ziele: ziele, letzter: letzter, onFeld: feldTippen,
+                    }),
+                    React.createElement("div", { className: "flex items-center justify-between gap-2 min-h-6" },
+                        React.createElement("span", { className: "mono text-xs", style: {
+                                color: lage === "daneben" ? lift("#A03A5E")
+                                    : lage === "geloest" ? lift("#1E6E5A") : "var(--muted)",
+                            } }, lage === "daneben" ? "Nicht dieser Zug."
+                            : lage === "geloest" ? (gezeigt ? "Lösung gezeigt." : patzer ? "Gelöst — mit Umweg." : "Gelöst.")
+                                : offen > 1 ? "Noch " + offen + " Züge zu finden"
+                                    : "Finde den besten Zug"),
+                        themen.length > 0 && lage === "geloest" && (React.createElement("span", { className: "mono text-xs pl-muted" }, themen.join(" · ")))),
+                    React.createElement("div", { className: "flex gap-2" },
+                        lage === "geloest"
+                            ? React.createElement("button", { onClick: laden, className: "flex-1 py-2.5 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Nächste Aufgabe")
+                            : React.createElement(React.Fragment, null,
+                                React.createElement("button", { onClick: loesungZeigen, disabled: gezeigt, className: "pl-btn px-3 py-2 rounded mono text-xs" }, "Lösung zeigen"),
+                                React.createElement("button", { onClick: laden, className: "pl-btn px-3 py-2 rounded mono text-xs" }, "Überspringen"))))));
 }
 /* ════════════════ Assistent ════════════════ */
 function AssiSheet({ state, blocksFor, heuteK, katKeys, mails, onAnlegen, onClose }) {
