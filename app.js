@@ -1805,6 +1805,63 @@ async function rezeptVonKi(wunsch) {
         createdAt: Date.now(),
     };
 }
+/* ── Postfach ───────────────────────────────────────────────
+   Ein Skript im eigenen Google-Konto sieht nach und meldet an den
+   eigenen Cloudflare-Dienst; die App holt es von dort. Der Umweg ist
+   nötig, weil der Gmail-Zugriff für fremde Apps eine Prüfung samt
+   jährlichem Sicherheitsaudit verlangt - ein eigenes Skript im eigenen
+   Konto nicht.
+
+   Der Schlüssel liegt im Gerätespeicher und nicht in config.js: Die
+   liegt in einem öffentlichen Repo, und mit dem Schlüssel könnte jeder
+   die Betreffzeilen mitlesen. */
+const POST_KEY = "planer:postfach";
+const postfachSchluessel = () => {
+    try {
+        return localStorage.getItem(POST_KEY) || "";
+    }
+    catch (e) {
+        return "";
+    }
+};
+const postfachSchluesselSetzen = (v) => {
+    try {
+        v ? localStorage.setItem(POST_KEY, v.trim()) : localStorage.removeItem(POST_KEY);
+    }
+    catch (e) { }
+};
+const postfachMoeglich = () => !!(PUSH_DIENST && postfachSchluessel());
+/* Was die App schon gesehen hat - bewusst nur lokal, nicht im
+   abgeglichenen Stand: Was auf dem Handy gelesen ist, muss auf dem
+   Tablet nicht auch als gelesen gelten. */
+const POST_GESEHEN = "planer:postfachGesehen";
+const postfachGesehen = () => {
+    try {
+        return Number(localStorage.getItem(POST_GESEHEN) || 0);
+    }
+    catch (e) {
+        return 0;
+    }
+};
+const postfachGesehenSetzen = (t) => {
+    try {
+        localStorage.setItem(POST_GESEHEN, String(t));
+    }
+    catch (e) { }
+};
+async function postfachHolen() {
+    if (!postfachMoeglich())
+        return [];
+    const url = PUSH_DIENST.replace(/\/$/, "") + "/mail/liste?schluessel="
+        + encodeURIComponent(postfachSchluessel());
+    const a = await fetch(url);
+    if (a.status === 403)
+        throw new Error("Postfach-Schlüssel wird nicht angenommen");
+    if (!a.ok)
+        throw new Error("Postfach nicht erreichbar (" + a.status + ")");
+    const d = await a.json();
+    return Array.isArray(d.mails) ? d.mails : [];
+}
 /* ── Assistent ──────────────────────────────────────────────
    Claude im Planer, mit Händen statt nur Mund: Er sieht, was ansteht,
    und kann Termine, Aufgaben, Gewohnheiten und Prüfungen anlegen.
@@ -1906,7 +1963,7 @@ function assiWerkzeuge(katKeys) {
 
 /* Was der Assistent sieht - und damit auch: was das Gerät verlässt.
    Bewusst knapp gehalten, das spart Kosten und hält die Antwort scharf. */
-function assiKontext(state, blocksFor, heuteK) {
+function assiKontext(state, blocksFor, heuteK, mails) {
     const zeilen = [];
     const d = new Date(heuteK + "T00:00:00");
     zeilen.push("Heute: " + datumLang(heuteK));
@@ -1945,6 +2002,13 @@ function assiKontext(state, blocksFor, heuteK) {
         zeilen.push("", "Kommende Prüfungen:");
         zeilen.push(pruef.map((e) => "· " + e.title + " am " + e.date
             + " (in " + Math.ceil((new Date(e.date + "T00:00:00") - d) / 86400000) + " Tagen)").join("\n"));
+    }
+
+    if ((mails || []).length) {
+        zeilen.push("", "Zuletzt eingegangene E-Mails (nur Absender und Betreff):");
+        zeilen.push(mails.slice(0, 15).map((m) => "· "
+            + new Date(m.zeit).toLocaleString("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+            + " von " + m.von + ": " + m.betreff).join("\n"));
     }
 
     const wochen = (state.study && state.study.weeks) || [];
@@ -3011,6 +3075,40 @@ function PlannerApp() {
             };
         }, { undo: false });
     }, [loaded, tagesVers, bibelTag, bibel.zuletzt, persist]);
+    /* ── Postfach ───────────────────────────────────────── */
+    /* Zählt hoch, wenn der Schlüssel gesetzt wird - sonst müsste man die
+       App neu starten, damit das Abfragen anläuft. */
+    const [postKeyStand, setPostKeyStand] = useState(0);
+    const [mails, setMails] = useState([]);
+    const [postFehler, setPostFehler] = useState("");
+    /* Beim Öffnen holen und danach beim Zurückkehren zur App. Die App
+       fragt nach, statt dass der Dienst sie weckt - in einer WebView
+       gibt es keinen Weg, von außen hereinzurufen. */
+    useEffect(() => {
+        if (!loaded || !postfachMoeglich())
+            return;
+        let weg = false;
+        const holen = () => {
+            if (document.visibilityState !== "visible")
+                return;
+            postfachHolen()
+                .then((m) => { if (!weg) { setMails(m); setPostFehler(""); } })
+                .catch((e) => { if (!weg) setPostFehler(e.message); });
+        };
+        holen();
+        document.addEventListener("visibilitychange", holen);
+        const takt = setInterval(holen, 5 * 60000);
+        return () => {
+            weg = true;
+            document.removeEventListener("visibilitychange", holen);
+            clearInterval(takt);
+        };
+    }, [loaded, postKeyStand]);
+    const neueMails = mails.filter((m) => m.zeit > postfachGesehen());
+    const mailsGelesen = () => {
+        postfachGesehenSetzen(Date.now());
+        setMails((m) => m.slice());
+    };
     /* ── Assistent ──────────────────────────────────────── */
     const [assiOffen, setAssiOffen] = useState(false);
     /* Führt einen Werkzeugaufruf aus. Alles läuft über dieselben
@@ -4306,6 +4404,7 @@ function PlannerApp() {
                     vorgemerkt: (abendAlle[selectedDay] || {}).habits || [],
                     vorsatz: (abendAlle[selectedDay] || {}).vorsatz || "",
                     abendFaellig: abendFaellig && selectedDay === todayKey,
+                    neueMails: neueMails, onMailsGelesen: mailsGelesen,
                     onAbend: () => setAbendOffen(true) }))),
             view === "woche" && (React.createElement(React.Fragment, null,
                 React.createElement("header", { className: "px-4 pb-3 md:px-6" },
@@ -4417,6 +4516,10 @@ function PlannerApp() {
                     onKalender: (an) => setNotify({ kalender: an }),
                     onTest: () => zeigeHinweis({ id: "test", title: "So sieht ein Hinweis aus", start: now.getHours() * 60 + now.getMinutes(), dur: 60 }),
                 }),
+                React.createElement(PostfachPanel, {
+                    anzahl: mails.length, fehler: postFehler,
+                    onGesetzt: () => setPostKeyStand((n) => n + 1),
+                }),
                 React.createElement(ProtokollPanel, null),
                 React.createElement(CatPanel, { cats: catsNow, onField: setCatField, onAdd: addCat, onRemove: removeCat }),
                 React.createElement(RoutinePanel, { routines: state.routines, checks: state.checks, days: days, weekStart: weekStart, today: today, onAdd: addRoutine, onRemove: removeRoutine, onToggle: toggleCheck, onTarget: setRoutineTarget, onFeld: setRoutineFeld, onPlan: (r) => startPlacing({ title: r.title, cat: r.cat, est: 60 }) })))),
@@ -4460,7 +4563,7 @@ function PlannerApp() {
         })),
         assiOffen && (React.createElement(AssiSheet, {
             state: state, blocksFor: blocksFor, heuteK: todayKey,
-            katKeys: Object.keys(catsNow),
+            katKeys: Object.keys(catsNow), mails: mails,
             onAnlegen: assiAnlegen,
             onClose: () => setAssiOffen(false),
         })),
@@ -4484,7 +4587,7 @@ function PlannerApp() {
         }))));
 }
 /* ════════════════ Assistent ════════════════ */
-function AssiSheet({ state, blocksFor, heuteK, katKeys, onAnlegen, onClose }) {
+function AssiSheet({ state, blocksFor, heuteK, katKeys, mails, onAnlegen, onClose }) {
     const [verlauf, setVerlauf] = useState([]);
     const [frage, setFrage] = useState("");
     const [laeuft, setLaeuft] = useState(false);
@@ -4516,7 +4619,7 @@ function AssiSheet({ state, blocksFor, heuteK, katKeys, onAnlegen, onClose }) {
            So bleibt der System-Teil über alle Anfragen gleich und kann
            zwischengespeichert werden. */
         const nachrichten = [];
-        const kontext = assiKontext(state, blocksFor, heuteK);
+        const kontext = assiKontext(state, blocksFor, heuteK, mails);
         for (const n of sichtbar.slice(-ASSI_VERLAUF_MAX)) {
             if (n.rolle === "ich")
                 nachrichten.push({ role: "user", content: n.text });
@@ -5516,7 +5619,7 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
 function HourRail({ hours, ppm, every = 1, compact = false, von = DAY_START, bis = DAY_END }) {
     return (React.createElement("div", { className: "relative", style: { height: (bis - von) * 60 * ppm } }, hours.map((h, i) => (i % every === 0 ? (React.createElement("div", { key: h, className: "absolute mono pl-muted", style: { right: compact ? 3 : 6, top: (h - von) * 60 * ppm - 6, fontSize: compact ? 9 : 11 } }, compact ? h : pad(h))) : null))));
 }
-function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, onMove, ppm, todos, todoPlan, onAddTodo, onToggleTodo, onRemoveTodo, onPlanTodo, onOpenBlock, pendingPick, onImportTodoist, vorgemerkt, vorsatz, abendFaellig, onAbend }) {
+function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck, onBlock, onStatus, onAdd, onShiftDay, onBackToToday, onSlot, onMove, ppm, todos, todoPlan, onAddTodo, onToggleTodo, onRemoveTodo, onPlanTodo, onOpenBlock, pendingPick, onImportTodoist, vorgemerkt, vorsatz, abendFaellig, onAbend, neueMails = [], onMailsGelesen }) {
     var _a, _b;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const d = new Date(dayK + "T00:00:00");
@@ -5541,6 +5644,20 @@ function TodayView({ dayK, blocks, now, isToday, routines, checks, onToggleCheck
             React.createElement("button", { onClick: () => onShiftDay(1), className: "pl-btn p-2 rounded", "aria-label": "Tag vor" },
                 React.createElement(ChevronRight, { size: 16 }))),
         !isToday && (React.createElement("button", { onClick: onBackToToday, className: "pl-btn px-3 py-1.5 rounded mono text-xs self-center" }, "zur\u00FCck zu heute")),
+        /* Was seit dem letzten Hinsehen eingegangen ist. Steht weit oben,
+           weil eine Mail, die man erst abends sieht, oft zu sp\u00E4t ist. */
+        isToday && neueMails.length > 0 && (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2", style: { borderLeft: `3px solid ${lift("#12657F")}` } },
+            React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                React.createElement("span", { className: "mono text-xs uppercase tracking-widest", style: { color: lift("#12657F") } },
+                    neueMails.length === 1 ? "1 neue E-Mail" : neueMails.length + " neue E-Mails"),
+                React.createElement("button", { onClick: onMailsGelesen, className: "mono text-xs pl-muted" }, "gesehen")),
+            neueMails.slice(0, 5).map((m) => (React.createElement("div", { key: m.id, className: "flex flex-col" },
+                React.createElement("span", { className: "text-sm leading-snug" }, m.betreff),
+                React.createElement("span", { className: "mono text-xs pl-muted" },
+                    m.von,
+                    " \u00B7 ",
+                    new Date(m.zeit).toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" }))))),
+            neueMails.length > 5 && (React.createElement("span", { className: "mono text-xs pl-muted" }, "und " + (neueMails.length - 5) + " weitere")))),
         /* Was du dir gestern Abend f\u00FCr heute vorgenommen hast */
         isToday && vorsatz && (React.createElement("div", { className: "pl-card rounded p-3", style: { borderLeft: `3px solid ${lift("#5B3FA0")}` } },
             React.createElement("div", { className: "mono text-xs uppercase tracking-widest", style: { color: lift("#5B3FA0") } }, "Vorsatz f\u00FCr heute"),
@@ -6213,6 +6330,31 @@ function NotifyPanel({ notify, recht, onAnschalten, onAus, onVorlauf, onTest, on
 /* Zeigt, was bei der Anmeldung tatsächlich passiert ist. Die Anmeldung
    läuft über App, Browser und Google hinweg - geht unterwegs etwas
    verloren, sieht man von außen nur "es tut sich nichts". */
+/* Der Schlüssel, mit dem App und Dienst sich erkennen. Er liegt im
+   Gerätespeicher und nicht in config.js - die steht in einem
+   öffentlichen Repo, und mit dem Schlüssel könnte jeder die
+   Betreffzeilen mitlesen. */
+function PostfachPanel({ anzahl, fehler, onGesetzt }) {
+    const [schluessel, setSchluessel] = useState(postfachSchluessel());
+    const [offen, setOffen] = useState(!postfachSchluessel());
+    const an = postfachMoeglich();
+    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2" },
+        React.createElement("div", { className: "flex items-center justify-between gap-2" },
+            React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Postfach"),
+            React.createElement("button", { onClick: () => setOffen(!offen), className: "mono text-xs pl-muted" }, offen ? "▾ zu" : "▸ einrichten")),
+        React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, an
+            ? "Verbunden. " + (anzahl ? anzahl + " Nachrichten bekannt." : "Noch nichts gemeldet.")
+            : "Noch nicht eingerichtet. Ein Skript in deinem Google-Konto meldet Absender, Betreff und Uhrzeit — nie den Inhalt."),
+        fehler && (React.createElement("p", { className: "mono text-xs leading-relaxed", style: { color: lift("#A03A5E") } }, fehler)),
+        offen && (React.createElement("div", { className: "pl-rise flex flex-col gap-2" },
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Derselbe Schlüssel wie im Skript und bei Cloudflare. Er bleibt nur auf diesem Gerät."),
+            React.createElement("div", { className: "flex gap-2" },
+                React.createElement("input", { value: schluessel, onChange: (e) => setSchluessel(e.target.value), type: "password", placeholder: "Postfach-Schlüssel", className: "pl-input px-2 py-1.5 rounded text-sm flex-1" }),
+                React.createElement("button", { onClick: () => { postfachSchluesselSetzen(schluessel); setOffen(false); if (onGesetzt)
+                        onGesetzt(); }, className: "px-3 py-1.5 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Sichern")),
+            an && (React.createElement("button", { onClick: () => { postfachSchluesselSetzen(""); setSchluessel(""); if (onGesetzt)
+                    onGesetzt(); }, className: "mono text-xs pl-muted self-start" }, "Verbindung lösen"))))));
+}
 function ProtokollPanel() {
     const [offen, setOffen] = useState(false);
     const [zeilen, setZeilen] = useState([]);

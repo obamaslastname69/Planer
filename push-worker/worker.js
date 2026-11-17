@@ -53,10 +53,22 @@ async function kennung(endpoint) {
   return b64url(hash).slice(0, 24);
 }
 
+/* Vergleich in gleichbleibender Zeit. Ein gewoehnlicher Vergleich bricht
+   beim ersten falschen Zeichen ab - aus den Zeitunterschieden liesse sich
+   der Schluessel Zeichen fuer Zeichen erraten. */
+function gleicherSchluessel(gegeben, erwartet) {
+  const a = String(gegeben || "");
+  const b = String(erwartet || "");
+  if (!b || a.length !== b.length) return false;
+  let abweichung = 0;
+  for (let i = 0; i < a.length; i++) abweichung |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return abweichung === 0;
+}
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 export default {
@@ -153,6 +165,54 @@ export default {
           { status: 500, headers: { ...cors, "content-type": "application/json" } });
       }
       return new Response(JSON.stringify({ ok: antwort.ok, status: antwort.status }),
+        { headers: { ...cors, "content-type": "application/json" } });
+    }
+
+    /* ── Postfach ──────────────────────────────────────────
+       Ein Skript im Google-Konto des Nutzers sieht alle paar Minuten
+       nach und meldet hierher, was eingegangen ist. Gespeichert werden
+       nur Absender, Betreff und Zeit - nie der Inhalt.
+
+       Beide Wege verlangen denselben Schluessel. Ohne ihn koennte sonst
+       jeder, der die Adresse kennt, die Betreffzeilen mitlesen oder
+       falsche Meldungen einschleusen - der Dienst ist oeffentlich
+       erreichbar. Verglichen wird in gleichbleibender Zeit, damit sich
+       der Schluessel nicht zeichenweise erraten laesst. */
+    if (pfad === "/mail/melden" && anfrage.method === "POST") {
+      const daten = await anfrage.json().catch(() => null);
+      if (!daten || !gleicherSchluessel(daten.schluessel, env.POSTFACH_SCHLUESSEL))
+        return new Response("Nicht berechtigt", { status: 403, headers: cors });
+
+      const herein = Array.isArray(daten.mails) ? daten.mails : [];
+      const alt = JSON.parse((await env.PLANER.get("_mails")) || "[]");
+      const nach = {};
+      for (const m of alt) nach[m.id] = m;
+      let neu = 0;
+      for (const m of herein.slice(0, 50)) {
+        if (!m || !m.id || nach[m.id]) continue;
+        nach[m.id] = {
+          id: String(m.id).slice(0, 80),
+          von: String(m.von || "").slice(0, 120),
+          betreff: String(m.betreff || "").slice(0, 200),
+          zeit: Number(m.zeit) || Date.now(),
+        };
+        neu++;
+      }
+      /* Nur die juengsten behalten - das hier ist ein Briefkasten, kein Archiv */
+      const liste = Object.keys(nach).map((k) => nach[k])
+        .sort((a, b) => b.zeit - a.zeit)
+        .slice(0, 50);
+      await env.PLANER.put("_mails", JSON.stringify(liste), { expirationTtl: 30 * 86400 });
+      return new Response(JSON.stringify({ ok: true, neu: neu, gesamt: liste.length }),
+        { headers: { ...cors, "content-type": "application/json" } });
+    }
+
+    if (pfad === "/mail/liste") {
+      const url = new URL(anfrage.url);
+      if (!gleicherSchluessel(url.searchParams.get("schluessel"), env.POSTFACH_SCHLUESSEL))
+        return new Response("Nicht berechtigt", { status: 403, headers: cors });
+      const liste = JSON.parse((await env.PLANER.get("_mails")) || "[]");
+      return new Response(JSON.stringify({ mails: liste }),
         { headers: { ...cors, "content-type": "application/json" } });
     }
 

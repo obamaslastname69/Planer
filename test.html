@@ -565,6 +565,38 @@ window.PLANER_CLIENT_ID = "";
     "Hallo\nWelt");
   gleich("ohne Textblock bleibt es leer", assiText({ content: [{ type: "tool_use", id: "x" }] }), "");
 
+  /* ── Postfach ── */
+  gruppe("Postfach");
+  /* Bewusst nicht am gespeicherten Schluessel festgemacht: Der haengt
+     davon ab, was im Browser zufaellig liegt, und ein Test, der von der
+     Umgebung abhaengt, schlaegt irgendwann ohne Grund fehl. */
+  pruefe("ohne Schluessel gilt das Postfach als nicht eingerichtet",
+    /postfachSchluessel\(\)/.test(postfachMoeglich.toString())
+    && /PUSH_DIENST/.test(postfachMoeglich.toString()),
+    "es braucht beides: einen Dienst und einen Schluessel");
+  gleich("der Schluessel wird als Text gelesen, nie als Objekt",
+    typeof postfachSchluessel(), "string");
+  var leerKontext = assiKontext(
+    { todos: [], routines: [], checks: {}, study: { exams: [], weeks: [] }, studyDone: {} },
+    function () { return []; }, dayKey(new Date()), []);
+  pruefe("ohne Mails steht im Kontext kein Postfach-Abschnitt",
+    leerKontext.indexOf("E-Mails") === -1);
+  var mitKontext = assiKontext(
+    { todos: [], routines: [], checks: {}, study: { exams: [], weeks: [] }, studyDone: {} },
+    function () { return []; }, dayKey(new Date()),
+    [{ id: "m1", von: "Mayr GmbH", betreff: "Bewerbung Praktikum", zeit: Date.now() }]);
+  pruefe("mit Mails stehen Absender und Betreff drin",
+    mitKontext.indexOf("Mayr GmbH") > -1 && mitKontext.indexOf("Bewerbung Praktikum") > -1);
+  pruefe("und es ist benannt, dass nur Kopfdaten gehen",
+    mitKontext.indexOf("nur Absender und Betreff") > -1,
+    "der Hinweis gehoert dorthin, damit beim Lesen klar ist, was das Geraet verlaesst");
+
+  /* Der Schluessel darf nie in den abgeglichenen Stand geraten - der
+     liegt in der Cloud, und mit ihm koennte man die Betreffzeilen
+     mitlesen. Er gehoert in den Geraetespeicher. */
+  pruefe("der Postfach-Schluessel steht nicht im Standard-Zustand",
+    JSON.stringify(DEFAULT_STATE).indexOf("postfach") === -1);
+
   /* ── Ausgabe ── */
   var html = "";
   gruppen.forEach(function (g) {
