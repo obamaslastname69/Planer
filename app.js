@@ -1680,7 +1680,7 @@ function rezeptAusText(roh) {
 ──────────────────────────────────────────────────────────── */
 const AI_KEY = "planer:anthropic";
 const AI_API = "https://api.anthropic.com/v1/messages";
-const AI_MODEL = "claude-opus-5";
+const AI_MODEL = "claude-opus-5-5";
 function aiKey() {
     try {
         return localStorage.getItem(AI_KEY) || "";
@@ -1805,6 +1805,222 @@ async function rezeptVonKi(wunsch) {
         createdAt: Date.now(),
     };
 }
+/* ── Assistent ──────────────────────────────────────────────
+   Claude im Planer, mit Händen statt nur Mund: Er sieht, was ansteht,
+   und kann Termine, Aufgaben, Gewohnheiten und Prüfungen anlegen.
+
+   Jede Änderung läuft über dieselbe Schiene wie deine eigenen - also
+   lässt sie sich mit "Rückgängig" zurücknehmen. Das ist Absicht: Ein
+   Assistent, der etwas tut, muss sich auch widerrufen lassen.
+
+   Was er zu sehen bekommt, steht in assiKontext und sonst nirgends -
+   eine Stelle, an der sich nachlesen lässt, was das Gerät verlässt. */
+const ASSI_MAX_RUNDEN = 4;
+const ASSI_VERLAUF_MAX = 24;
+
+const ASSI_SYSTEM = `Du bist der Assistent in einem persönlichen Wochenplaner.
+Der Nutzer studiert Lebensmittel- und Biotechnologie in Österreich.
+
+Antworte kurz und auf Deutsch. Keine Floskeln, keine Wiederholung der Frage.
+Sag klar, was du getan hast — nicht, was du gleich tun wirst.
+
+Du kannst Einträge anlegen. Nutze die Werkzeuge, wenn der Nutzer etwas
+geplant haben will; frag nicht lange nach, wenn sich das Fehlende sinnvoll
+erschließen lässt. Fehlt etwas Wesentliches (etwa der Tag), frag kurz nach.
+
+Uhrzeiten sind Minuten ab Mitternacht: 8:30 ist 510, 14:00 ist 840.
+Der Tag läuft von 6:00 bis 23:00. Lege nichts in die Nacht.
+Prüfe im Kontext, ob die Zeit schon belegt ist, und weich sonst aus.
+
+Wenn du etwas nicht weißt, sag das. Erfinde keine Termine und keine Noten.`;
+
+/* Die Werkzeuge. strict sorgt dafür, dass die Felder wirklich so
+   ankommen, wie sie hier stehen - sonst müsste jeder Aufruf geprüft
+   werden, bevor er in die Daten darf. */
+function assiWerkzeuge(katKeys) {
+    const kat = { type: "string", enum: katKeys, description: "Kategorie" };
+    return [
+        {
+            name: "termin_anlegen",
+            description: "Legt einen Termin im Wochenplan an.",
+            strict: true,
+            input_schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["tag", "start", "dauer", "titel", "kategorie"],
+                properties: {
+                    tag: { type: "string", description: "Datum als JJJJ-MM-TT" },
+                    start: { type: "integer", description: "Minuten ab Mitternacht, z. B. 510 für 8:30" },
+                    dauer: { type: "integer", description: "Dauer in Minuten" },
+                    titel: { type: "string" },
+                    kategorie: kat,
+                },
+            },
+        },
+        {
+            name: "aufgabe_anlegen",
+            description: "Legt eine offene Aufgabe an, ohne feste Zeit.",
+            strict: true,
+            input_schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["titel", "kategorie", "dauer"],
+                properties: {
+                    titel: { type: "string" },
+                    kategorie: kat,
+                    dauer: { type: "integer", description: "geschätzte Minuten, 0 wenn unbekannt" },
+                },
+            },
+        },
+        {
+            name: "gewohnheit_anlegen",
+            description: "Legt eine tägliche Gewohnheit an, auf Wunsch mit Erinnerungszeit.",
+            strict: true,
+            input_schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["titel", "kategorie", "zeit"],
+                properties: {
+                    titel: { type: "string" },
+                    kategorie: kat,
+                    zeit: { type: "string", description: "HH:MM oder leer für ohne Erinnerung" },
+                },
+            },
+        },
+        {
+            name: "pruefung_anlegen",
+            description: "Trägt eine Prüfung mit Datum ein.",
+            strict: true,
+            input_schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["titel", "datum"],
+                properties: {
+                    titel: { type: "string" },
+                    datum: { type: "string", description: "JJJJ-MM-TT" },
+                },
+            },
+        },
+    ];
+}
+
+/* Was der Assistent sieht - und damit auch: was das Gerät verlässt.
+   Bewusst knapp gehalten, das spart Kosten und hält die Antwort scharf. */
+function assiKontext(state, blocksFor, heuteK) {
+    const zeilen = [];
+    const d = new Date(heuteK + "T00:00:00");
+    zeilen.push("Heute: " + datumLang(heuteK));
+
+    const kommend = [];
+    for (let i = 0; i < 7; i++) {
+        const tag = dayKey(addDays(d, i));
+        for (const b of blocksFor(tag)) {
+            if (b.allDay || !b.title) continue;
+            kommend.push(tag + " " + minsToLabel(b.start) + " " + durLabel(b.dur)
+                + " · " + b.title + (b.external ? " (Kalender)" : ""));
+        }
+    }
+    zeilen.push("", "Termine der nächsten 7 Tage:");
+    zeilen.push(kommend.length ? kommend.join("\n") : "keine");
+
+    const offen = (state.todos || []).filter((t) => !t.done);
+    zeilen.push("", "Offene Aufgaben:");
+    zeilen.push(offen.length
+        ? offen.map((t) => "· " + t.title + (t.est ? " (" + durLabel(t.est) + ")" : "")).join("\n")
+        : "keine");
+
+    const hab = (state.routines || []).filter(istGewohnheit);
+    if (hab.length) {
+        const heuteFertig = state.checks && state.checks[heuteK] || [];
+        zeilen.push("", "Gewohnheiten heute:");
+        zeilen.push(hab.map((r) => "· " + r.title
+            + (r.zeit ? " um " + r.zeit : "")
+            + (heuteFertig.includes(r.id) ? " — erledigt" : " — offen")).join("\n"));
+    }
+
+    const pruef = ((state.study && state.study.exams) || [])
+        .filter((e) => e.date >= heuteK)
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (pruef.length) {
+        zeilen.push("", "Kommende Prüfungen:");
+        zeilen.push(pruef.map((e) => "· " + e.title + " am " + e.date
+            + " (in " + Math.ceil((new Date(e.date + "T00:00:00") - d) / 86400000) + " Tagen)").join("\n"));
+    }
+
+    const wochen = (state.study && state.study.weeks) || [];
+    const jetztWoche = wochen.find((w) => heuteK >= w.from && heuteK <= w.to);
+    if (jetztWoche) {
+        const offenAufg = (jetztWoche.must || [])
+            .filter((t) => !(state.studyDone || {})[t.id])
+            .map((t) => "· " + t.t + " (" + durLabel(t.m) + ")");
+        zeilen.push("", "Lernwoche „" + jetztWoche.title + "\", noch offen:");
+        zeilen.push(offenAufg.length ? offenAufg.join("\n") : "alles erledigt");
+    }
+    return zeilen.join("\n");
+}
+
+/* Eine Runde beim Modell. Gibt die Antwort zurück; Werkzeugaufrufe
+   führt der Aufrufer aus und schickt die Ergebnisse in die nächste
+   Runde - so bleibt das Anwenden von Änderungen an einer Stelle. */
+async function assiFragen(nachrichten, werkzeuge, system) {
+    const key = aiKey();
+    if (!key)
+        throw new Error("Kein Schlüssel hinterlegt");
+    let res;
+    try {
+        res = await fetch(AI_API, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                /* Ohne diesen Kopf blockt der Browser die Anfrage (CORS) */
+                "anthropic-dangerous-direct-browser-access": "true",
+                "anthropic-beta": "server-side-fallback-2026-07-01",
+            },
+            body: JSON.stringify({
+                model: AI_MODEL,
+                max_tokens: 4000,
+                system: system,
+                /* Mittlerer Aufwand: Planen braucht etwas Nachdenken, aber
+                   kein tiefes - und jede Stufe kostet. */
+                output_config: { effort: "medium" },
+                /* Lehnt eine Sicherheitsprüfung ab, antwortet ein anderes
+                   Modell, statt dass der Assistent stumm bleibt. */
+                fallbacks: "default",
+                tools: werkzeuge,
+                messages: nachrichten,
+            }),
+        });
+    }
+    catch (e) {
+        throw new Error("Keine Verbindung zu Claude — Internet?");
+    }
+    if (res.status === 401)
+        throw new Error("Schlüssel wird nicht angenommen — stimmt er noch?");
+    if (res.status === 429)
+        throw new Error("Zu viele Anfragen — kurz warten");
+    if (!res.ok) {
+        let text = "";
+        try {
+            const j = await res.json();
+            text = (j && j.error && j.error.message) || "";
+        }
+        catch (e) { }
+        throw new Error("Claude " + res.status + (text ? ": " + text.slice(0, 160) : ""));
+    }
+    const data = await res.json();
+    if (data.stop_reason === "refusal")
+        throw new Error("Die Anfrage wurde abgelehnt");
+    return data;
+}
+
+/* Aus den Blöcken der Antwort den sichtbaren Text ziehen */
+const assiText = (data) => (data.content || [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
 /* ── Abgleich über Google Drive ────────────────────────────
    Speichert im versteckten appDataFolder: nur diese App sieht ihn.
 ──────────────────────────────────────────────────────────── */
@@ -2579,7 +2795,7 @@ function PlannerApp() {
         });
         setSync({ status: "ok", msg: `Vorlage aus ${tpl.length} Blöcken gesichert` });
     };
-    const removeTemplateEntry = (id) => persist({ ...state, template: state.template.filter((t) => t.id !== id) });
+    const removeTemplateEntry = (id) => persist((prev) => ({ ...prev, template: prev.template.filter((t) => t.id !== id) }));
     const toggleTemplateAuto = (id) => persist({
         ...state,
         template: state.template.map((t) => (t.id === id ? { ...t, auto: !t.auto } : t)),
@@ -2795,6 +3011,52 @@ function PlannerApp() {
             };
         }, { undo: false });
     }, [loaded, tagesVers, bibelTag, bibel.zuletzt, persist]);
+    /* ── Assistent ──────────────────────────────────────── */
+    const [assiOffen, setAssiOffen] = useState(false);
+    /* Führt einen Werkzeugaufruf aus. Alles läuft über dieselben
+       Funktionen wie eine Eingabe von Hand - also auch über denselben
+       Rückgängig-Speicher. Was der Assistent anlegt, lässt sich
+       genauso zurücknehmen wie das Eigene. */
+    const assiAnlegen = (name, ein) => {
+        const kat = (k) => (catsNow[k] ? k : "fokus");
+        if (name === "termin_anlegen") {
+            const tag = String(ein.tag || "");
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(tag))
+                return { ok: false, meldung: "Das Datum muss JJJJ-MM-TT sein." };
+            const start = Math.max(0, Math.min(23 * 60, Number(ein.start) || 0));
+            const dur = Math.max(15, Math.min(12 * 60, Number(ein.dauer) || 60));
+            addBlock(tag, start, { dur: dur, title: String(ein.titel || "").slice(0, 120), cat: kat(ein.kategorie), stillAnlegen: true });
+            return { ok: true, beschreibung: ein.titel + " am " + datumKurz(tag) + " um " + minsToLabel(start) };
+        }
+        if (name === "aufgabe_anlegen") {
+            const est = Math.max(0, Math.min(8 * 60, Number(ein.dauer) || 0));
+            addTodo(String(ein.titel || "").slice(0, 120), kat(ein.kategorie), est || undefined);
+            return { ok: true, beschreibung: "Aufgabe: " + ein.titel };
+        }
+        if (name === "gewohnheit_anlegen") {
+            const zeit = zeitInMinuten(ein.zeit) === null ? "" : String(ein.zeit).trim();
+            const id = uid();
+            persist((prev) => ({
+                ...prev,
+                routines: [...(prev.routines || []), {
+                        id: id, title: String(ein.titel || "").slice(0, 80),
+                        cat: kat(ein.kategorie), taeglich: true, zeit: zeit,
+                    }],
+            }));
+            return { ok: true, beschreibung: "Gewohnheit: " + ein.titel + (zeit ? " um " + zeit : "") };
+        }
+        if (name === "pruefung_anlegen") {
+            const datum = String(ein.datum || "");
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(datum))
+                return { ok: false, meldung: "Das Datum muss JJJJ-MM-TT sein." };
+            updateStudy((st) => ({
+                ...st,
+                exams: [...(st.exams || []), { id: uid(), title: String(ein.titel || "").slice(0, 80), date: datum }],
+            }));
+            return { ok: true, beschreibung: "Prüfung: " + ein.titel + " am " + datumKurz(datum) };
+        }
+        return { ok: false, meldung: "Unbekanntes Werkzeug: " + name };
+    };
     /* ── Suche ──────────────────────────────────────────── */
     /* Ein Treffer führt dorthin, wo er zu Hause ist: erst den Tag und
        die Woche stellen, dann den Tab wechseln, dann das Einzelne
@@ -3168,7 +3430,12 @@ function PlannerApp() {
             synced: false,
         };
         persist((prev) => ({ ...prev, blocks: [...prev.blocks, b] }));
-        setDetailId(b.id);
+        /* Von Hand angelegt will man den Termin gleich ausfüllen. Legt ihn
+           dagegen der Assistent an, schöbe sich das Detailfenster über das
+           Gespräch - und bei mehreren Terminen gleich mehrfach. */
+        if (!patch.stillAnlegen)
+            setDetailId(b.id);
+        return b;
     };
     /* patch darf eine Funktion sein, die den aktuellen Block bekommt. Nur so
        rechnen schnell aufeinander folgende Klicks (Tage +) korrekt weiter,
@@ -3330,7 +3597,7 @@ function PlannerApp() {
             deleteFromCalendar(b.gcalId);
         removeBlock(id);
     };
-    const removeBlock = (id) => persist({ ...state, blocks: state.blocks.filter((b) => b.id !== id) });
+    const removeBlock = (id) => persist((prev) => ({ ...prev, blocks: prev.blocks.filter((b) => b.id !== id) }));
     const handleSlotClick = (day, minutes) => {
         if (manualPick) {
             const t = manualPick;
@@ -3760,7 +4027,12 @@ function PlannerApp() {
         }
     };
     /* To-dos */
-    const addTodo = (title, cat, est) => persist({ ...state, todos: [...state.todos, { id: uid(), title, cat, est, done: false }] });
+    /* Alle diese Änderungen nehmen den vorigen Stand als Vorlage, statt den
+       beim Rendern festgehaltenen. Mit dem festgehaltenen ging bei zwei
+       Änderungen kurz hintereinander die erste verloren: Die zweite schrieb
+       einen Stand zurück, der die erste noch gar nicht enthielt. Von Hand
+       fällt das kaum auf, der Assistent legt aber mehrere auf einmal an. */
+    const addTodo = (title, cat, est) => persist((prev) => ({ ...prev, todos: [...prev.todos, { id: uid(), title, cat, est, done: false }] }));
     /* Todoist-Aufgaben übernehmen: vorhandene aktualisieren, neue anlegen */
     const importTodoist = useCallback(async () => {
         setSync({ status: "loading", msg: "Todoist wird gelesen…" });
@@ -3804,9 +4076,9 @@ function PlannerApp() {
             todos: prev.todos.map((x) => (x.id === id ? { ...x, done: !x.done } : x)),
         }));
     };
-    const removeTodo = (id) => persist({ ...state, todos: state.todos.filter((t) => t.id !== id) });
+    const removeTodo = (id) => persist((prev) => ({ ...prev, todos: prev.todos.filter((t) => t.id !== id) }));
     /* Routinen */
-    const addRoutine = (title, cat) => persist({ ...state, routines: [...state.routines, { id: uid(), title, cat }] });
+    const addRoutine = (title, cat) => persist((prev) => ({ ...prev, routines: [...prev.routines, { id: uid(), title, cat }] }));
     /* ── Gewohnheiten und Abendplanung ──────────────────── */
     const setRoutineFeld = (id, patch) => persist((prev) => ({
         ...prev,
@@ -3857,11 +4129,11 @@ function PlannerApp() {
         ...prev,
         routines: prev.routines.map((r) => (r.id === id ? { ...r, weekTarget } : r)),
     }));
-    const removeRoutine = (id) => persist({ ...state, routines: state.routines.filter((r) => r.id !== id) });
+    const removeRoutine = (id) => persist((prev) => ({ ...prev, routines: prev.routines.filter((r) => r.id !== id) }));
     const toggleCheck = (routineId, key) => {
         const cur = state.checks[key] || [];
         const next = cur.includes(routineId) ? cur.filter((x) => x !== routineId) : [...cur, routineId];
-        persist({ ...state, checks: { ...state.checks, [key]: next } });
+        persist((prev) => ({ ...prev, checks: { ...prev.checks, [key]: next } }));
     };
     /* ── Render ── */
     const weekLabel = `${weekStart.getDate()}.${pad(weekStart.getMonth() + 1)}. – ${addDays(weekStart, 6).getDate()}.${pad(addDays(weekStart, 6).getMonth() + 1)}.`;
@@ -3988,6 +4260,11 @@ function PlannerApp() {
                     className: "pl-btn px-2 py-1 rounded flex items-center",
                     title: "Suchen"
                 }, React.createElement(Lupe, { size: 13 })),
+                React.createElement("button", {
+                    onClick: () => setAssiOffen(true),
+                    className: "pl-btn px-2.5 py-1 rounded mono text-xs",
+                    title: "Assistent fragen"
+                }, "Claude"),
                 React.createElement("button", {
                     onClick: toggleTheme,
                     className: "pl-btn px-2 py-1 rounded flex items-center",
@@ -4181,6 +4458,12 @@ function PlannerApp() {
                 setRecipeEdit(r.id);
             },
         })),
+        assiOffen && (React.createElement(AssiSheet, {
+            state: state, blocksFor: blocksFor, heuteK: todayKey,
+            katKeys: Object.keys(catsNow),
+            onAnlegen: assiAnlegen,
+            onClose: () => setAssiOffen(false),
+        })),
         sucheOffen && (React.createElement(SearchSheet, {
             state: state, onClose: () => setSucheOffen(false), onZiel: suchZiel,
         })),
@@ -4199,6 +4482,142 @@ function PlannerApp() {
             onSave: (patch) => updateRecipe(bearbeitetesRezept.id, patch),
             onDelete: () => { removeRecipe(bearbeitetesRezept.id); setRecipeEdit(null); },
         }))));
+}
+/* ════════════════ Assistent ════════════════ */
+function AssiSheet({ state, blocksFor, heuteK, katKeys, onAnlegen, onClose }) {
+    const [verlauf, setVerlauf] = useState([]);
+    const [frage, setFrage] = useState("");
+    const [laeuft, setLaeuft] = useState(false);
+    const [fehler, setFehler] = useState("");
+    const [schluessel, setSchluessel] = useState(aiKey());
+    const [schluesselOffen, setSchluesselOffen] = useState(!aiKey());
+    const endeRef = useRef(null);
+    const c = lift("#2B4B8F");
+
+    useEffect(() => {
+        if (endeRef.current)
+            endeRef.current.scrollIntoView({ block: "end" });
+    }, [verlauf, laeuft]);
+
+    /* Eine Frage, dann so lange Werkzeuge ausführen, bis Claude fertig
+       ist. Die Begrenzung verhindert, dass ein Missverständnis in eine
+       Endlosschleife läuft - jede Runde kostet Geld. */
+    const senden = async () => {
+        const text = frage.trim();
+        if (!text || laeuft)
+            return;
+        setFehler("");
+        setFrage("");
+        const sichtbar = [...verlauf, { rolle: "ich", text: text }];
+        setVerlauf(sichtbar);
+        setLaeuft(true);
+
+        /* Der Kontext geht als erste Nachricht mit, nicht im System-Text:
+           So bleibt der System-Teil über alle Anfragen gleich und kann
+           zwischengespeichert werden. */
+        const nachrichten = [];
+        const kontext = assiKontext(state, blocksFor, heuteK);
+        for (const n of sichtbar.slice(-ASSI_VERLAUF_MAX)) {
+            if (n.rolle === "ich")
+                nachrichten.push({ role: "user", content: n.text });
+            else if (n.rolle === "claude" && n.text)
+                nachrichten.push({ role: "assistant", content: n.text });
+        }
+        nachrichten[0] = {
+            role: "user",
+            content: "Stand des Planers:\n\n" + kontext + "\n\n---\n\n" + nachrichten[0].content,
+        };
+
+        const werkzeuge = assiWerkzeuge(katKeys);
+        const getan = [];
+        try {
+            for (let runde = 0; runde < ASSI_MAX_RUNDEN; runde++) {
+                const data = await assiFragen(nachrichten, werkzeuge, ASSI_SYSTEM);
+                const rufe = (data.content || []).filter((b) => b.type === "tool_use");
+                if (!rufe.length) {
+                    setVerlauf((v) => [...v, {
+                        rolle: "claude",
+                        text: assiText(data) || "(keine Antwort)",
+                        getan: getan.slice(),
+                    }]);
+                    break;
+                }
+                /* Alle Aufrufe einer Runde ausführen und die Ergebnisse
+                   gemeinsam zurückgeben - einzeln zurückzuschicken bringt
+                   Claude dazu, künftig nicht mehr mehrere auf einmal zu
+                   machen. */
+                nachrichten.push({ role: "assistant", content: data.content });
+                const ergebnisse = [];
+                for (const ruf of rufe) {
+                    let ergebnis;
+                    try {
+                        ergebnis = onAnlegen(ruf.name, ruf.input);
+                        getan.push(ergebnis.beschreibung);
+                    }
+                    catch (e) {
+                        ergebnis = { ok: false, beschreibung: "", meldung: String(e && e.message || e) };
+                    }
+                    ergebnisse.push({
+                        type: "tool_result",
+                        tool_use_id: ruf.id,
+                        is_error: !ergebnis.ok,
+                        content: ergebnis.ok ? "Erledigt: " + ergebnis.beschreibung : ergebnis.meldung,
+                    });
+                }
+                nachrichten.push({ role: "user", content: ergebnisse });
+                if (runde === ASSI_MAX_RUNDEN - 1) {
+                    setVerlauf((v) => [...v, {
+                        rolle: "claude",
+                        text: "Das waren viele Schritte auf einmal — schau bitte nach, ob alles stimmt.",
+                        getan: getan.slice(),
+                    }]);
+                }
+            }
+        }
+        catch (e) {
+            setFehler(String(e && e.message || e));
+        }
+        setLaeuft(false);
+    };
+
+    return (React.createElement("div", { onClick: onClose, className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6", style: { background: "rgba(25,29,26,.42)" } },
+        React.createElement("div", { className: "pl-sheet pl-rise w-full md:max-w-lg rounded-t-lg md:rounded-lg flex flex-col", style: { maxHeight: "92vh" }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "p-4 pb-2 flex items-center justify-between gap-2 shrink-0" },
+                React.createElement("span", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, "Assistent"),
+                React.createElement("div", { className: "flex items-center gap-2" },
+                    verlauf.length > 0 && React.createElement("button", { onClick: () => { setVerlauf([]); setFehler(""); }, className: "mono text-xs pl-muted" }, "neu"),
+                    React.createElement("button", { onClick: onClose, className: "pl-muted p-1", "aria-label": "Schließen" },
+                        React.createElement(X, { size: 18 })))),
+
+            schluesselOffen && (React.createElement("div", { className: "px-4 pb-3 flex flex-col gap-2 shrink-0" },
+                React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Der Assistent braucht einen eigenen Schlüssel von platform.claude.com. Er bleibt nur auf diesem Gerät."),
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("input", { value: schluessel, onChange: (e) => setSchluessel(e.target.value), type: "password", placeholder: "sk-ant-…", className: "pl-input px-2 py-1.5 rounded text-sm flex-1" }),
+                    React.createElement("button", { onClick: () => { aiSetKey(schluessel); setSchluesselOffen(false); }, className: "px-3 py-1.5 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Sichern")))),
+
+            React.createElement("div", { className: "px-4 flex-1 overflow-y-auto pl-scroll overscroll-contain flex flex-col gap-3" },
+                verlauf.length === 0 && !schluesselOffen && (React.createElement("div", { className: "flex flex-col gap-2 py-2" },
+                    React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Er sieht deine Termine der nächsten Woche, offene Aufgaben, Gewohnheiten, Prüfungen und die laufende Lernwoche — und kann Einträge anlegen."),
+                    ["Was steht morgen an?",
+                        "Leg mir morgen 2 Stunden Thermo am Vormittag rein",
+                        "Wann habe diese Woche noch Zeit zum Lernen?"].map((v) => (React.createElement("button", { key: v, onClick: () => setFrage(v), className: "pl-card rounded p-2.5 text-left text-sm" }, v))))),
+
+                verlauf.map((n, i) => (React.createElement("div", { key: i, className: "flex flex-col gap-1" },
+                    n.rolle === "ich"
+                        ? React.createElement("div", { className: "self-end rounded-lg px-3 py-2 text-sm", style: { background: "var(--ink)", color: "var(--paper)", maxWidth: "85%" } }, n.text)
+                        : React.createElement("div", { className: "text-sm leading-relaxed", style: { whiteSpace: "pre-wrap" } }, n.text),
+                    (n.getan || []).length > 0 && (React.createElement("div", { className: "flex flex-col gap-0.5 mt-0.5" }, n.getan.map((g, j) => (React.createElement("span", { key: j, className: "mono text-xs flex items-center gap-1.5", style: { color: lift("#1E6E5A") } },
+                        React.createElement(Check, { size: 11 }),
+                        g)))))))),
+
+                laeuft && (React.createElement("div", { className: "mono text-xs pl-muted py-1" }, "denkt nach…")),
+                fehler && (React.createElement("p", { className: "mono text-xs leading-relaxed", style: { color: lift("#A03A5E") } }, fehler)),
+                React.createElement("div", { ref: endeRef })),
+
+            React.createElement("div", { className: "p-4 pt-3 flex gap-2 shrink-0" },
+                React.createElement("input", { value: frage, onChange: (e) => setFrage(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
+                        senden(); }, placeholder: "Frag etwas oder sag, was du geplant haben willst", className: "pl-input px-3 py-2 rounded text-sm flex-1", disabled: laeuft }),
+                React.createElement("button", { onClick: senden, disabled: laeuft || !frage.trim(), className: "px-3 py-2 rounded mono text-xs shrink-0", style: { background: "var(--ink)", color: "var(--paper)", opacity: laeuft || !frage.trim() ? 0.5 : 1 } }, "Senden")))));
 }
 /* ════════════════ Rezept von Claude ════════════════ */
 function RecipeAiSheet({ onClose, onFertig }) {

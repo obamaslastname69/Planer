@@ -527,6 +527,44 @@ window.PLANER_CLIENT_ID = "";
   gleich("alle entfernen loescht nur Vergangenes", nachAufraeumen.length, 1);
   gleich("und laesst die kommende stehen", nachAufraeumen[0].title, "Thermodynamik");
 
+  /* ── Assistent ── */
+  gruppe("Assistent");
+  var wz = assiWerkzeuge(["fokus", "uni", "training"]);
+  gleich("vier Werkzeuge", wz.length, 4);
+  gleich("und zwar diese", wz.map(function (w) { return w.name; }).sort().join(","),
+    "aufgabe_anlegen,gewohnheit_anlegen,pruefung_anlegen,termin_anlegen");
+  pruefe("alle verlangen genaue Felder (strict)",
+    wz.every(function (w) { return w.strict === true; }),
+    "ohne strict koennen falsch geformte Aufrufe in die Daten geraten");
+  pruefe("keines erlaubt Zusatzfelder",
+    wz.every(function (w) { return w.input_schema.additionalProperties === false; }));
+  pruefe("die Kategorien kommen aus der App, nicht aus einer festen Liste",
+    JSON.stringify(wz[0].input_schema.properties.kategorie.enum) === JSON.stringify(["fokus", "uni", "training"]));
+
+  /* Der Kontext ist die einzige Stelle, an der Daten das Geraet verlassen -
+     also auch die einzige, die man pruefen muss. */
+  var assiStand = {
+    todos: [{ id: "t1", title: "Altklausur rechnen", done: false, est: 90 },
+            { id: "t2", title: "Schon erledigt", done: true }],
+    routines: [{ id: "h1", title: "Stille Zeit", taeglich: true, zeit: "07:00" }],
+    checks: {},
+    study: { exams: [{ id: "e1", title: "Thermodynamik", date: "2099-01-15" }], weeks: [] },
+    studyDone: {}
+  };
+  var k = assiKontext(assiStand, function () { return []; }, dayKey(new Date()));
+  pruefe("das heutige Datum steht drin", k.indexOf("Heute:") === 0);
+  pruefe("offene Aufgaben stehen drin", k.indexOf("Altklausur rechnen") > -1);
+  pruefe("erledigte nicht", k.indexOf("Schon erledigt") === -1);
+  pruefe("Gewohnheiten mit Uhrzeit und Stand",
+    k.indexOf("Stille Zeit") > -1 && k.indexOf("07:00") > -1 && k.indexOf("offen") > -1);
+  pruefe("kommende Pruefungen", k.indexOf("Thermodynamik") > -1);
+  pruefe("ohne Termine steht das auch so da", k.indexOf("keine") > -1);
+
+  gleich("Text wird aus den Textbloecken gezogen",
+    assiText({ content: [{ type: "text", text: "Hallo" }, { type: "tool_use", id: "x" }, { type: "text", text: "Welt" }] }),
+    "Hallo\nWelt");
+  gleich("ohne Textblock bleibt es leer", assiText({ content: [{ type: "tool_use", id: "x" }] }), "");
+
   /* ── Ausgabe ── */
   var html = "";
   gruppen.forEach(function (g) {
