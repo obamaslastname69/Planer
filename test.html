@@ -201,7 +201,6 @@ window.PLANER_CLIENT_ID = "";
     recipes: [{ id: "r1", title: "Linsencurry", cat: "hauptgericht", ingredients: [{ name: "rote Linsen" }] }],
     study: { weeks: [{ n: 3, title: "Mitte des Stoffs", must: [{ t: "Altklausur rechnen", m: 90 }] }] },
     training: { types: [{ id: "y1", name: "Kraft & Limit", exercises: [{ id: "e1", name: "Weighted Pull-ups" }] }] },
-    gebet: { "0": { dank: [{ id: "g1", text: "Dass ich studieren darf" }] } },
     bibel: { gelesen: [{ datum: "2026-08-30", kap: 27, vers: 4, text: "Grausam ist der Zorn" }] }
   };
   var f = function (q) { return sucheAlles(probeStand, q); };
@@ -211,7 +210,6 @@ window.PLANER_CLIENT_ID = "";
   pruefe("findet ein Rezept über die Zutat", f("linsen").some(function (t) { return t.art === "Rezept"; }));
   pruefe("findet eine Lernaufgabe", f("altklausur").some(function (t) { return t.art === "Lernen"; }));
   pruefe("findet eine Übung", f("pull-ups").some(function (t) { return t.art === "Training"; }));
-  pruefe("findet einen Gebetseintrag", f("studieren").some(function (t) { return t.art === "Gebet"; }));
   pruefe("findet einen gelesenen Vers", f("grausam").some(function (t) { return t.art === "Vers"; }));
   pruefe("findet im ganzen Buch der Sprüche",
     f("weisheit").some(function (t) { return t.art === "Sprüche"; }));
@@ -235,16 +233,6 @@ window.PLANER_CLIENT_ID = "";
   gleich("datumLang", datumLang("2026-08-31"), "Montag, 31. August 2026");
   gleich("addDays über den Monat", dayKey(addDays(new Date(2026, 7, 31), 1)), "2026-09-01");
 
-  /* ── Gebetsliste ── */
-  gruppe("Gebetsliste");
-  gleich("fünf Rubriken", GEBET_TEILE.length, 5);
-  pruefe("jede Rubrik hat einen eigenen Schlüssel",
-    new Set(GEBET_TEILE.map(function (t) { return t.key; })).size === GEBET_TEILE.length);
-  pruefe("Über mich hat das Gegenteil-Feld",
-    GEBET_TEILE.some(function (t) { return t.key === "gedanken" && t.mitDagegen; }));
-  gleich("Montag ist Tag 0", gebetTagNr(new Date(2026, 7, 31)), 0);
-  gleich("Sonntag ist Tag 6", gebetTagNr(new Date(2026, 8, 6)), 6);
-
   /* ── Stände zusammenführen ──
      Der heikelste Teil der App: hier kann echter Datenverlust entstehen.
      Deshalb wird jeder Fall geprüft, der schon einmal schiefging. */
@@ -255,12 +243,12 @@ window.PLANER_CLIENT_ID = "";
   var handy = {
     updatedAt: 1000,
     todos: [{ id: "a", title: "vom Handy", _t: 1000 }],
-    blocks: [], routines: [], projects: [], recipes: [], gebet: {}, _weg: [],
+    blocks: [], routines: [], projects: [], recipes: [], _weg: [],
   };
   var tablet = {
     updatedAt: 2000,
     todos: [{ id: "b", title: "vom Tablet", _t: 2000 }],
-    blocks: [], routines: [], projects: [], recipes: [], gebet: {}, _weg: [],
+    blocks: [], routines: [], projects: [], recipes: [], _weg: [],
   };
   var beide = zusammenfuehren(handy, tablet);
   gleich("beide To-dos überleben", beide.todos.length, 2);
@@ -295,11 +283,6 @@ window.PLANER_CLIENT_ID = "";
     checksBeide["2026-08-31"] && checksBeide["2026-09-01"],
     "bekommen: " + JSON.stringify(checksBeide));
 
-  /* Gebetsliste liegt eine Ebene tiefer */
-  var gebetA = { updatedAt: 1000, gebet: { 0: { dank: [{ id: "g1", text: "A", _t: 1000 }] } }, _weg: [] };
-  var gebetB = { updatedAt: 2000, gebet: { 0: { dank: [{ id: "g2", text: "B", _t: 2000 }] } }, _weg: [] };
-  gleich("Gebetseinträge beider Geräte überleben",
-    zusammenfuehren(gebetA, gebetB).gebet[0].dank.length, 2);
 
   /* Gelesene Verse: je Datum einer, nichts doppelt */
   var verseA = { updatedAt: 1000, bibel: { zuletzt: "2026-08-30", gelesen: [{ datum: "2026-08-30", kap: 1, vers: 1, text: "A" }] }, _weg: [] };

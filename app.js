@@ -620,54 +620,6 @@ window.storage = {
     },
 };
 const MCP_CALENDAR = "https://calendarmcp.googleapis.com/mcp/v1";
-/* ── Gebetsliste ────────────────────────────────────────────
-   Für jeden Wochentag eine eigene Liste. Beim Öffnen steht der heutige
-   Tag da, die anderen sechs sind einen Tipp entfernt. Gezählt wird von
-   Montag (0) bis Sonntag (6) - wie DAY_NAMES, nicht wie getDay(). */
-/* Die Reihenfolge ist der Weg durch ein Gebet: erst nach oben, dann
-   zurück auf das Gegebene, dann nach innen, dann zu anderen, zuletzt
-   zu sich selbst. Umsortieren ändert nur die Anzeige - die Einträge
-   hängen am Schlüssel, nicht an der Position. */
-const GEBET_TEILE = [
-    {
-        key: "lob",
-        label: "Lob",
-        frage: "Wer ist Gott für dich?",
-        hinweis: "Nicht was er gegeben hat - das steht im Dank. Hier steht, wer er ist: treu, geduldig, gerecht.",
-        platzhalter: "Wer er ist",
-    },
-    {
-        key: "dank",
-        label: "Dank",
-        frage: "Wofür kannst du danke sagen?",
-        hinweis: "Auch das Kleine vom Tag zählt, nicht nur das Große.",
-        platzhalter: "Wofür",
-    },
-    {
-        key: "gedanken",
-        label: "Über mich",
-        frage: "Welcher Gedanke über dich war schlecht?",
-        hinweis: "Aufgeschrieben verliert er an Macht. Ins zweite Feld kommt, was stattdessen wahr ist.",
-        platzhalter: "Der Gedanke",
-        mitDagegen: true,
-    },
-    {
-        key: "personen",
-        label: "Personen",
-        frage: "Für wen betest du?",
-        hinweis: "Familie, Freunde, jemand aus dem Studium, jemand mit dem es gerade schwierig ist.",
-        platzhalter: "Name",
-    },
-    {
-        key: "bitte",
-        label: "Bitte für mich",
-        frage: "Was brauchst du selbst?",
-        hinweis: "Prüfungen, Entscheidungen, Kraft, Geduld. Das, was du sonst niemandem sagst.",
-        platzhalter: "Was ich brauche",
-    },
-];
-/* Wochentag einer Uhrzeit, Montag = 0 */
-const gebetTagNr = (d) => (d.getDay() + 6) % 7;
 const DAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 /* ── Zeit-Helfer ───────────────────────────────────────────── */
 const pad = (n) => String(n).padStart(2, "0");
@@ -1909,19 +1861,6 @@ function inhaltGleich(a, b) {
     };
     return stabil(putzen(a)) === stabil(putzen(b));
 }
-/* Alle Einträge mit Kennung einsammeln - auch die in der Gebetsliste,
-   die eine Ebene tiefer liegen. */
-function gebetEintraege(gebet) {
-    const raus = [];
-    for (const tag of Object.keys(gebet || {})) {
-        const derTag = gebet[tag] || {};
-        for (const rubrik of Object.keys(derTag)) {
-            for (const e of derTag[rubrik] || [])
-                raus.push(e);
-        }
-    }
-    return raus;
-}
 /* Geänderte Einträge stempeln, entfernte vermerken. Zentral an einer
    Stelle, damit nicht jede der vielen Änderungsfunktionen daran denken
    muss - vergäße eine es, ginge genau dort wieder etwas verloren. */
@@ -1968,25 +1907,6 @@ function stempeln(vorher, nachher, jetzt) {
         if (!Array.isArray(nachher[feld]))
             continue;
         ergebnis[feld] = listeStempeln((vorher || {})[feld], nachher[feld]);
-    }
-    /* Gebetsliste: dieselbe Logik je Wochentag und Rubrik */
-    if (nachher.gebet && typeof nachher.gebet === "object") {
-        const altGebet = (vorher || {}).gebet || {};
-        const neuGebet = {};
-        for (const tag of Object.keys(nachher.gebet)) {
-            const derTag = nachher.gebet[tag] || {};
-            neuGebet[tag] = {};
-            for (const rubrik of Object.keys(derTag)) {
-                neuGebet[tag][rubrik] = listeStempeln(((altGebet[tag] || {})[rubrik]) || [], derTag[rubrik]);
-            }
-        }
-        /* Ganze Tage oder Rubriken, die verschwunden sind, ebenfalls vermerken */
-        for (const e of gebetEintraege(altGebet)) {
-            const nochDa = gebetEintraege(neuGebet).some((n) => n && n.id === e.id);
-            if (e && e.id && !nochDa)
-                merkeWeg(e.id);
-        }
-        ergebnis.gebet = neuGebet;
     }
     ergebnis._weg = weg.filter((w) => jetzt - (w._t || 0) < WEG_FRIST);
     return ergebnis;
@@ -2058,25 +1978,6 @@ function zusammenfuehren(a, b) {
     for (const feld of ["checks", "materialized", "studyDone", "abend"]) {
         erg[feld] = { ...((aelter || {})[feld] || {}), ...((neuer || {})[feld] || {}) };
     }
-    /* Gebetsliste je Wochentag und Rubrik */
-    const gebetErg = {};
-    const tage = {};
-    for (const quelle of [a, b])
-        for (const tag of Object.keys((quelle && quelle.gebet) || {}))
-            tage[tag] = true;
-    for (const tag of Object.keys(tage)) {
-        const ta = ((a || {}).gebet || {})[tag] || {};
-        const tb = ((b || {}).gebet || {})[tag] || {};
-        const rubriken = {};
-        for (const r of Object.keys(ta))
-            rubriken[r] = true;
-        for (const r of Object.keys(tb))
-            rubriken[r] = true;
-        gebetErg[tag] = {};
-        for (const r of Object.keys(rubriken))
-            gebetErg[tag][r] = listeMischen(ta[r], tb[r], weg);
-    }
-    erg.gebet = gebetErg;
     /* Gelesene Tagesverse: je Datum genau einer, beide Seiten behalten */
     const verse = {};
     for (const quelle of [a, b])
@@ -2332,8 +2233,6 @@ const DEFAULT_STATE = {
     notify: { an: false, vorlauf: 10 },
     /* Tagesverse: der zuletzt gezeigte Tag und die Sammlung der gelesenen */
     bibel: { zuletzt: "", gelesen: [] },
-    /* Gebetsliste je Wochentag, Montag = "0" bis Sonntag = "6" */
-    gebet: {},
     /* Abendplanung, je geplantem Tag: { fertig, vorsatz, habits: [id] } */
     abend: {},
     updatedAt: 0,
@@ -2896,21 +2795,6 @@ function PlannerApp() {
             };
         }, { undo: false });
     }, [loaded, tagesVers, bibelTag, bibel.zuletzt, persist]);
-    /* ── Gebetsliste ────────────────────────────────────── */
-    const gebet = state.gebet || {};
-    const gebetHeute = gebetTagNr(now);
-    /* Ein Wochentag, eine Rubrik, eine Liste - alles andere bleibt stehen */
-    const gebetSetzen = (tag, teil, fn) => persist((prev) => {
-        const alle = prev.gebet || {};
-        const derTag = alle[tag] || {};
-        return {
-            ...prev,
-            gebet: { ...alle, [tag]: { ...derTag, [teil]: fn(derTag[teil] || []) } },
-        };
-    });
-    const gebetNeu = (tag, teil, text) => gebetSetzen(tag, teil, (l) => [...l, { id: uid(), text: text, dagegen: "" }]);
-    const gebetAendern = (tag, teil, id, patch) => gebetSetzen(tag, teil, (l) => l.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-    const gebetWeg = (tag, teil, id) => gebetSetzen(tag, teil, (l) => l.filter((e) => e.id !== id));
     /* ── Suche ──────────────────────────────────────────── */
     /* Ein Treffer führt dorthin, wo er zu Hause ist: erst den Tag und
        die Woche stellen, dann den Tab wechseln, dann das Einzelne
@@ -4230,7 +4114,7 @@ function PlannerApp() {
             view === "lernen" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onDeleteVorbei: deleteExamsVorbei, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing, minuten: studyMinuten }))),
             view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true), onEinfuegen: () => setRecipePaste(true) })),
-            view === "bibel" && (React.createElement(BibelView, { heute: tagesVers, gelesen: bibel.gelesen || [], onOeffnen: () => setVersOffen(true), gebet: gebet, gebetHeute: gebetHeute, onGebetNeu: gebetNeu, onGebetAendern: gebetAendern, onGebetWeg: gebetWeg })),
+            view === "bibel" && (React.createElement(BibelView, { heute: tagesVers, gelesen: bibel.gelesen || [], onOeffnen: () => setVersOffen(true) })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -4535,88 +4419,7 @@ function VersSheet({ vers, onClose, onAlle }) {
 /* Die Sammlung: oben der heutige Vers, darunter die gelesenen Tage.
    Die Liste kommt aus dem gesicherten Stand und wandert damit über den
    Drive-Abgleich auf die anderen Geräte mit. */
-/* Ein Textfeld, das erst beim Verlassen sichert - nicht bei jedem Zeichen.
-   Sonst läge nach einem getippten Satz der halbe Rückgängig-Speicher voll
-   und der Drive-Abgleich liefe bei jedem Buchstaben an. */
-function GebetFeld({ wert, platzhalter, klasse, onFertig }) {
-    const [text, setText] = useState(wert || "");
-    useEffect(() => { setText(wert || ""); }, [wert]);
-    return React.createElement("input", {
-        value: text,
-        onChange: (e) => setText(e.target.value),
-        onBlur: () => { if (text !== (wert || "")) onFertig(text); },
-        onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
-        placeholder: platzhalter,
-        className: klasse,
-    });
-}
-/* Eine Rubrik des gewählten Tages: Personen, Über mich oder Dank */
-function GebetTeil({ teil, eintraege, onNeu, onAendern, onWeg }) {
-    const [neu, setNeu] = useState("");
-    const c = lift(BIBEL_FARBE);
-    const anlegen = () => {
-        const t = neu.trim();
-        if (!t)
-            return;
-        onNeu(t);
-        setNeu("");
-    };
-    return (React.createElement("div", { className: "pl-card rounded p-3 flex flex-col gap-2" },
-        React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
-            React.createElement("span", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, teil.label),
-            eintraege.length > 0 && (React.createElement("span", { className: "mono text-xs pl-muted" }, eintraege.length))),
-        eintraege.length === 0 && (React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, teil.hinweis)),
-        eintraege.map((e) => (React.createElement("div", { key: e.id, className: "flex flex-col gap-1 border-t pl-hair pt-2" },
-            React.createElement("div", { className: "flex items-center gap-2" },
-                React.createElement(GebetFeld, {
-                    wert: e.text, platzhalter: teil.platzhalter,
-                    klasse: "pl-input px-2 py-1.5 rounded text-sm flex-1",
-                    onFertig: (t) => onAendern(e.id, { text: t }),
-                }),
-                React.createElement("button", { onClick: () => onWeg(e.id), className: "pl-muted shrink-0", "aria-label": "Eintrag löschen" },
-                    React.createElement(Trash2, { size: 13 }))),
-            teil.mitDagegen && (React.createElement(GebetFeld, {
-                wert: e.dagegen, platzhalter: "Was stattdessen wahr ist",
-                klasse: "pl-input px-2 py-1.5 rounded text-sm",
-                onFertig: (t) => onAendern(e.id, { dagegen: t }),
-            }))))),
-        React.createElement("div", { className: "flex gap-2 border-t pl-hair pt-2" },
-            React.createElement("input", { value: neu, onChange: (ev) => setNeu(ev.target.value), onKeyDown: (ev) => { if (ev.key === "Enter")
-                    anlegen(); }, placeholder: teil.frage, className: "pl-input px-2 py-1.5 rounded text-sm flex-1" }),
-            React.createElement("button", { onClick: anlegen, className: "pl-btn px-2 rounded", "aria-label": teil.label + " ergänzen" },
-                React.createElement(Plus, { size: 14 })))));
-}
-/* Die Wochentagsreihe samt Liste des gewählten Tages. Solange nichts
-   angetippt wurde, folgt sie dem heutigen Tag - auch über Mitternacht. */
-function GebetListe({ gebet, heuteNr, onNeu, onAendern, onWeg }) {
-    const [gewaehlt, setGewaehlt] = useState(null);
-    const aktiv = gewaehlt === null ? heuteNr : gewaehlt;
-    const c = lift(BIBEL_FARBE);
-    const zaehle = (n) => GEBET_TEILE.reduce((s, t) => s + (((gebet[n] || {})[t.key]) || []).length, 0);
-    const derTag = gebet[aktiv] || {};
-    return (React.createElement("div", { className: "flex flex-col gap-2 pt-4" },
-        React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
-            React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Gebetsliste"),
-            React.createElement("span", { className: "mono text-xs", style: { color: c } },
-                aktiv === heuteNr ? "heute · " : "",
-                WOCHENTAGE_LANG[(aktiv + 1) % 7])),
-        React.createElement("div", { className: "flex gap-1" }, DAY_NAMES.map((name, i) => {
-            const an = i === aktiv;
-            const n = zaehle(i);
-            return (React.createElement("button", { key: name, onClick: () => setGewaehlt(i), className: "flex-1 py-2 rounded mono text-xs", style: an
-                    ? { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" }
-                    : { background: "var(--card)", color: "var(--ink)", border: `1px solid ${i === heuteNr ? BIBEL_FARBE : "var(--line)"}` } },
-                name,
-                n > 0 && (React.createElement("span", { className: "ml-1", style: { color: an ? "#F0B429" : "var(--muted)" } }, n))));
-        })),
-        GEBET_TEILE.map((teil) => (React.createElement(GebetTeil, {
-            key: teil.key, teil: teil, eintraege: derTag[teil.key] || [],
-            onNeu: (t) => onNeu(aktiv, teil.key, t),
-            onAendern: (id, patch) => onAendern(aktiv, teil.key, id, patch),
-            onWeg: (id) => onWeg(aktiv, teil.key, id),
-        })))));
-}
-function BibelView({ heute, gelesen, onOeffnen, gebet, gebetHeute, onGebetNeu, onGebetAendern, onGebetWeg }) {
+function BibelView({ heute, gelesen, onOeffnen }) {
     const c = lift(BIBEL_FARBE);
     /* Heute steht schon oben - in der Liste darunter wäre er doppelt */
     const frueher = (gelesen || [])
@@ -4630,10 +4433,6 @@ function BibelView({ heute, gelesen, onOeffnen, gebet, gebetHeute, onGebetNeu, o
             React.createElement("span", { className: "mono text-xs uppercase tracking-widest", style: { color: c } }, "Vers des Tages"),
             React.createElement("span", { className: "text-base leading-relaxed" }, heute.text),
             React.createElement("span", { className: "mono text-xs", style: { color: c } }, heute.stelle))),
-        React.createElement(GebetListe, {
-            gebet: gebet || {}, heuteNr: gebetHeute,
-            onNeu: onGebetNeu, onAendern: onGebetAendern, onWeg: onGebetWeg,
-        }),
         frueher.length > 0 && (React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest pt-4" },
             "Gelesen · ",
             frueher.length + (heute ? 1 : 0),
@@ -4995,18 +4794,6 @@ function sucheAlles(state, frage) {
             if (!passt(ue.name, ue.note))
                 continue;
             dazu("Training", ue.name, ty.name, { view: "training" });
-        }
-    }
-    /* Gebetsliste, Tag für Tag und Rubrik für Rubrik */
-    const gebet = state.gebet || {};
-    for (let tag = 0; tag < 7; tag++) {
-        const derTag = gebet[tag] || gebet[String(tag)] || {};
-        for (const teil of GEBET_TEILE) {
-            for (const e of derTag[teil.key] || []) {
-                if (!passt(e.text, e.dagegen))
-                    continue;
-                dazu("Gebet", e.text, DAY_NAMES[tag] + " · " + teil.label, { view: "bibel" });
-            }
         }
     }
     /* Schon gelesene Tagesverse */
