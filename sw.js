@@ -3,10 +3,10 @@
    Fremde Bibliotheken: Cache zuerst, die ändern sich nie.
    Dadurch siehst du Änderungen sofort, bleibst aber offline nutzbar. */
 
-const CACHE = 'planer-v4';
+const CACHE = 'planer-v5';
 
 const CORE = [
-  './', './index.html', './style.css', './app.js', './verse.js', './chess.min.js', './config.js', './manifest.json', './icon.svg',
+  './', './index.html', './style.css', './app.js', './verse.js', './chess.min.js', './aufgaben.js', './config.js', './manifest.json', './icon.svg',
   'https://unpkg.com/react@18.3.1/umd/react.production.min.js',
   'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js',
 ];

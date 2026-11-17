@@ -52,6 +52,7 @@ window.PLANER_CLIENT_ID = "";
 </script>
 <script src="verse.js"></script>
 <script src="chess.min.js"></script>
+<script src="aufgaben.js"></script>
 <script src="app.js"></script>
 
 <script>
@@ -597,6 +598,214 @@ window.PLANER_CLIENT_ID = "";
      mitlesen. Er gehoert in den Geraetespeicher. */
   pruefe("der Postfach-Schluessel steht nicht im Standard-Zustand",
     JSON.stringify(DEFAULT_STATE).indexOf("postfach") === -1);
+
+  /* ── Schach: der Aufgabensatz ── */
+  gruppe("Schach — Aufgabensatz");
+  var aufg = aufgabenListe();
+  gleich("4000 Aufgaben", aufg.length, 4000);
+  pruefe("chess.js ist geladen", typeof Chess === "function");
+  pruefe("Schach ist damit möglich", schachMoeglich());
+
+  var wertungenOk = true, sortiert = true, themenOk = true, laengeOk = true;
+  var verz = window.AUFGABEN_THEMEN || [];
+  for (var i = 0; i < aufg.length; i++) {
+    var a = aufg[i];
+    if (!(a.wertung >= 400 && a.wertung <= 1599)) wertungenOk = false;
+    if (i > 0 && aufg[i - 1].wertung > a.wertung) sortiert = false;
+    if (a.loesung.length % 2 !== 1 || a.loesung.length > 3) laengeOk = false;
+    for (var j = 0; j < a.themen.length; j++)
+      if (!verz[a.themen[j]]) themenOk = false;
+  }
+  pruefe("alle Wertungen zwischen 400 und 1599", wertungenOk);
+  pruefe("nach Wertung sortiert", sortiert);
+  pruefe("jede Lösung endet mit einem eigenen Zug", laengeOk,
+    "die Länge muss ungerade sein - sonst hätte der Gegner das letzte Wort");
+  pruefe("alle Themennummern stehen im Verzeichnis", themenOk);
+
+  /* Die wichtigste Prüfung: Jede einzelne Aufgabe muss spielbar sein.
+     Eine Stellung ohne saubere Lösung ist schlimmer als gar keine. */
+  var kaputt = 0, ersterFehler = "";
+  for (var i = 0; i < aufg.length; i++) {
+    var a = aufg[i];
+    try {
+      var s = new Chess(a.fen);
+      if (s.fen().split(" ")[0] !== a.fen.split(" ")[0]) throw new Error("Stellung nicht angenommen");
+      for (var j = 0; j < a.loesung.length; j++) {
+        var z = a.loesung[j];
+        if (!s.move({ from: z.slice(0, 2), to: z.slice(2, 4), promotion: z[4] || "q" }))
+          throw new Error("Zug " + z + " nicht möglich");
+      }
+    } catch (e) {
+      kaputt++;
+      if (!ersterFehler) ersterFehler = a.fen + " — " + e.message;
+    }
+  }
+  pruefe("alle 4000 Aufgaben sind regelkonform spielbar", kaputt === 0,
+    kaputt + " kaputt, erste: " + ersterFehler);
+
+  /* ── Schach: Figuren nachführen ── */
+  gruppe("Schach — Figuren nachführen");
+  var START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  var f0 = figurenAusFen(START);
+  gleich("Grundstellung hat 32 Figuren", f0.length, 32);
+  pruefe("weißer König steht auf e1",
+    f0.some(function (f) { return f.art === "K" && f.feld === "e1"; }));
+  pruefe("schwarzer Turm steht auf h8",
+    f0.some(function (f) { return f.art === "r" && f.feld === "h8"; }));
+  pruefe("alle Figuren haben eine eigene Nummer",
+    new Set(f0.map(function (f) { return f.id; })).size === 32);
+
+  /* Schlagen: das Opfer wird als weg markiert, nicht gelöscht - es
+     blendet aus, statt zu springen. */
+  var sA = new Chess("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2");
+  var fA = figurenAusFen(sA.fen());
+  var zA = sA.move({ from: "e4", to: "d5" });
+  var fA2 = figurenNachZug(fA, zA);
+  pruefe("der schlagende Bauer steht auf d5",
+    fA2.some(function (f) { return !f.weg && f.feld === "d5" && f.art === "P"; }));
+  gleich("genau eine Figur ist weg", fA2.filter(function (f) { return f.weg; }).length, 1);
+  pruefe("das Opfer war der schwarze Bauer",
+    fA2.some(function (f) { return f.weg && f.art === "p"; }));
+  gleich("auf d5 steht nur noch eine Figur",
+    fA2.filter(function (f) { return !f.weg && f.feld === "d5"; }).length, 1);
+
+  /* En passant: der geschlagene Bauer steht NICHT auf dem Zielfeld.
+     Genau hier geht eine naive Umsetzung schief. */
+  var sB = new Chess("rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3");
+  var fB = figurenAusFen(sB.fen());
+  var zB = sB.move({ from: "e5", to: "f6" });
+  pruefe("en passant wird von chess.js als solches erkannt",
+    zB && zB.flags.indexOf("e") > -1);
+  var fB2 = figurenNachZug(fB, zB);
+  pruefe("der geschlagene Bauer stand auf f5, nicht auf f6",
+    fB2.some(function (f) { return f.weg && f.art === "p"; }) &&
+    !fB2.some(function (f) { return !f.weg && f.feld === "f5"; }));
+  pruefe("der schlagende Bauer steht auf f6",
+    fB2.some(function (f) { return !f.weg && f.feld === "f6" && f.art === "P"; }));
+
+  /* Rochade: der Turm zieht mit, sonst bleibt er stehen */
+  var sC = new Chess("rnbqk2r/pppp1ppp/5n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4");
+  var fC = figurenAusFen(sC.fen());
+  var zC = sC.move({ from: "e1", to: "g1" });
+  var fC2 = figurenNachZug(fC, zC);
+  pruefe("König steht nach der Rochade auf g1",
+    fC2.some(function (f) { return !f.weg && f.art === "K" && f.feld === "g1"; }));
+  pruefe("der Turm ist mitgezogen auf f1",
+    fC2.some(function (f) { return !f.weg && f.art === "R" && f.feld === "f1"; }));
+  pruefe("auf h1 steht nichts mehr",
+    !fC2.some(function (f) { return !f.weg && f.feld === "h1"; }));
+
+  /* Umwandlung: dieselbe Figur, neue Gestalt */
+  var sD = new Chess("8/4P3/8/8/8/8/8/K6k w - - 0 1");
+  var fD = figurenAusFen(sD.fen());
+  var bauerId = fD.filter(function (f) { return f.art === "P"; })[0].id;
+  var zD = sD.move({ from: "e7", to: "e8", promotion: "q" });
+  var fD2 = figurenNachZug(fD, zD);
+  var neu = fD2.filter(function (f) { return f.id === bauerId; })[0];
+  gleich("aus dem Bauern wird eine Dame", neu.art, "Q");
+  gleich("auf dem Umwandlungsfeld", neu.feld, "e8");
+  pruefe("es ist dieselbe Figur geblieben", neu.id === bauerId);
+
+  /* ── Schach: Schach erkennen ── */
+  gruppe("Schach — Schach erkennen");
+  pruefe("ohne Schach kommt nichts zurück", schachFeldVon(new Chess(START)) === null);
+  gleich("der bedrohte König wird gefunden",
+    schachFeldVon(new Chess("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3")), "e1");
+
+  /* ── Schach: Wertung ── */
+  gruppe("Schach — Wertung");
+  pruefe("gleich starke Aufgabe gelöst bringt Punkte",
+    wertungNeu(700, 700, true) > 700);
+  pruefe("gleich starke Aufgabe verpatzt kostet Punkte",
+    wertungNeu(700, 700, false) < 700);
+  pruefe("eine schwere Aufgabe bringt mehr als eine leichte",
+    (wertungNeu(700, 1200, true) - 700) > (wertungNeu(700, 400, true) - 700));
+  pruefe("eine leichte Aufgabe zu verpatzen kostet mehr",
+    (700 - wertungNeu(700, 400, false)) > (700 - wertungNeu(700, 1200, false)));
+  gleich("nach unten bei 400 gedeckelt", wertungNeu(400, 1599, false), 400);
+  gleich("nach oben bei 1599 gedeckelt", wertungNeu(1599, 400, true), 1599);
+
+  /* ── Schach: Auswahl ── */
+  gruppe("Schach — Auswahl der Aufgabe");
+  var w1 = aufgabeWaehlen(700, []);
+  pruefe("findet eine Aufgabe", !!w1);
+  pruefe("die Aufgabe liegt nahe an der eigenen Wertung",
+    Math.abs(w1.wertung - 700) <= 110, "bekommen: " + (w1 && w1.wertung));
+  var alleNummern = [];
+  for (var i = 0; i < aufg.length; i++) alleNummern.push(i);
+  pruefe("ist alles gelöst, kommt nichts zurück", aufgabeWaehlen(700, alleNummern) === null);
+  /* Gelöstes darf nicht noch einmal kommen */
+  var ohne = [], treffer = 0;
+  for (var i = 0; i < aufg.length; i++)
+    if (Math.abs(aufg[i].wertung - 700) <= 110) ohne.push(i);
+  ohne.pop();
+  for (var k = 0; k < 40; k++) {
+    var w = aufgabeWaehlen(700, ohne);
+    if (w && ohne.indexOf(w.nr) > -1) treffer++;
+  }
+  gleich("eine bereits gelöste Aufgabe kommt nicht wieder", treffer, 0);
+
+  /* ── Schach: Themen ── */
+  gruppe("Schach — Themen");
+  var nrVon = function (name) { return verz.indexOf(name); };
+  gleich("englische Schlagworte werden übersetzt",
+    themenLesbar([nrVon("fork")]), ["Gabel"]);
+  gleich("doppelte Namen nur einmal",
+    themenLesbar([nrVon("dovetailMate"), nrVon("swallowstailMate")]), ["Schwalbenschwanz-Matt"]);
+  pruefe("höchstens drei Themen",
+    themenLesbar([nrVon("fork"), nrVon("pin"), nrVon("skewer"), nrVon("zugzwang")]).length === 3);
+  gleich("unbekannte Nummern werden übersprungen", themenLesbar([9999]), []);
+  /* Jedes Thema im Satz soll einen deutschen Namen haben - sonst steht
+     bei einer Aufgabe gar nichts. */
+  var ohneNamen = verz.filter(function (t) { return !THEMA_NAMEN[t]; });
+  gleich("jedes vorkommende Thema hat einen deutschen Namen", ohneNamen, []);
+
+  /* ── Schach: Zustand ── */
+  gruppe("Schach — Zustand");
+  gleich("Anfangswertung 700", DEFAULT_STATE.schach.wertung, 700);
+  gleich("noch nichts gelöst", DEFAULT_STATE.schach.erledigt, []);
+  gleich("ein Zug als Text", zugAlsText({ from: "e2", to: "e4" }), "e2e4");
+  gleich("mit Umwandlung", zugAlsText({ from: "e7", to: "e8", promotion: "q" }), "e7e8q");
+  /* Ein alter Stand kennt die Wertung noch nicht - sie muss ergänzt
+     werden, sonst steht dort "undefined". */
+  var alt = { geloest: 1, versucht: 2, serie: 1, besteSerie: 1 };
+  gleich("alter Stand ohne Wertung wird ergänzt",
+    ({ ...SCHACH_LEER, ...alt }).wertung, 700);
+  gleich("dabei bleiben die alten Zahlen erhalten",
+    ({ ...SCHACH_LEER, ...alt }).geloest, 1);
+
+  /* Alle zwölf Figuren müssen gezeichnet werden können */
+  var fehlendeFiguren = "KQRBNPkqrbnp".split("").filter(function (a) { return !FIGUREN_SVG[a]; });
+  gleich("alle zwölf Figuren haben eine Zeichnung", fehlendeFiguren, []);
+  pruefe("keine Zeichnung enthält ausführbaren Code",
+    Object.keys(FIGUREN_SVG).every(function (k) {
+      return !/<script|\son[a-z]+\s*=|javascript:/i.test(FIGUREN_SVG[k]);
+    }));
+
+  /* ── Schach: Abgleich zwischen Geräten ── */
+  gruppe("Schach — Abgleich zwischen Geräten");
+  /* Handy: drei gelöst. Danach sichert das Tablet, das nur eine kennt.
+     Würde der Stand als Ganzes übernommen, wären die drei weg. */
+  var handy = {
+    updatedAt: 1000,
+    schach: { wertung: 760, geloest: 3, versucht: 4, serie: 2, besteSerie: 5, erledigt: [1, 2, 3], zuletzt: null },
+  };
+  var tablet = {
+    updatedAt: 2000,
+    schach: { wertung: 712, geloest: 1, versucht: 1, serie: 1, besteSerie: 1, erledigt: [9], zuletzt: { delta: 12, sauber: true } },
+  };
+  var zus = zusammenfuehren(handy, tablet).schach;
+  gleich("gelöste Aufgaben beider Geräte bleiben",
+    zus.erledigt.slice().sort(function (x, y) { return x - y; }), [1, 2, 3, 9]);
+  gleich("der Zähler fällt nicht zurück", zus.geloest, 3);
+  gleich("auch die Versuche nicht", zus.versucht, 4);
+  gleich("die beste Serie bleibt die beste", zus.besteSerie, 5);
+  gleich("die Wertung kommt vom neueren Gerät", zus.wertung, 712);
+  gleich("umgekehrt dasselbe Ergebnis bei den gelösten",
+    zusammenfuehren(tablet, handy).schach.erledigt.slice().sort(function (x, y) { return x - y; }), [1, 2, 3, 9]);
+  /* Ein Gerät, das noch gar nicht Schach gespielt hat, darf nichts löschen */
+  gleich("ein Gerät ohne Schachstand löscht nichts",
+    zusammenfuehren(handy, { updatedAt: 3000 }).schach.erledigt.slice().sort(function (x, y) { return x - y; }), [1, 2, 3]);
 
   /* ── Ausgabe ── */
   var html = "";

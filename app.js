@@ -1863,28 +1863,121 @@ async function postfachHolen() {
     return Array.isArray(d.mails) ? d.mails : [];
 }
 /* ── Schach: Taktikaufgaben ─────────────────────────────────
-   Die Aufgaben kommen von Lichess (offen, ohne Anmeldung, CC0). Selbst
-   ausgedachte Stellungen waeren zu fehleranfaellig - eine Aufgabe ohne
-   saubere Loesung ist schlimmer als gar keine.
+   Die Aufgaben liegen in aufgaben.js, ausgewählt aus der offenen
+   Lichess-Aufgabendatenbank (CC0). Nicht über das Netz geholt, und das
+   aus einem handfesten Grund: Die offene Schnittstelle von Lichess gibt
+   ohne Anmeldung nur Aufgaben mit Wertung 1600 bis 2500 her. Das ist
+   für einen Anfänger unlösbar, also nutzlos. Hier liegen 4000 Aufgaben
+   von Wertung 400 bis 1599 bereit, und die App sucht die passende zu
+   deiner eigenen Wertung aus. Nebenbei läuft so alles offline.
 
-   Zum Format, weil es leicht misszuverstehen ist: Die Stellung enthaelt
-   den letzten Zug des Gegners bereits. Wer in der Stellung am Zug ist,
-   ist der Loeser, und der erste Zug der Loesung ist seiner. An drei
-   Aufgaben gegengeprueft.
+   Zum Format, weil es leicht misszuverstehen ist: Die gespeicherte
+   Stellung enthält den letzten Zug des Gegners bereits. Wer in ihr am
+   Zug ist, ist der Löser. Jede Aufgabe wurde beim Erzeugen mit chess.js
+   nachgerechnet - Stellung gültig, alle Lösungszüge regelkonform.
 
-   Die Regeln rechnet chess.js - Rochade, en passant und Fesselungen
-   selbst zu schreiben waere viel Code und viel Risiko. */
-const SCHACH_API = "https://lichess.org/api/puzzle/next";
+   Die Regeln rechnet chess.js. Rochade, en passant und Fesselungen
+   selbst zu schreiben wäre viel Code und viel Risiko. */
 
-/* Unicode statt Bilddateien: funktioniert offline und braucht nichts
-   nachzuladen. Grossbuchstaben sind Weiss. */
-const FIGUREN = {
-    K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
-    k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
+/* Die Figuren. Echte Zeichnungen statt Schriftzeichen - Unicode-Figuren
+   sind je nach Gerät unterschiedlich breit, dünn und oft kaum vom
+   Untergrund zu unterscheiden.
+
+   Herkunft: Colin M. L. Burnett, über Wikimedia Commons, CC BY-SA 3.0.
+   Geändert wurden nur die beiden Farbwerte: statt reinweiß und
+   reinschwarz die wärmeren Töne der App. Diese Bearbeitung steht unter
+   derselben Lizenz. */
+const FIGUREN_SVG = {
+    K: '<g fill="none" fill-rule="evenodd" stroke="#1F211D" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"> <path stroke-linejoin="miter" d="M22.5 11.63V6M20 8h5"/> <path fill="#F4F1E8" stroke-linecap="butt" stroke-linejoin="miter" d="M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5"/> <path fill="#F4F1E8" d="M12.5 37c5.5 3.5 14.5 3.5 20 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-2.5-7.5-12-10.5-16-4-3 6 6 10.5 6 10.5v7"/> <path d="M12.5 30c5.5-3 14.5-3 20 0m-20 3.5c5.5-3 14.5-3 20 0m-20 3.5c5.5-3 14.5-3 20 0"/> </g>',
+    Q: '<g style="fill:#F4F1E8;stroke:#1F211D;stroke-width:1.5;stroke-linejoin:round"> <path d="M 9,26 C 17.5,24.5 30,24.5 36,26 L 38.5,13.5 L 31,25 L 30.7,10.9 L 25.5,24.5 L 22.5,10 L 19.5,24.5 L 14.3,10.9 L 14,25 L 6.5,13.5 L 9,26 z"/> <path d="M 9,26 C 9,28 10.5,28 11.5,30 C 12.5,31.5 12.5,31 12,33.5 C 10.5,34.5 11,36 11,36 C 9.5,37.5 11,38.5 11,38.5 C 17.5,39.5 27.5,39.5 34,38.5 C 34,38.5 35.5,37.5 34,36 C 34,36 34.5,34.5 33,33.5 C 32.5,31 32.5,31.5 33.5,30 C 34.5,28 36,28 36,26 C 27.5,24.5 17.5,24.5 9,26 z"/> <path d="M 11.5,30 C 15,29 30,29 33.5,30" style="fill:none"/> <path d="M 12,33.5 C 18,32.5 27,32.5 33,33.5" style="fill:none"/> <circle cx="6" cy="12" r="2" /> <circle cx="14" cy="9" r="2" /> <circle cx="22.5" cy="8" r="2" /> <circle cx="31" cy="9" r="2" /> <circle cx="39" cy="12" r="2" /> </g>',
+    R: '<g style="opacity:1; fill:#F4F1E8; fill-opacity:1; fill-rule:evenodd; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;" transform="translate(0,0.3)"> <path d="M 9,39 L 36,39 L 36,36 L 9,36 L 9,39 z " style="stroke-linecap:butt;" /> <path d="M 12,36 L 12,32 L 33,32 L 33,36 L 12,36 z " style="stroke-linecap:butt;" /> <path d="M 11,14 L 11,9 L 15,9 L 15,11 L 20,11 L 20,9 L 25,9 L 25,11 L 30,11 L 30,9 L 34,9 L 34,14" style="stroke-linecap:butt;" /> <path d="M 34,14 L 31,17 L 14,17 L 11,14" /> <path d="M 31,17 L 31,29.5 L 14,29.5 L 14,17" style="stroke-linecap:butt; stroke-linejoin:miter;" /> <path d="M 31,29.5 L 32.5,32 L 12.5,32 L 14,29.5" /> <path d="M 11,14 L 34,14" style="fill:none; stroke:#1F211D; stroke-linejoin:miter;" /> </g>',
+    B: '<g style="opacity:1; fill:none; fill-rule:evenodd; fill-opacity:1; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;" transform="translate(0,0.6)"> <g style="fill:#F4F1E8; stroke:#1F211D; stroke-linecap:butt;"> <path d="M 9,36 C 12.39,35.03 19.11,36.43 22.5,34 C 25.89,36.43 32.61,35.03 36,36 C 36,36 37.65,36.54 39,38 C 38.32,38.97 37.35,38.99 36,38.5 C 32.61,37.53 25.89,38.96 22.5,37.5 C 19.11,38.96 12.39,37.53 9,38.5 C 7.65,38.99 6.68,38.97 6,38 C 7.35,36.54 9,36 9,36 z"/> <path d="M 15,32 C 17.5,34.5 27.5,34.5 30,32 C 30.5,30.5 30,30 30,30 C 30,27.5 27.5,26 27.5,26 C 33,24.5 33.5,14.5 22.5,10.5 C 11.5,14.5 12,24.5 17.5,26 C 17.5,26 15,27.5 15,30 C 15,30 14.5,30.5 15,32 z"/> <path d="M 25 8 A 2.5 2.5 0 1 1 20,8 A 2.5 2.5 0 1 1 25 8 z"/> </g> <path d="M 17.5,26 L 27.5,26 M 15,30 L 30,30 M 22.5,15.5 L 22.5,20.5 M 20,18 L 25,18" style="fill:none; stroke:#1F211D; stroke-linejoin:miter;"/> </g>',
+    N: '<g style="opacity:1; fill:none; fill-opacity:1; fill-rule:evenodd; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;" transform="translate(0,0.3)"> <path d="M 22,10 C 32.5,11 38.5,18 38,39 L 15,39 C 15,30 25,32.5 23,18" style="fill:#F4F1E8; stroke:#1F211D;" /> <path d="M 24,18 C 24.38,20.91 18.45,25.37 16,27 C 13,29 13.18,31.34 11,31 C 9.958,30.06 12.41,27.96 11,28 C 10,28 11.19,29.23 10,30 C 9,30 5.997,31 6,26 C 6,24 12,14 12,14 C 12,14 13.89,12.1 14,10.5 C 13.27,9.506 13.5,8.5 13.5,7.5 C 14.5,6.5 16.5,10 16.5,10 L 18.5,10 C 18.5,10 19.28,8.008 21,7 C 22,7 22,10 22,10" style="fill:#F4F1E8; stroke:#1F211D;" /> <path d="M 9.5 25.5 A 0.5 0.5 0 1 1 8.5,25.5 A 0.5 0.5 0 1 1 9.5 25.5 z" style="fill:#1F211D; stroke:#1F211D;" /> <path d="M 15 15.5 A 0.5 1.5 0 1 1 14,15.5 A 0.5 1.5 0 1 1 15 15.5 z" transform="matrix(0.866,0.5,-0.5,0.866,9.693,-5.173)" style="fill:#1F211D; stroke:#1F211D;" /> </g>',
+    P: '<path d="m 22.5,9 c -2.21,0 -4,1.79 -4,4 0,0.89 0.29,1.71 0.78,2.38 C 17.33,16.5 16,18.59 16,21 c 0,2.03 0.94,3.84 2.41,5.03 C 15.41,27.09 11,31.58 11,39.5 H 34 C 34,31.58 29.59,27.09 26.59,26.03 28.06,24.84 29,23.03 29,21 29,18.59 27.67,16.5 25.72,15.38 26.21,14.71 26.5,13.89 26.5,13 c 0,-2.21 -1.79,-4 -4,-4 z" style="opacity:1; fill:#F4F1E8; fill-opacity:1; fill-rule:nonzero; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:miter; stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;"/>',
+    k: '<g style="fill:none; fill-opacity:1; fill-rule:evenodd; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;"> <path d="M 22.5,11.63 L 22.5,6" style="fill:none; stroke:#1F211D; stroke-linejoin:miter;" id="path6570"/> <path d="M 22.5,25 C 22.5,25 27,17.5 25.5,14.5 C 25.5,14.5 24.5,12 22.5,12 C 20.5,12 19.5,14.5 19.5,14.5 C 18,17.5 22.5,25 22.5,25" style="fill:#1F211D;fill-opacity:1; stroke-linecap:butt; stroke-linejoin:miter;"/> <path d="M 12.5,37 C 18,40.5 27,40.5 32.5,37 L 32.5,30 C 32.5,30 41.5,25.5 38.5,19.5 C 34.5,13 25,16 22.5,23.5 L 22.5,27 L 22.5,23.5 C 20,16 10.5,13 6.5,19.5 C 3.5,25.5 12.5,30 12.5,30 L 12.5,37" style="fill:#1F211D; stroke:#1F211D;"/> <path d="M 20,8 L 25,8" style="fill:none; stroke:#1F211D; stroke-linejoin:miter;"/> <path d="M 32,29.5 C 32,29.5 40.5,25.5 38.03,19.85 C 34.15,14 25,18 22.5,24.5 L 22.5,26.6 L 22.5,24.5 C 20,18 10.85,14 6.97,19.85 C 4.5,25.5 13,29.5 13,29.5" style="fill:none; stroke:#F4F1E8;"/> <path d="M 12.5,30 C 18,27 27,27 32.5,30 M 12.5,33.5 C 18,30.5 27,30.5 32.5,33.5 M 12.5,37 C 18,34 27,34 32.5,37" style="fill:none; stroke:#F4F1E8;"/> </g>',
+    q: '<g style="fill:#1F211D;stroke:#1F211D;stroke-width:1.5; stroke-linecap:round;stroke-linejoin:round"> <path d="M 9,26 C 17.5,24.5 30,24.5 36,26 L 38.5,13.5 L 31,25 L 30.7,10.9 L 25.5,24.5 L 22.5,10 L 19.5,24.5 L 14.3,10.9 L 14,25 L 6.5,13.5 L 9,26 z" style="stroke-linecap:butt;fill:#1F211D" /> <path d="m 9,26 c 0,2 1.5,2 2.5,4 1,1.5 1,1 0.5,3.5 -1.5,1 -1,2.5 -1,2.5 -1.5,1.5 0,2.5 0,2.5 6.5,1 16.5,1 23,0 0,0 1.5,-1 0,-2.5 0,0 0.5,-1.5 -1,-2.5 -0.5,-2.5 -0.5,-2 0.5,-3.5 1,-2 2.5,-2 2.5,-4 -8.5,-1.5 -18.5,-1.5 -27,0 z" /> <path d="M 11.5,30 C 15,29 30,29 33.5,30" /> <path d="m 12,33.5 c 6,-1 15,-1 21,0" /> <circle cx="6" cy="12" r="2" /> <circle cx="14" cy="9" r="2" /> <circle cx="22.5" cy="8" r="2" /> <circle cx="31" cy="9" r="2" /> <circle cx="39" cy="12" r="2" /> <path d="M 11,38.5 A 35,35 1 0 0 34,38.5" style="fill:none; stroke:#1F211D;stroke-linecap:butt;" /> <g style="fill:none; stroke:#F4F1E8;"> <path d="M 11,29 A 35,35 1 0 1 34,29" /> <path d="M 12.5,31.5 L 32.5,31.5" /> <path d="M 11.5,34.5 A 35,35 1 0 0 33.5,34.5" /> <path d="M 10.5,37.5 A 35,35 1 0 0 34.5,37.5" /> </g> </g>',
+    r: '<g style="opacity:1; fill:#1F211D; fill-opacity:1; fill-rule:evenodd; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;" transform="translate(0,0.3)"> <path d="M 9,39 L 36,39 L 36,36 L 9,36 L 9,39 z " style="stroke-linecap:butt;" /> <path d="M 12.5,32 L 14,29.5 L 31,29.5 L 32.5,32 L 12.5,32 z " style="stroke-linecap:butt;" /> <path d="M 12,36 L 12,32 L 33,32 L 33,36 L 12,36 z " style="stroke-linecap:butt;" /> <path d="M 14,29.5 L 14,16.5 L 31,16.5 L 31,29.5 L 14,29.5 z " style="stroke-linecap:butt;stroke-linejoin:miter;" /> <path d="M 14,16.5 L 11,14 L 34,14 L 31,16.5 L 14,16.5 z " style="stroke-linecap:butt;" /> <path d="M 11,14 L 11,9 L 15,9 L 15,11 L 20,11 L 20,9 L 25,9 L 25,11 L 30,11 L 30,9 L 34,9 L 34,14 L 11,14 z " style="stroke-linecap:butt;" /> <path d="M 12,35.5 L 33,35.5 L 33,35.5" style="fill:none; stroke:#F4F1E8; stroke-width:1; stroke-linejoin:miter;" /> <path d="M 13,31.5 L 32,31.5" style="fill:none; stroke:#F4F1E8; stroke-width:1; stroke-linejoin:miter;" /> <path d="M 14,29.5 L 31,29.5" style="fill:none; stroke:#F4F1E8; stroke-width:1; stroke-linejoin:miter;" /> <path d="M 14,16.5 L 31,16.5" style="fill:none; stroke:#F4F1E8; stroke-width:1; stroke-linejoin:miter;" /> <path d="M 11,14 L 34,14" style="fill:none; stroke:#F4F1E8; stroke-width:1; stroke-linejoin:miter;" /> </g>',
+    b: '<g style="opacity:1; fill:none; fill-rule:evenodd; fill-opacity:1; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;" transform="translate(0,0.6)"> <g style="fill:#1F211D; stroke:#1F211D; stroke-linecap:butt;"> <path d="M 9,36 C 12.39,35.03 19.11,36.43 22.5,34 C 25.89,36.43 32.61,35.03 36,36 C 36,36 37.65,36.54 39,38 C 38.32,38.97 37.35,38.99 36,38.5 C 32.61,37.53 25.89,38.96 22.5,37.5 C 19.11,38.96 12.39,37.53 9,38.5 C 7.65,38.99 6.68,38.97 6,38 C 7.35,36.54 9,36 9,36 z"/> <path d="M 15,32 C 17.5,34.5 27.5,34.5 30,32 C 30.5,30.5 30,30 30,30 C 30,27.5 27.5,26 27.5,26 C 33,24.5 33.5,14.5 22.5,10.5 C 11.5,14.5 12,24.5 17.5,26 C 17.5,26 15,27.5 15,30 C 15,30 14.5,30.5 15,32 z"/> <path d="M 25 8 A 2.5 2.5 0 1 1 20,8 A 2.5 2.5 0 1 1 25 8 z"/> </g> <path d="M 17.5,26 L 27.5,26 M 15,30 L 30,30 M 22.5,15.5 L 22.5,20.5 M 20,18 L 25,18" style="fill:none; stroke:#F4F1E8; stroke-linejoin:miter;"/> </g>',
+    n: '<g style="opacity:1; fill:none; fill-opacity:1; fill-rule:evenodd; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;" transform="translate(0,0.3)"> <path d="M 22,10 C 32.5,11 38.5,18 38,39 L 15,39 C 15,30 25,32.5 23,18" style="fill:#1F211D; stroke:#1F211D;" /> <path d="M 24,18 C 24.38,20.91 18.45,25.37 16,27 C 13,29 13.18,31.34 11,31 C 9.958,30.06 12.41,27.96 11,28 C 10,28 11.19,29.23 10,30 C 9,30 5.997,31 6,26 C 6,24 12,14 12,14 C 12,14 13.89,12.1 14,10.5 C 13.27,9.506 13.5,8.5 13.5,7.5 C 14.5,6.5 16.5,10 16.5,10 L 18.5,10 C 18.5,10 19.28,8.008 21,7 C 22,7 22,10 22,10" style="fill:#1F211D; stroke:#1F211D;" /> <path d="M 9.5 25.5 A 0.5 0.5 0 1 1 8.5,25.5 A 0.5 0.5 0 1 1 9.5 25.5 z" style="fill:#F4F1E8; stroke:#F4F1E8;" /> <path d="M 15 15.5 A 0.5 1.5 0 1 1 14,15.5 A 0.5 1.5 0 1 1 15 15.5 z" transform="matrix(0.866,0.5,-0.5,0.866,9.693,-5.173)" style="fill:#F4F1E8; stroke:#F4F1E8;" /> <path d="M 24.55,10.4 L 24.1,11.85 L 24.6,12 C 27.75,13 30.25,14.49 32.5,18.75 C 34.75,23.01 35.75,29.06 35.25,39 L 35.2,39.5 L 37.45,39.5 L 37.5,39 C 38,28.94 36.62,22.15 34.25,17.66 C 31.88,13.17 28.46,11.02 25.06,10.5 L 24.55,10.4 z " style="fill:#F4F1E8; stroke:none;" /> </g>',
+    p: '<path d="m 22.5,9 c -2.21,0 -4,1.79 -4,4 0,0.89 0.29,1.71 0.78,2.38 C 17.33,16.5 16,18.59 16,21 c 0,2.03 0.94,3.84 2.41,5.03 C 15.41,27.09 11,31.58 11,39.5 H 34 C 34,31.58 29.59,27.09 26.59,26.03 28.06,24.84 29,23.03 29,21 29,18.59 27.67,16.5 25.72,15.38 26.21,14.71 26.5,13.89 26.5,13 c 0,-2.21 -1.79,-4 -4,-4 z" style="opacity:1; fill:#1F211D; fill-opacity:1; fill-rule:nonzero; stroke:#1F211D; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:miter; stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;"/>',
 };
 const LINIEN = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
-const schachMoeglich = () => typeof Chess === "function";
+/* Brettfarben. Bewusst in beiden Erscheinungsbildern gleich: Ein Brett
+   ist ein Gegenstand, kein Teil der Oberfläche. Im dunklen Modus war es
+   vorher grau auf grau und die schwarzen Figuren verschwanden fast. */
+const BRETT_HELL = "#E9E3D2";
+const BRETT_DUNKEL = "#79906F";
+const BRETT_RAND = "#2A2E2A";
+const MARKE = "232, 183, 74";    /* letzter Zug, gewähltes Feld */
+const HINWEIS = "28, 40, 30";    /* Punkte und Ringe für mögliche Züge */
+
+const SCHACH_START = 700;        /* Anfangswertung, grob Anfängerniveau */
+const SCHACH_MIN = 400, SCHACH_MAX = 1599;
+const SCHACH_LEER = {
+    wertung: SCHACH_START, geloest: 0, versucht: 0,
+    serie: 0, besteSerie: 0, erledigt: [], zuletzt: null,
+};
+
+/* Die Aufgabenliste wird einmal zerlegt und dann behalten - 4000 Zeilen
+   bei jedem Bild neu zu zerlegen wäre Verschwendung. */
+let AUFGABEN_LISTE = null;
+function aufgabenListe() {
+    if (AUFGABEN_LISTE)
+        return AUFGABEN_LISTE;
+    const roh = (typeof window !== "undefined" && window.AUFGABEN) || "";
+    const aus = [];
+    for (const zeile of roh.split("\n")) {
+        if (!zeile)
+            continue;
+        const t = zeile.split("|");
+        if (t.length < 4)
+            continue;
+        aus.push({
+            fen: t[0],
+            loesung: t[1].split(" "),
+            wertung: +t[2],
+            themen: t[3] ? t[3].split(",").map(Number) : [],
+        });
+    }
+    AUFGABEN_LISTE = aus;
+    return aus;
+}
+
+const schachMoeglich = () => typeof Chess === "function" && aufgabenListe().length > 0;
+
+/* Eine Aufgabe nahe der eigenen Wertung, die noch nicht gelöst wurde.
+   Die Spanne wächst, falls in der Nähe nichts Offenes mehr liegt. */
+function aufgabeWaehlen(wertung, erledigt) {
+    const alle = aufgabenListe();
+    if (!alle.length)
+        return null;
+    const weg = new Set(erledigt || []);
+    for (const spanne of [110, 200, 320, 500, 99999]) {
+        const topf = [];
+        for (let i = 0; i < alle.length; i++) {
+            if (weg.has(i))
+                continue;
+            if (Math.abs(alle[i].wertung - wertung) <= spanne)
+                topf.push(i);
+        }
+        if (topf.length) {
+            const nr = topf[Math.floor(Math.random() * topf.length)];
+            return { nr: nr, fen: alle[nr].fen, loesung: alle[nr].loesung,
+                wertung: alle[nr].wertung, themen: alle[nr].themen };
+        }
+    }
+    return null;   /* alles gelöst - dann fängt die App von vorne an */
+}
+
+/* Wertung wie eine Elo-Zahl: Eine schwere Aufgabe bringt viel, eine
+   leichte wenig, und ein Fehlschlag kostet entsprechend. So pendelt
+   sich die Schwierigkeit von selbst auf dein Niveau ein. */
+function wertungNeu(spieler, aufgabe, gewonnen) {
+    const erwartet = 1 / (1 + Math.pow(10, (aufgabe - spieler) / 400));
+    const neu = Math.round(spieler + 24 * ((gewonnen ? 1 : 0) - erwartet));
+    return Math.max(SCHACH_MIN, Math.min(SCHACH_MAX, neu));
+}
 
 /* Ein Zug in der Schreibweise der Aufgaben: "e2e4", bei Umwandlung
    "e7e8q". Genau so vergleichen wir, was gespielt wurde. */
@@ -1892,53 +1985,111 @@ function zugAlsText(zug) {
     return zug.from + zug.to + (zug.promotion ? zug.promotion : "");
 }
 
-async function aufgabeHolen() {
-    let a;
-    try {
-        a = await fetch(SCHACH_API);
+/* Figuren mit eigener Nummer, damit dieselbe Figur beim Ziehen auch
+   dieselbe bleibt. Nur so kann sie über das Brett gleiten statt an der
+   einen Stelle zu verschwinden und an der anderen aufzutauchen. */
+function figurenAusFen(fen) {
+    const s = new Chess(fen);
+    const brett = s.board();
+    const aus = [];
+    let n = 0;
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const f = brett[r][c];
+            if (!f)
+                continue;
+            aus.push({
+                id: "f" + (n++),
+                art: f.color === "w" ? f.type.toUpperCase() : f.type,
+                feld: LINIEN[c] + (8 - r),
+                weg: false,
+            });
+        }
     }
-    catch (e) {
-        throw new Error("Keine Verbindung zu Lichess");
+    return aus;
+}
+
+/* Die Figurenliste einem Zug nachführen. Geschlagene Figuren bleiben
+   kurz als "weg" stehen und blenden aus, statt zu springen. */
+function figurenNachZug(figuren, zug) {
+    const aus = figuren.map((f) => ({ ...f }));
+    const bei = (feld) => aus.find((f) => !f.weg && f.feld === feld);
+    if (zug.captured) {
+        /* En passant: der geschlagene Bauer steht nicht auf dem Zielfeld */
+        const opfer = zug.flags.indexOf("e") > -1
+            ? bei(zug.to[0] + (zug.color === "w" ? "5" : "4"))
+            : bei(zug.to);
+        if (opfer)
+            opfer.weg = true;
     }
-    if (!a.ok)
-        throw new Error("Lichess antwortet mit " + a.status);
-    const d = await a.json();
-    const p = d && d.puzzle;
-    if (!p || !p.fen || !Array.isArray(p.solution))
-        throw new Error("Aufgabe unvollständig");
-    return {
-        id: p.id,
-        fen: p.fen,
-        loesung: p.solution,
-        wertung: p.rating || 0,
-        themen: Array.isArray(p.themes) ? p.themes : [],
-    };
+    const zieher = bei(zug.from);
+    if (zieher) {
+        zieher.feld = zug.to;
+        if (zug.promotion)
+            zieher.art = zug.color === "w" ? zug.promotion.toUpperCase() : zug.promotion;
+    }
+    if (zug.flags.indexOf("k") > -1 || zug.flags.indexOf("q") > -1) {
+        const reihe = zug.color === "w" ? "1" : "8";
+        const kurz = zug.flags.indexOf("k") > -1;
+        const turm = bei((kurz ? "h" : "a") + reihe);
+        if (turm)
+            turm.feld = (kurz ? "f" : "d") + reihe;
+    }
+    return aus;
+}
+
+/* Feld des Königs, der im Schach steht - sonst leer */
+function schachFeldVon(spiel) {
+    if (!spiel || !spiel.in_check())
+        return null;
+    const wer = spiel.turn();
+    const brett = spiel.board();
+    for (let r = 0; r < 8; r++)
+        for (let c = 0; c < 8; c++) {
+            const f = brett[r][c];
+            if (f && f.type === "k" && f.color === wer)
+                return LINIEN[c] + (8 - r);
+        }
+    return null;
 }
 
 /* Themen lesbar machen - die englischen Schlagworte sagen wenig */
 const THEMA_NAMEN = {
     mateIn1: "Matt in 1", mateIn2: "Matt in 2", mateIn3: "Matt in 3",
-    mate: "Matt", fork: "Gabel", pin: "Fesselung", skewer: "Spieß",
-    discoveredAttack: "Abzug", doubleCheck: "Doppelschach",
+    backRankMate: "Grundreihenmatt", smotheredMate: "Ersticktes Matt",
+    anastasiaMate: "Anastasia-Matt", arabianMate: "Arabisches Matt",
+    bodenMate: "Bodens Matt", operaMate: "Opernmatt",
+    pillsburysMate: "Pillsbury-Matt", morphysMate: "Morphys Matt",
+    vukovicMate: "Vuković-Matt", balestraMate: "Balestra-Matt",
+    dovetailMate: "Schwalbenschwanz-Matt", swallowstailMate: "Schwalbenschwanz-Matt",
+    doubleBishopMate: "Matt mit zwei Läufern", epauletteMate: "Epaulettenmatt",
+    hookMate: "Hakenmatt", cornerMate: "Eckmatt", killBoxMate: "Käfigmatt",
+    triangleMate: "Dreiecksmatt", blindSwineMate: "Matt der blinden Schweine",
+    fork: "Gabel", pin: "Fesselung", skewer: "Spieß",
+    discoveredAttack: "Abzugsangriff", discoveredCheck: "Abzugsschach",
+    doubleCheck: "Doppelschach", xRayAttack: "Röntgenangriff",
     sacrifice: "Opfer", deflection: "Ablenkung", attraction: "Hinlenkung",
     clearance: "Räumung", interference: "Unterbrechung",
+    intermezzo: "Zwischenzug", capturingDefender: "Verteidiger schlagen",
     hangingPiece: "Figur steht ein", trappedPiece: "Figur gefangen",
-    backRankMate: "Grundreihenmatt", smotheredMate: "Ersticktes Matt",
-    promotion: "Umwandlung", endgame: "Endspiel", middlegame: "Mittelspiel",
-    opening: "Eröffnung", advantage: "Vorteil", crushing: "Entscheidend",
-    kingsideAttack: "Königsangriff", queensideAttack: "Damenflügel",
-    defensiveMove: "Verteidigung", quietMove: "Stiller Zug",
-    zugzwang: "Zugzwang", exposedKing: "Offener König",
+    promotion: "Umwandlung", underPromotion: "Unterverwandlung",
+    advancedPawn: "Weit vorgerückter Bauer", enPassant: "En passant",
+    castling: "Rochade", zugzwang: "Zugzwang", quietMove: "Stiller Zug",
+    defensiveMove: "Verteidigung", exposedKing: "Offener König",
+    kingsideAttack: "Königsangriff", queensideAttack: "Angriff am Damenflügel",
+    attackingF2F7: "Angriff auf f2/f7",
+    endgame: "Endspiel", rookEndgame: "Turmendspiel",
+    pawnEndgame: "Bauernendspiel", queenEndgame: "Damenendspiel",
+    bishopEndgame: "Läuferendspiel", knightEndgame: "Springerendspiel",
+    queenRookEndgame: "Damen- und Turmendspiel",
 };
-const themaName = (t) => THEMA_NAMEN[t] || "";
-/* Laenge und Phase sagen beim Ueben wenig - die fliegen raus */
-const THEMA_EGAL = ["short", "long", "veryLong", "oneMove", "master", "masterVsMaster", "superGM"];
-function themenLesbar(themen) {
+
+/* Aus den gespeicherten Nummern wieder deutsche Namen machen */
+function themenLesbar(nummern) {
+    const verz = (typeof window !== "undefined" && window.AUFGABEN_THEMEN) || [];
     const raus = [];
-    for (const t of themen || []) {
-        if (THEMA_EGAL.indexOf(t) > -1)
-            continue;
-        const n = themaName(t);
+    for (const i of nummern || []) {
+        const n = THEMA_NAMEN[verz[i]];
         if (n && raus.indexOf(n) === -1)
             raus.push(n);
     }
@@ -2352,6 +2503,24 @@ function zusammenfuehren(a, b) {
         zuletzt: zuletztA > zuletztB ? zuletztA : zuletztB,
         gelesen: Object.keys(verse).sort((x, y) => (x < y ? 1 : -1)).map((d) => verse[d]),
     };
+    /* Schach: nicht als Ganzes übernehmen, sonst verliert das Handy
+       seine gelösten Aufgaben, wenn danach das Tablet sichert. Zähler
+       wachsen nur, gelöste Aufgaben werden vereinigt. */
+    {
+        const sA = { ...SCHACH_LEER, ...((a || {}).schach || {}) };
+        const sB = { ...SCHACH_LEER, ...((b || {}).schach || {}) };
+        const sNeu = { ...SCHACH_LEER, ...((neuer || {}).schach || {}) };
+        const erledigt = Array.from(new Set([...(sA.erledigt || []), ...(sB.erledigt || [])]));
+        erg.schach = {
+            wertung: sNeu.wertung,
+            geloest: Math.max(sA.geloest, sB.geloest),
+            versucht: Math.max(sA.versucht, sB.versucht),
+            serie: sNeu.serie,
+            besteSerie: Math.max(sA.besteSerie, sB.besteSerie),
+            erledigt: erledigt,
+            zuletzt: sNeu.zuletzt,
+        };
+    }
     const jetzt = Date.now();
     erg._weg = Object.keys(weg)
         .filter((id) => jetzt - weg[id] < WEG_FRIST)
@@ -2598,7 +2767,7 @@ const DEFAULT_STATE = {
     /* Abendplanung, je geplantem Tag: { fertig, vorsatz, habits: [id] } */
     abend: {},
     /* Taktikaufgaben: gelöst, versucht, laufende und beste Serie */
-    schach: { geloest: 0, versucht: 0, serie: 0, besteSerie: 0 },
+    schach: { ...SCHACH_LEER },
     updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
@@ -3160,22 +3329,40 @@ function PlannerApp() {
         }, { undo: false });
     }, [loaded, tagesVers, bibelTag, bibel.zuletzt, persist]);
     /* ── Schach ─────────────────────────────────────────── */
-    const schachStand = state.schach || { geloest: 0, versucht: 0, serie: 0, besteSerie: 0 };
+    const schachStand = { ...SCHACH_LEER, ...(state.schach || {}) };
     /* sauber = ohne falschen Zug und ohne gezeigte Lösung. Nur das
-       zählt für die Serie - sonst wäre sie geschenkt. */
-    const schachErgebnis = (sauber) => persist((prev) => {
-        const alt = prev.schach || { geloest: 0, versucht: 0, serie: 0, besteSerie: 0 };
+       zählt für die Serie - sonst wäre sie geschenkt.
+
+       Die Wertung bewegt sich wie eine Elo-Zahl, damit die Aufgaben von
+       selbst zu deinem Niveau passen. Gelöste Aufgaben werden vermerkt,
+       damit dieselbe nicht zweimal kommt. */
+    const schachErgebnis = (nr, sauber) => persist((prev) => {
+        const alt = { ...SCHACH_LEER, ...(prev.schach || {}) };
+        const liste = aufgabenListe();
+        const schwere = liste[nr] ? liste[nr].wertung : alt.wertung;
+        const neueWertung = wertungNeu(alt.wertung, schwere, sauber);
         const serie = sauber ? alt.serie + 1 : 0;
+        const erledigt = (nr >= 0 && alt.erledigt.indexOf(nr) === -1)
+            ? [...alt.erledigt, nr] : alt.erledigt;
         return {
             ...prev,
             schach: {
+                wertung: neueWertung,
                 geloest: alt.geloest + (sauber ? 1 : 0),
                 versucht: alt.versucht + 1,
                 serie: serie,
                 besteSerie: Math.max(alt.besteSerie || 0, serie),
+                erledigt: erledigt,
+                zuletzt: { delta: neueWertung - alt.wertung, sauber: sauber },
             },
         };
     }, { undo: false });
+    /* Wenn wirklich alle Aufgaben durch sind: die Liste leeren, Wertung
+       und Serien bleiben stehen - die sind ja verdient. */
+    const schachZuruecksetzen = () => persist((prev) => ({
+        ...prev,
+        schach: { ...SCHACH_LEER, ...(prev.schach || {}), erledigt: [] },
+    }), { undo: false });
     /* ── Postfach ───────────────────────────────────────── */
     /* Zählt hoch, wenn der Schlüssel gesetzt wird - sonst müsste man die
        App neu starten, damit das Abfragen anläuft. */
@@ -4598,7 +4785,7 @@ function PlannerApp() {
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onDeleteVorbei: deleteExamsVorbei, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing, minuten: studyMinuten }))),
             view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true), onEinfuegen: () => setRecipePaste(true) })),
             view === "bibel" && (React.createElement(BibelView, { heute: tagesVers, gelesen: bibel.gelesen || [], onOeffnen: () => setVersOffen(true) })),
-            view === "schach" && (React.createElement(SchachView, { stand: schachStand, onErgebnis: schachErgebnis })),
+            view === "schach" && (React.createElement(SchachView, { stand: schachStand, onErgebnis: schachErgebnis, onZuruecksetzen: schachZuruecksetzen })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -4695,120 +4882,192 @@ function PlannerApp() {
         }))));
 }
 /* ════════════════ Schach ════════════════ */
-/* Das Brett. Gedreht, wenn Schwarz zieht - man loest eine Aufgabe von
-   seiner eigenen Seite aus, sonst muss man im Kopf spiegeln. */
-function Brett({ stellung, unten, gewaehlt, ziele, letzter, onFeld }) {
-    const reihen = unten === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8];
-    const linien = unten === "w" ? LINIEN : LINIEN.slice().reverse();
-    return (React.createElement("div", { className: "pl-card rounded overflow-hidden", style: {
-            display: "grid",
-            gridTemplateColumns: "repeat(8, 1fr)",
-            aspectRatio: "1 / 1",
-            width: "100%",
-        } }, reihen.map((r) => linien.map((l) => {
-        const feld = l + r;
-        const stueck = stellung[feld];
-        const hell = (LINIEN.indexOf(l) + r) % 2 === 1;
-        const istZiel = ziele.indexOf(feld) > -1;
-        const istGewaehlt = gewaehlt === feld;
-        const warBeteiligt = letzter && (letzter.from === feld || letzter.to === feld);
-        return (React.createElement("button", { key: feld, onClick: () => onFeld(feld), className: "relative flex items-center justify-center", style: {
-                background: istGewaehlt ? lift("#C8A24A")
-                    : warBeteiligt ? hexA(lift("#C8A24A"), 0.35)
-                        : hell ? surf("#E8E4D9", "#4A4A46") : surf("#B4A98C", "#2E2E2C"),
-                border: "none", padding: 0, lineHeight: 1,
-                fontSize: "min(7.6vw, 34px)",
-                color: stueck && stueck === stueck.toUpperCase() ? "#FAFAF8" : "#191D1A",
-                textShadow: stueck && stueck === stueck.toUpperCase() ? "0 1px 2px rgba(0,0,0,.45)" : "none",
-                cursor: "pointer",
-            } },
-            stueck ? FIGUREN[stueck] : "",
-            /* Punkt fuer ein moegliches Ziel; auf besetzten Feldern ein
-               Ring, sonst verdeckt der Punkt die Figur, die dort steht. */
-            istZiel && (React.createElement("span", { className: "absolute", style: stueck
-                    ? { inset: 2, borderRadius: "50%", border: "3px solid " + hexA(lift("#1E6E5A"), 0.8) }
-                    : { width: "26%", height: "26%", borderRadius: "50%", background: hexA(lift("#1E6E5A"), 0.75) } }))));
-    }))));
+
+/* Das Brett besteht aus zwei Schichten: unten die 64 Felder, die
+   zugleich die Klickflächen sind, darüber die Figuren. Markierungen,
+   Zielpunkte und das Schachsignal zeichnet das Feld selbst als
+   Hintergrund - das spart 64 zusätzliche Elemente.
+
+   Die Figuren liegen nicht in den Feldern, sondern frei darüber. Nur
+   deshalb können sie beim Ziehen gleiten: Es ist dieselbe Figur, die
+   sich bewegt, nicht eine, die hier verschwindet und dort auftaucht. */
+
+function feldHintergrund({ hell, marke, zielLeer, zielBesetzt, imSchach, fehler }) {
+    const schichten = [];
+    if (zielLeer)
+        schichten.push("radial-gradient(circle closest-side, rgba(" + HINWEIS + ",.26) 0 30%, rgba(0,0,0,0) 31%)");
+    if (zielBesetzt)
+        schichten.push("radial-gradient(circle closest-side, rgba(0,0,0,0) 0 78%, rgba(" + HINWEIS + ",.30) 79%)");
+    if (imSchach)
+        schichten.push("radial-gradient(circle closest-side, rgba(178,56,56,.92) 0 26%, rgba(178,56,56,.42) 58%, rgba(0,0,0,0) 100%)");
+    if (fehler)
+        schichten.push("linear-gradient(rgba(178,56,56,.62), rgba(178,56,56,.62))");
+    else if (marke)
+        schichten.push("linear-gradient(rgba(" + MARKE + "," + marke + "), rgba(" + MARKE + "," + marke + "))");
+    return {
+        backgroundColor: hell ? BRETT_HELL : BRETT_DUNKEL,
+        backgroundImage: schichten.join(", "),
+    };
 }
 
-function SchachView({ stand, onErgebnis }) {
+function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld, ruhig, onFeld }) {
+    const reihen = unten === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8];
+    const linien = unten === "w" ? LINIEN : LINIEN.slice().reverse();
+    const besetzt = {};
+    for (const f of figuren)
+        if (!f.weg)
+            besetzt[f.feld] = true;
+
+    const felder = [];
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const linie = linien[c], reihe = reihen[r];
+            const feld = linie + reihe;
+            /* a1 ist dunkel: Linie + Reihe gerade heißt hell */
+            const hell = (LINIEN.indexOf(linie) + reihe) % 2 === 0;
+            const istZiel = ziele.indexOf(feld) > -1;
+            const marke = gewaehlt === feld ? 0.58
+                : (letzter && (letzter.from === feld || letzter.to === feld)) ? 0.34
+                    : 0;
+            felder.push(React.createElement("button", {
+                key: feld,
+                "aria-label": feld,
+                onClick: () => onFeld(feld),
+                style: Object.assign({
+                    position: "relative", border: "none", padding: 0,
+                    cursor: "pointer", appearance: "none",
+                    transition: "background-image .12s linear",
+                }, feldHintergrund({
+                    hell: hell, marke: marke,
+                    zielLeer: istZiel && !besetzt[feld],
+                    zielBesetzt: istZiel && !!besetzt[feld],
+                    imSchach: imSchach === feld,
+                    fehler: fehlerFeld === feld,
+                })),
+            },
+                /* Koordinaten am Rand, in der Farbe des Nachbarfeldes */
+                c === 0 && React.createElement("span", { style: {
+                        position: "absolute", top: "3%", left: "5%",
+                        fontSize: "min(2.3vw, 10px)", fontWeight: 600, lineHeight: 1,
+                        fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+                        color: hell ? BRETT_DUNKEL : BRETT_HELL, opacity: .85,
+                        pointerEvents: "none",
+                    } }, reihe),
+                r === 7 && React.createElement("span", { style: {
+                        position: "absolute", bottom: "3%", right: "5%",
+                        fontSize: "min(2.3vw, 10px)", fontWeight: 600, lineHeight: 1,
+                        fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+                        color: hell ? BRETT_DUNKEL : BRETT_HELL, opacity: .85,
+                        pointerEvents: "none",
+                    } }, linie)));
+        }
+    }
+
+    const spalteVon = (feld) => unten === "w" ? LINIEN.indexOf(feld[0]) : 7 - LINIEN.indexOf(feld[0]);
+    const reiheVon = (feld) => unten === "w" ? 8 - Number(feld[1]) : Number(feld[1]) - 1;
+
+    return (React.createElement("div", { style: {
+            position: "relative", width: "100%", maxWidth: 420, margin: "0 auto",
+            aspectRatio: "1 / 1", borderRadius: 5, overflow: "hidden",
+            border: "1px solid " + BRETT_RAND,
+            boxShadow: ruhig
+                ? "0 0 0 2.5px " + lift("#1E6E5A") + ", 0 0 22px -4px " + hexA(lift("#1E6E5A"), .55) + ", 0 10px 28px rgba(0,0,0,.30)"
+                : "0 10px 28px rgba(0,0,0,.30)",
+            transition: "box-shadow .25s ease",
+            touchAction: "manipulation",
+        } },
+        React.createElement("div", { style: {
+                position: "absolute", inset: 0, display: "grid",
+                gridTemplateColumns: "repeat(8, 1fr)", gridTemplateRows: "repeat(8, 1fr)",
+            } }, felder),
+        figuren.map((f) => React.createElement("div", {
+            key: f.id,
+            style: {
+                position: "absolute", left: 0, top: 0, width: "12.5%", height: "12.5%",
+                transform: "translate(" + spalteVon(f.feld) * 100 + "%, " + reiheVon(f.feld) * 100 + "%)",
+                transition: "transform .19s cubic-bezier(.2,.78,.28,1), opacity .18s linear",
+                opacity: f.weg ? 0 : 1,
+                zIndex: f.weg ? 1 : 2,
+                pointerEvents: "none", willChange: "transform",
+            },
+        }, React.createElement("svg", {
+            viewBox: "0 0 45 45",
+            style: { display: "block", width: "100%", height: "100%",
+                filter: "drop-shadow(0 1px 1.4px rgba(0,0,0,.32))" },
+            dangerouslySetInnerHTML: { __html: FIGUREN_SVG[f.art] || "" },
+        })))));
+}
+
+/* Eine Kennzahl neben der Hauptzahl */
+function SchachKachel({ titel, wert }) {
+    return (React.createElement("div", { className: "flex flex-col items-end gap-0.5" },
+        React.createElement("span", { className: "mono pl-muted uppercase tracking-widest", style: { fontSize: 9 } }, titel),
+        React.createElement("span", { style: { fontSize: 19, fontWeight: 600, lineHeight: 1 } }, wert)));
+}
+
+function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
+    const [nr, setNr] = useState(-1);
     const [aufgabe, setAufgabe] = useState(null);
     const [spiel, setSpiel] = useState(null);
+    const [figuren, setFiguren] = useState([]);
     const [schritt, setSchritt] = useState(0);
     const [gewaehlt, setGewaehlt] = useState(null);
     const [letzter, setLetzter] = useState(null);
-    const [lage, setLage] = useState("laedt");
-    const [fehler, setFehler] = useState("");
+    const [fehlerFeld, setFehlerFeld] = useState(null);
+    const [lage, setLage] = useState("leer");
     const [gezeigt, setGezeigt] = useState(false);
     const [patzer, setPatzer] = useState(false);
+    /* Wertung und Erledigtes nur beim Laden lesen - sonst springt
+       mitten in der Aufgabe die Auswahl weg. */
+    const standRef = useRef(stand);
+    standRef.current = stand;
 
-    const laden = useCallback(() => {
-        setLage("laedt");
-        setFehler("");
-        setGewaehlt(null);
-        setLetzter(null);
-        setGezeigt(false);
-        setPatzer(false);
-        setSchritt(0);
-        aufgabeHolen()
-            .then((a) => {
-            const s = new Chess(a.fen);
-            setAufgabe(a);
-            setSpiel(s);
-            setLage("laeuft");
-        })
-            .catch((e) => { setFehler(e.message); setLage("fehler"); });
+    /* laden() hängt auch direkt an Knöpfen, bekommt dann also das
+       Klick-Ereignis als Argument - darum die Prüfung auf eine Liste. */
+    const laden = useCallback((erledigtStatt) => {
+        const s = standRef.current || SCHACH_LEER;
+        const erledigt = Array.isArray(erledigtStatt) ? erledigtStatt : (s.erledigt || []);
+        const a = aufgabeWaehlen(s.wertung || SCHACH_START, erledigt);
+        setGewaehlt(null); setLetzter(null); setFehlerFeld(null);
+        setGezeigt(false); setPatzer(false); setSchritt(0);
+        if (!a) { setLage("leer"); setAufgabe(null); return; }
+        const sp = new Chess(a.fen);
+        setNr(a.nr); setAufgabe(a); setSpiel(sp);
+        setFiguren(figurenAusFen(a.fen));
+        setLage("laeuft");
     }, []);
 
-    useEffect(() => { if (schachMoeglich())
-        laden(); }, [laden]);
+    useEffect(() => { if (schachMoeglich()) laden(); }, [laden]);
 
     if (!schachMoeglich())
         return (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-md md:mx-auto" },
-            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Die Schach-Bibliothek wurde nicht geladen. Die Datei „chess.min.js\" muss im selben Ordner wie „app.js\" liegen.")));
+            React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" },
+                "Die Aufgaben konnten nicht geladen werden. Die Dateien „chess.min.js\" und „aufgaben.js\" müssen im selben Ordner wie „app.js\" liegen.")));
 
-    /* Stellung als Feld→Figur, damit das Brett nicht rechnen muss */
-    const stellung = {};
-    if (spiel) {
-        const reihen = spiel.board();
-        for (let r = 0; r < 8; r++) {
-            for (let c = 0; c < 8; c++) {
-                const f = reihen[r][c];
-                if (f)
-                    stellung[LINIEN[c] + (8 - r)] = f.color === "w" ? f.type.toUpperCase() : f.type;
-            }
-        }
-    }
     const meineFarbe = aufgabe ? new Chess(aufgabe.fen).turn() : "w";
     const fertig = aufgabe && schritt >= aufgabe.loesung.length;
+    const ziele = (!gewaehlt || !spiel || fertig || lage !== "laeuft") ? [] : spiel
+        .moves({ square: gewaehlt, verbose: true }).map((m) => m.to);
 
-    const ziele = (!gewaehlt || !spiel || fertig) ? [] : spiel
-        .moves({ square: gewaehlt, verbose: true })
-        .map((m) => m.to);
+    const nachbauen = (s) => new Chess(s.fen());
 
-    const antwortSpielen = (s, naechsterSchritt) => {
-        /* Der Gegenzug steht fest - er gehoert zur Loesung und wird
-           gespielt, damit man weiterrechnen kann. */
-        const gegen = aufgabe.loesung[naechsterSchritt];
+    const antwortSpielen = (s, figs, naechster) => {
+        const gegen = aufgabe.loesung[naechster];
         if (!gegen) {
-            setSchritt(naechsterSchritt);
+            setSchritt(naechster);
             setLage("geloest");
-            onErgebnis(!patzer);
+            onErgebnis(nr, !patzer && !gezeigt);
             return;
         }
         setTimeout(() => {
             const z = s.move({ from: gegen.slice(0, 2), to: gegen.slice(2, 4), promotion: gegen[4] || "q" });
-            setLetzter(z ? { from: z.from, to: z.to } : null);
+            if (!z)
+                return;
+            setLetzter({ from: z.from, to: z.to });
+            setFiguren(figurenNachZug(figs, z));
             setSpiel(nachbauen(s));
-            setSchritt(naechsterSchritt + 1);
-        }, 420);
-    };
-
-    /* chess.js gibt kein neues Objekt zurueck; React braucht aber eines,
-       sonst merkt es die Aenderung nicht. */
-    const nachbauen = (s) => {
-        const neu = new Chess(s.fen());
-        return neu;
+            setSchritt(naechster + 1);
+        }, 360);
     };
 
     const feldTippen = (feld) => {
@@ -4817,10 +5076,8 @@ function SchachView({ stand, onErgebnis }) {
         if (gewaehlt && ziele.indexOf(feld) > -1) {
             const soll = aufgabe.loesung[schritt];
             const versuch = gewaehlt + feld;
-            /* Umwandlung: Lichess schreibt die Figur dazu. Wir wandeln
-               immer in eine Dame um, ausser die Loesung sagt etwas
-               anderes - Unterverwandlung ist selten und dann Teil der
-               Pointe. */
+            /* Umwandlung: immer zur Dame, außer die Lösung will etwas
+               anderes - Unterverwandlung ist selten und dann die Pointe */
             const umwandlung = soll && soll.length === 5 && soll.slice(0, 4) === versuch ? soll[4] : "q";
             const probe = new Chess(spiel.fen());
             const z = probe.move({ from: gewaehlt, to: feld, promotion: umwandlung });
@@ -4828,22 +5085,24 @@ function SchachView({ stand, onErgebnis }) {
                 return;
             setGewaehlt(null);
             if (zugAlsText(z) !== soll) {
-                /* Falscher Zug: Stellung bleibt, nur ein Hinweis. Wer die
-                   Aufgabe danach loest, bekommt sie nicht als sauber
-                   geloest angerechnet. */
+                /* Falscher Zug: Die Stellung bleibt stehen, das Zielfeld
+                   blinkt kurz rot. Wer danach löst, bekommt die Aufgabe
+                   nicht als sauber gelöst angerechnet. */
                 setPatzer(true);
+                setFehlerFeld(feld);
                 setLage("daneben");
-                setTimeout(() => setLage("laeuft"), 900);
+                setTimeout(() => { setFehlerFeld(null); setLage("laeuft"); }, 620);
                 return;
             }
-            const s = probe;
-            setSpiel(s);
+            const neueFiguren = figurenNachZug(figuren, z);
+            setFiguren(neueFiguren);
+            setSpiel(probe);
             setLetzter({ from: z.from, to: z.to });
-            antwortSpielen(s, schritt + 1);
+            antwortSpielen(probe, neueFiguren, schritt + 1);
             return;
         }
-        const stueck = stellung[feld];
-        if (stueck && (stueck === stueck.toUpperCase() ? "w" : "b") === spiel.turn()) {
+        const treffer = figuren.find((f) => !f.weg && f.feld === feld);
+        if (treffer && (treffer.art === treffer.art.toUpperCase() ? "w" : "b") === spiel.turn()) {
             setGewaehlt(feld === gewaehlt ? null : feld);
             return;
         }
@@ -4851,71 +5110,110 @@ function SchachView({ stand, onErgebnis }) {
     };
 
     const loesungZeigen = () => {
-        if (!aufgabe || fertig)
+        if (!aufgabe || fertig || lage === "geloest")
             return;
         setGezeigt(true);
         setPatzer(true);
+        setGewaehlt(null);
         const s = new Chess(spiel.fen());
+        let figs = figuren;
         let i = schritt;
         const weiter = () => {
             const zug = aufgabe.loesung[i];
-            if (!zug) {
-                setLage("geloest");
-                onErgebnis(false);
-                return;
-            }
+            if (!zug) { setLage("geloest"); onErgebnis(nr, false); return; }
             const z = s.move({ from: zug.slice(0, 2), to: zug.slice(2, 4), promotion: zug[4] || "q" });
-            setLetzter(z ? { from: z.from, to: z.to } : null);
+            if (!z) { setLage("geloest"); onErgebnis(nr, false); return; }
+            figs = figurenNachZug(figs, z);
+            setFiguren(figs);
+            setLetzter({ from: z.from, to: z.to });
             setSpiel(new Chess(s.fen()));
-            i++;
-            setSchritt(i);
-            setTimeout(weiter, 650);
+            i++; setSchritt(i);
+            setTimeout(weiter, 620);
         };
         weiter();
     };
 
     const themen = aufgabe ? themenLesbar(aufgabe.themen) : [];
     const offen = aufgabe ? Math.ceil((aufgabe.loesung.length - schritt) / 2) : 0;
+    const zuletzt = stand.zuletzt;
+    const zeigeDelta = lage === "geloest" && zuletzt && typeof zuletzt.delta === "number";
+    const gruen = lift("#1E6E5A"), rot = lift("#A03A5E");
+
+    const meldung = lage === "daneben" ? { text: "Nicht dieser Zug.", farbe: rot }
+        : lage === "geloest" ? (gezeigt ? { text: "Lösung gezeigt.", farbe: "var(--muted)" }
+            : patzer ? { text: "Gelöst — mit Umweg.", farbe: "var(--muted)" }
+                : { text: "Gelöst.", farbe: gruen })
+            : offen > 1 ? { text: "Noch " + offen + " Züge zu finden", farbe: "var(--muted)" }
+                : { text: "Finde den besten Zug", farbe: "var(--muted)" };
 
     return (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-md md:mx-auto" },
-        React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
-            React.createElement("span", { className: "mono text-xs pl-muted uppercase tracking-widest" }, "Taktik"),
-            React.createElement("span", { className: "mono text-xs pl-muted" },
-                stand.serie > 0 ? "Serie " + stand.serie + " · " : "",
-                stand.geloest,
-                " von ",
-                stand.versucht,
-                " gelöst")),
 
-        lage === "fehler"
+        /* Kennzahlen: eine Hauptzahl, daneben zwei kleine */
+        React.createElement("div", { className: "pl-card rounded px-4 py-3 flex items-end justify-between gap-3" },
+            React.createElement("div", { className: "flex flex-col gap-0.5 min-w-0" },
+                React.createElement("span", { className: "mono pl-muted uppercase tracking-widest", style: { fontSize: 9 } }, "Deine Wertung"),
+                React.createElement("div", { className: "flex items-baseline gap-2" },
+                    React.createElement("span", { style: { fontSize: 40, fontWeight: 600, lineHeight: 1.05, letterSpacing: "-.01em" } },
+                        stand.wertung || SCHACH_START),
+                    zeigeDelta && React.createElement("span", { className: "mono", style: {
+                            fontSize: 12, fontWeight: 600,
+                            color: zuletzt.delta >= 0 ? gruen : rot,
+                        } }, (zuletzt.delta >= 0 ? "+" : "") + zuletzt.delta)),
+                React.createElement("span", { className: "mono pl-muted", style: { fontSize: 10 } },
+                    (stand.geloest || 0) + " von " + (stand.versucht || 0) + " gelöst")),
+            React.createElement("div", { className: "flex gap-5 shrink-0" },
+                React.createElement(SchachKachel, { titel: "Serie", wert: stand.serie || 0 }),
+                React.createElement(SchachKachel, { titel: "Beste", wert: stand.besteSerie || 0 }))),
+
+        lage === "leer" || !aufgabe
             ? React.createElement("div", { className: "pl-card rounded p-5 flex flex-col gap-3" },
-                React.createElement("p", { className: "text-sm leading-relaxed" }, fehler),
-                React.createElement("button", { onClick: laden, className: "pl-btn px-3 py-2 rounded mono text-xs self-start" }, "Nochmal versuchen"))
-            : !spiel
-                ? React.createElement("p", { className: "mono text-xs pl-muted py-8 text-center" }, "Aufgabe wird geholt…")
-                : React.createElement(React.Fragment, null,
-                    React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
-                        React.createElement("span", { className: "text-sm font-medium" }, meineFarbe === "w" ? "Weiß am Zug" : "Schwarz am Zug"),
-                        React.createElement("span", { className: "mono text-xs pl-muted" }, aufgabe.wertung ? aufgabe.wertung : "")),
-                    React.createElement(Brett, {
-                        stellung: stellung, unten: meineFarbe, gewaehlt: gewaehlt,
-                        ziele: ziele, letzter: letzter, onFeld: feldTippen,
-                    }),
-                    React.createElement("div", { className: "flex items-center justify-between gap-2 min-h-6" },
-                        React.createElement("span", { className: "mono text-xs", style: {
-                                color: lage === "daneben" ? lift("#A03A5E")
-                                    : lage === "geloest" ? lift("#1E6E5A") : "var(--muted)",
-                            } }, lage === "daneben" ? "Nicht dieser Zug."
-                            : lage === "geloest" ? (gezeigt ? "Lösung gezeigt." : patzer ? "Gelöst — mit Umweg." : "Gelöst.")
-                                : offen > 1 ? "Noch " + offen + " Züge zu finden"
-                                    : "Finde den besten Zug"),
-                        themen.length > 0 && lage === "geloest" && (React.createElement("span", { className: "mono text-xs pl-muted" }, themen.join(" · ")))),
-                    React.createElement("div", { className: "flex gap-2" },
-                        lage === "geloest"
-                            ? React.createElement("button", { onClick: laden, className: "flex-1 py-2.5 rounded mono text-xs", style: { background: "var(--ink)", color: "var(--paper)" } }, "Nächste Aufgabe")
-                            : React.createElement(React.Fragment, null,
-                                React.createElement("button", { onClick: loesungZeigen, disabled: gezeigt, className: "pl-btn px-3 py-2 rounded mono text-xs" }, "Lösung zeigen"),
-                                React.createElement("button", { onClick: laden, className: "pl-btn px-3 py-2 rounded mono text-xs" }, "Überspringen"))))));
+                React.createElement("p", { className: "text-sm leading-relaxed" },
+                    "Du hast alle 4000 Aufgaben gelöst. Beachtlich."),
+                /* Erst die Liste der gelösten Aufgaben leeren, sonst
+                   findet die Auswahl weiterhin nichts. */
+                React.createElement("button", { onClick: () => { onZuruecksetzen(); laden([]); },
+                    className: "pl-btn px-3 py-2 rounded mono text-xs self-start" }, "Nochmal von vorn"))
+            : React.createElement(React.Fragment, null,
+
+                /* Wer am Zug ist, und wie schwer die Aufgabe ist */
+                React.createElement("div", { className: "flex items-center justify-between gap-2 px-0.5" },
+                    React.createElement("div", { className: "flex items-center gap-2" },
+                        React.createElement("span", { style: {
+                                width: 11, height: 11, borderRadius: "50%", display: "inline-block",
+                                background: meineFarbe === "w" ? "#F4F1E8" : "#1F211D",
+                                border: "1px solid " + (meineFarbe === "w" ? "#1F211D" : "#F4F1E8"),
+                            } }),
+                        /* Nach dem Lösen wäre "am Zug" falsch - dann steht
+                           dort nur noch, welche Seite du geführt hast. */
+                        React.createElement("span", { className: "text-sm font-medium" },
+                            (meineFarbe === "w" ? "Weiß" : "Schwarz") + (lage === "geloest" ? "" : " am Zug"))),
+                    React.createElement("span", { className: "mono pl-muted", style: { fontSize: 11 } },
+                        "Wertung " + aufgabe.wertung)),
+
+                React.createElement(Brett, {
+                    figuren: figuren, unten: meineFarbe, gewaehlt: gewaehlt, ziele: ziele,
+                    letzter: letzter, imSchach: schachFeldVon(spiel), fehlerFeld: fehlerFeld,
+                    ruhig: lage === "geloest" && !patzer, onFeld: feldTippen,
+                }),
+
+                React.createElement("div", { className: "flex items-center justify-between gap-2", style: { minHeight: 20 } },
+                    React.createElement("span", { className: "mono", style: { fontSize: 12, color: meldung.farbe } }, meldung.text),
+                    themen.length > 0 && lage === "geloest" && React.createElement("div", { className: "flex gap-1 flex-wrap justify-end" },
+                        themen.map((t) => React.createElement("span", {
+                            key: t, className: "mono", style: {
+                                fontSize: 10, padding: "2px 7px", borderRadius: 999,
+                                border: "1px solid var(--line)", color: "var(--muted)",
+                            } }, t)))),
+
+                React.createElement("div", { className: "flex gap-2" },
+                    lage === "geloest"
+                        ? React.createElement("button", { onClick: laden, className: "flex-1 py-3 rounded mono text-xs",
+                            style: { background: "var(--ink)", color: "var(--paper)", fontWeight: 600 } }, "Nächste Aufgabe")
+                        : React.createElement(React.Fragment, null,
+                            React.createElement("button", { onClick: loesungZeigen, disabled: gezeigt,
+                                className: "flex-1 py-2.5 rounded mono text-xs pl-btn" }, "Lösung zeigen"),
+                            React.createElement("button", { onClick: laden,
+                                className: "flex-1 py-2.5 rounded mono text-xs pl-btn" }, "Überspringen"))))));
 }
 /* ════════════════ Assistent ════════════════ */
 function AssiSheet({ state, blocksFor, heuteK, katKeys, mails, onAnlegen, onClose }) {
