@@ -690,17 +690,39 @@ window.PLANER_CLIENT_ID = "";
   var verz = window.AUFGABEN_THEMEN || [];
   for (var i = 0; i < fremd.length; i++) {
     var a = fremd[i];
-    if (!(a.wertung >= 400 && a.wertung <= 1599)) wertungenOk = false;
+    if (!(a.wertung >= 500 && a.wertung <= 1899)) wertungenOk = false;
     if (i > 0 && fremd[i - 1].wertung > a.wertung) sortiert = false;
-    if (a.loesung.length % 2 !== 1 || a.loesung.length > 3) laengeOk = false;
+    if (a.loesung.length % 2 !== 1 || a.loesung.length > 7) laengeOk = false;
     for (var j = 0; j < a.themen.length; j++)
       if (!verz[a.themen[j]]) themenOk = false;
   }
-  pruefe("alle Wertungen zwischen 400 und 1599", wertungenOk);
+  pruefe("alle Wertungen zwischen 500 und 1899", wertungenOk);
   pruefe("nach Wertung sortiert", sortiert);
   pruefe("jede Lösung endet mit einem eigenen Zug", laengeOk,
     "die Länge muss ungerade sein - sonst hätte der Gegner das letzte Wort");
   pruefe("alle Themennummern stehen im Verzeichnis", themenOk);
+
+  /* Die Mischung. Die erste Fassung bestand zu 40 Prozent aus Matt in
+     einem Zug und hatte gar nichts, was mehr als zwei eigene Züge
+     brauchte. Genau das soll nicht wiederkommen. */
+  var nrThema = function (name) { return (window.AUFGABEN_THEMEN || []).indexOf(name); };
+  var hatThema = function (a, name) { return a.themen.indexOf(nrThema(name)) > -1; };
+  var anteil = function (f) { return fremd.filter(f).length / fremd.length; };
+  var eigeneZuege = function (a) { return (a.loesung.length + 1) / 2; };
+
+  var m1 = anteil(function (a) { return hatThema(a, "mateIn1"); });
+  pruefe("höchstens 12 % sind Matt in einem Zug", m1 <= 0.12,
+    "sind " + Math.round(m1 * 100) + " % — vorher waren es 40 %");
+  var mehrzuegig = anteil(function (a) { return eigeneZuege(a) >= 2; });
+  pruefe("mindestens 80 % brauchen mehr als einen Zug", mehrzuegig >= 0.8,
+    "sind " + Math.round(mehrzuegig * 100) + " %");
+  var lang = fremd.filter(function (a) { return eigeneZuege(a) >= 3; }).length;
+  pruefe("es gibt Aufgaben mit drei oder mehr eigenen Zügen", lang > 200,
+    "sind nur " + lang + " — in der ersten Fassung gab es keine einzige");
+  pruefe("Matt in 3 kommt vor",
+    fremd.some(function (a) { return hatThema(a, "mateIn3"); }));
+  pruefe("Material ist die größte Gruppe",
+    anteil(function (a) { return !hatThema(a, "mateIn1") && !hatThema(a, "mateIn2") && !hatThema(a, "mateIn3"); }) > 0.6);
 
   /* Die wichtigste Prüfung: Jede einzelne Aufgabe muss spielbar sein.
      Eine Stellung ohne saubere Lösung ist schlimmer als gar keine. */
@@ -737,9 +759,22 @@ window.PLANER_CLIENT_ID = "";
     aufg.length > 4000 && aufg[4000].eigen === true);
   /* Feste Anker: Verschiebt sich die Liste je, fällt es hier auf. */
   gleich("Platz 0 ist dieselbe Stellung wie bisher", aufg[0].fen,
-    "5r1k/pppb2p1/4p2p/6q1/3P4/2PB2P1/PP5P/5RK1 w - - 0 26");
+    "8/8/K4k2/1P3p2/5P1p/8/8/8 b - - 1 47");
   gleich("Platz 3999 ist dieselbe Stellung wie bisher", aufg[3999].fen,
-    "3rr3/pppbRpk1/6pp/8/2PP4/5N1P/P2K1PP1/4R3 w - - 2 30");
+    "1r4k1/4pp1p/3p2p1/3P4/4P3/q4P2/P1Q3PP/1R4K1 b - - 3 31");
+
+  /* Wird der Satz ausgetauscht, zeigen die gemerkten Platznummern auf
+     andere Stellungen - dann müssen sie weg. Verdientes bleibt. */
+  var alterStand = { wertung: 820, geloest: 5, versucht: 9, serie: 2, besteSerie: 4,
+    erledigt: [12, 340, 4001], fassung: 1 };
+  var neuer = schachStandAngleichen(alterStand);
+  gleich("bei neuer Fassung ist Gelöstes zurückgesetzt", neuer.erledigt, []);
+  gleich("die Wertung bleibt", neuer.wertung, 820);
+  gleich("die beste Serie bleibt", neuer.besteSerie, 4);
+  gleich("die Fassung wird vermerkt", neuer.fassung, window.AUFGABEN_FASSUNG);
+  /* Beim zweiten Mal darf nichts mehr passieren */
+  var zweimal = schachStandAngleichen({ ...neuer, erledigt: [7] });
+  gleich("danach bleibt Gelöstes stehen", zweimal.erledigt, [7]);
 
   var ohneDatum = 0, ohneAdresse = 0, falscheArt = 0, keinSchlag = 0, keinMatt = 0, einZug = 0;
   for (var i = 0; i < eigene.length; i++) {

@@ -1981,8 +1981,20 @@ const SCHACH_START = 700;        /* Anfangswertung, grob Anfängerniveau */
 const SCHACH_MIN = 400, SCHACH_MAX = 1599;
 const SCHACH_LEER = {
     wertung: SCHACH_START, geloest: 0, versucht: 0,
-    serie: 0, besteSerie: 0, erledigt: [], zuletzt: null,
+    serie: 0, besteSerie: 0, erledigt: [], zuletzt: null, fassung: 0,
 };
+
+/* Gelöste Aufgaben merkt sich die App als Platznummer in der Liste.
+   Wird der Aufgabensatz ausgetauscht, zeigen diese Nummern plötzlich
+   auf ganz andere Stellungen - dann müssen sie weg. Wertung, Serien
+   und Zähler bleiben: die sind verdient. */
+function schachStandAngleichen(alt) {
+    const s = { ...SCHACH_LEER, ...(alt || {}) };
+    const jetzt = (typeof window !== "undefined" && window.AUFGABEN_FASSUNG) || 1;
+    if (s.fassung === jetzt)
+        return s;
+    return { ...s, erledigt: [], fassung: jetzt };
+}
 
 /* Die Aufgabenliste wird einmal zerlegt und dann behalten - 4000 Zeilen
    bei jedem Bild neu zu zerlegen wäre Verschwendung. */
@@ -2164,6 +2176,8 @@ function schachFeldVon(spiel) {
 /* Themen lesbar machen - die englischen Schlagworte sagen wenig */
 const THEMA_NAMEN = {
     mateIn1: "Matt in 1", mateIn2: "Matt in 2", mateIn3: "Matt in 3",
+    mateIn4: "Matt in 4", mateIn5: "Matt in 5",
+    collinearMove: "Zug auf einer Linie",
     backRankMate: "Grundreihenmatt", smotheredMate: "Ersticktes Matt",
     anastasiaMate: "Anastasia-Matt", arabianMate: "Arabisches Matt",
     bodenMate: "Bodens Matt", operaMate: "Opernmatt",
@@ -3470,7 +3484,7 @@ function PlannerApp() {
         }, { undo: false });
     }, [loaded, tagesVers, bibelTag, bibel.zuletzt, persist]);
     /* ── Schach ─────────────────────────────────────────── */
-    const schachStand = { ...SCHACH_LEER, ...(state.schach || {}) };
+    const schachStand = schachStandAngleichen(state.schach);
     /* sauber = ohne falschen Zug und ohne gezeigte Lösung. Nur das
        zählt für die Serie - sonst wäre sie geschenkt.
 
@@ -3478,7 +3492,7 @@ function PlannerApp() {
        selbst zu deinem Niveau passen. Gelöste Aufgaben werden vermerkt,
        damit dieselbe nicht zweimal kommt. */
     const schachErgebnis = (nr, sauber) => persist((prev) => {
-        const alt = { ...SCHACH_LEER, ...(prev.schach || {}) };
+        const alt = schachStandAngleichen(prev.schach);
         const liste = aufgabenListe();
         const schwere = liste[nr] ? liste[nr].wertung : alt.wertung;
         const neueWertung = wertungNeu(alt.wertung, schwere, sauber);
@@ -3495,6 +3509,7 @@ function PlannerApp() {
                 besteSerie: Math.max(alt.besteSerie || 0, serie),
                 erledigt: erledigt,
                 zuletzt: { delta: neueWertung - alt.wertung, sauber: sauber },
+                fassung: alt.fassung,
             },
         };
     }, { undo: false });
@@ -3502,7 +3517,7 @@ function PlannerApp() {
        und Serien bleiben stehen - die sind ja verdient. */
     const schachZuruecksetzen = () => persist((prev) => ({
         ...prev,
-        schach: { ...SCHACH_LEER, ...(prev.schach || {}), erledigt: [] },
+        schach: { ...schachStandAngleichen(prev.schach), erledigt: [] },
     }), { undo: false });
     /* ── Postfach ───────────────────────────────────────── */
     /* Zählt hoch, wenn der Schlüssel gesetzt wird - sonst müsste man die
