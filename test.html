@@ -634,6 +634,49 @@ window.PLANER_CLIENT_ID = "";
   }] }, { label: "Uni" }, "c1", ohneOrt);
   gleich("ohne Ortsangabe bleibt das Feld leer", ohneOrt[0].ort, "");
 
+  /* ── Lehrveranstaltungen aus dem Kalender ── */
+  gruppe("Lehrveranstaltungen — eigene Farbe trotz Google");
+  /* Ein Google-Termin wird bei jedem Abgleich neu geholt. Was Jonathan
+     ändert, hängt deshalb am NAMEN der Lehrveranstaltung und wird beim
+     Anzeigen darübergelegt. */
+  gleich("Groß- und Kleinschreibung ist egal",
+    kursSchluessel("  Thermodynamik   VO "), kursSchluessel("thermodynamik vo"));
+  gleich("mehrere Leerzeichen werden eins",
+    kursSchluessel("Mikrobiologie  UE"), "mikrobiologie ue");
+  gleich("ohne Titel kein Schlüssel", kursSchluessel(null), "");
+
+  var kurse = { "thermodynamik vo": { color: "#C2410C", notiz: "Skript mitbringen" } };
+  var ausKalender = { external: true, title: "Thermodynamik VO", color: "#2B4B8F", ort: "HS 3" };
+  var gemischt = mitKurs(ausKalender, kurse);
+  gleich("die selbst gewählte Farbe schlägt die aus Google", gemischt.color, "#C2410C");
+  gleich("und zählt dann auch beim Zeichnen", blockColor(gemischt), "#C2410C");
+  gleich("der Raum aus Google bleibt stehen", gemischt.ort, "HS 3");
+  gleich("die eigene Notiz kommt dazu", gemischt.notiz, "Skript mitbringen");
+  gleich("der Raum gilt nicht als selbst getippt", gemischt.ortEigen, false);
+
+  /* Fehlt der Raum bei Google, darf man ihn selbst eintragen */
+  var ohneRaum = mitKurs({ external: true, title: "Mikrobiologie UE", color: "#2B4B8F", ort: "" },
+    { "mikrobiologie ue": { ort: "Seminarraum 2" } });
+  gleich("ein selbst getippter Raum füllt die Lücke", ohneRaum.ort, "Seminarraum 2");
+  pruefe("und ist als selbst getippt gekennzeichnet", ohneRaum.ortEigen === true);
+
+  /* Ohne Eintrag und bei eigenen Terminen darf sich nichts ändern */
+  gleich("ohne Eintrag bleibt der Termin wie er ist",
+    mitKurs(ausKalender, {}).color, "#2B4B8F");
+  gleich("eigene Termine lässt mitKurs in Ruhe",
+    mitKurs({ external: false, title: "Thermodynamik VO", cat: "uni" }, kurse).color, undefined);
+  /* Ein anderer Name darf nicht mitgefärbt werden */
+  gleich("ein anderer Name bleibt unberührt",
+    mitKurs({ external: true, title: "Physik VO", color: "#2B4B8F" }, kurse).color, "#2B4B8F");
+
+  /* Beim Abgleich zwischen Geräten dürfen sich die Farben nicht
+     gegenseitig löschen - jede Lehrveranstaltung einzeln. */
+  var handyK = { updatedAt: 1000, kurse: { "thermodynamik vo": { color: "#C2410C" } } };
+  var tabletK = { updatedAt: 2000, kurse: { "mikrobiologie ue": { color: "#1E6E5A" } } };
+  var beide = zusammenfuehren(handyK, tabletK).kurse;
+  gleich("die Farbe vom Handy überlebt", beide["thermodynamik vo"].color, "#C2410C");
+  gleich("die vom Tablet auch", beide["mikrobiologie ue"].color, "#1E6E5A");
+
   /* ── Schach: der Aufgabensatz ── */
   gruppe("Schach — Aufgabensatz");
   var aufg = aufgabenListe();

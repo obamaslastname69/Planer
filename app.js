@@ -712,6 +712,37 @@ function localISO(dateObj, minutes) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
+/* Was an einem Kalendertermin geändert wird, kann nicht am Termin selbst
+   hängen: Der wird bei jedem Abgleich neu geholt und wäre wieder weg.
+   Es hängt am NAMEN der Lehrveranstaltung und wird beim Anzeigen
+   darübergelegt.
+
+   Das ist nicht nur ein Umweg, sondern auch das richtige Verhalten:
+   "Thermodynamik ist orange" soll für alle Thermodynamik-Termine des
+   Semesters gelten, nicht nur für den von nächstem Dienstag. */
+const kursSchluessel = (titel) => String(titel || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/* Die Angaben zur Lehrveranstaltung über einen Kalendertermin legen */
+function mitKurs(b, kurse) {
+    if (!b || !b.external)
+        return b;
+    const k = (kurse || {})[kursSchluessel(b.title)];
+    if (!k)
+        return b;
+    return { ...b,
+        /* Die gewählte Farbe schlägt die aus Google - sie wurde ja
+           bewusst gesetzt. Der Raum aus Google bleibt dagegen stehen;
+           eigener Text füllt nur eine Lücke. */
+        color: k.color || b.color,
+        ort: b.ort || k.ort || "",
+        /* Merken, ob der Raum selbst getippt wurde: einen aus Google
+           darf man nicht überschreiben, der käme beim nächsten Abgleich
+           zurück und es sähe aus wie ein Fehler. */
+        ortEigen: !b.ort && !!k.ort,
+        notiz: k.notiz || "",
+    };
+}
+
 /* Farbe eines Blocks. Reihenfolge: eigene Farbe des Eintrags, sonst die
    der Kategorie, bei Google-Terminen die von dort.
 
@@ -2596,7 +2627,7 @@ function zusammenfuehren(a, b) {
         erg[feld] = listeMischen((a || {})[feld], (b || {})[feld], weg);
     /* Tageszettel: je Schlüssel, nicht als Ganzes. So überleben ein am
        Handy und ein am Tablet abgehakter Tag nebeneinander. */
-    for (const feld of ["checks", "materialized", "studyDone", "abend"]) {
+    for (const feld of ["checks", "materialized", "studyDone", "abend", "kurse"]) {
         erg[feld] = { ...((aelter || {})[feld] || {}), ...((neuer || {})[feld] || {}) };
     }
     /* Gelesene Tagesverse: je Datum genau einer, beide Seiten behalten */
@@ -2876,6 +2907,7 @@ const DEFAULT_STATE = {
     abend: {},
     /* Taktikaufgaben: gelöst, versucht, laufende und beste Serie */
     schach: { ...SCHACH_LEER },
+    kurse: {},
     updatedAt: 0,
 };
 /* ════════════════════════════════════════════════════════════
@@ -3592,9 +3624,29 @@ function PlannerApp() {
     const detailBlock = useMemo(() => {
         if (!detailId)
             return null;
+        const fremd = external.find((b) => b.id === detailId);
         return state.blocks.find((b) => b.id === detailId)
-            || external.find((b) => b.id === detailId) || null;
-    }, [detailId, state.blocks, external]);
+            || (fremd ? mitKurs(fremd, state.kurse) : null);
+    }, [detailId, state.blocks, external, state.kurse]);
+    /* Farbe, Notiz und Ort einer Lehrveranstaltung ändern. Gespeichert
+       wird unter ihrem Namen, nicht am einzelnen Termin - siehe mitKurs. */
+    const kursSetzen = (titel, patch) => persist((prev) => {
+        const key = kursSchluessel(titel);
+        if (!key)
+            return prev;
+        const neu = { ...((prev.kurse || {})[key] || {}), ...patch };
+        /* Leergeräumte Felder nicht aufbewahren, sonst wächst der Stand
+           mit lauter leeren Einträgen. */
+        for (const f of Object.keys(neu))
+            if (!neu[f])
+                delete neu[f];
+        const kurse = { ...(prev.kurse || {}) };
+        if (Object.keys(neu).length)
+            kurse[key] = neu;
+        else
+            delete kurse[key];
+        return { ...prev, kurse: kurse };
+    });
     /* Feier, sobald der Trainingszyklus voll ist */
     const trainStats = useMemo(() => trainingStats(state.training, todayKey), [state.training, todayKey]);
     const zyklusRef = useRef(null);
@@ -3784,8 +3836,9 @@ function PlannerApp() {
     const blocksFor = useCallback((key) => [
         ...state.blocks.filter((b) => spanntUeber(b, key))
             .map((b) => (b.day === key ? b : { ...b, spanFolge: true })),
-        ...external.filter((b) => b.day === key && !eigeneGcalIds[b.gcalRawId]),
-    ].sort((a, b) => a.start - b.start), [state.blocks, external, eigeneGcalIds]);
+        ...external.filter((b) => b.day === key && !eigeneGcalIds[b.gcalRawId])
+            .map((b) => mitKurs(b, state.kurse)),
+    ].sort((a, b) => a.start - b.start), [state.blocks, external, eigeneGcalIds, state.kurse]);
     const plannedMinutes = useCallback((key) => blocksFor(key).reduce((s, b) => s + b.dur, 0), [blocksFor]);
     /* Wecker für die Termine von heute stellen. Steht hier, weil es
        blocksFor braucht. Wird neu gestellt, sobald die App wieder sichtbar
@@ -4930,7 +4983,7 @@ function PlannerApp() {
                 React.createElement("div", { className: "mono text-xs pl-muted uppercase tracking-widest mb-1" }, "geschafft"),
                 React.createElement("div", { className: "text-4xl font-semibold", style: { color: lift(celebration.color) } }, celebration.title),
                 React.createElement("div", { className: "text-sm pl-muted mt-1" }, celebration.sub)))),
-        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onFocus: (b) => { startFocus(b); setDetailId(null); }, onMakeTodo: blockZuTodo, todo: detailBlock && detailBlock.todoId ? state.todos.find((t) => t.id === detailBlock.todoId) : null, onDelete: () => { removeBlockAndCalendar(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
+        detailBlock && (React.createElement(BlockDetail, { block: detailBlock, now: now, projects: state.projects || [], onClose: () => setDetailId(null), onEdit: () => { setEditor(detailBlock); setDetailId(null); }, onStatus: (st) => setBlockStatus(detailBlock.id, st), onSave: (patch) => updateBlock(detailBlock.id, patch), onKurs: kursSetzen, onFocus: (b) => { startFocus(b); setDetailId(null); }, onMakeTodo: blockZuTodo, todo: detailBlock && detailBlock.todoId ? state.todos.find((t) => t.id === detailBlock.todoId) : null, onDelete: () => { removeBlockAndCalendar(detailBlock.id); setDetailId(null); }, onSync: () => syncBlock(detailBlock), syncing: sync.status === "loading" })),
         editor && (React.createElement(BlockEditor, { block: editor, onClose: () => setEditor(null), onSave: (patch) => { updateBlock(editor.id, patch); setEditor((e) => ({ ...e, ...(typeof patch === "function" ? patch(e) : patch) })); }, onDelete: () => { removeBlock(editor.id); setEditor(null); }, onSync: () => syncBlock(editor), onRepeat: toggleRepeat, projects: state.projects || [], syncing: sync.status === "loading" })),
         offenesRezept && (React.createElement(RecipeView, {
             recipe: offenesRezept, onClose: () => setRecipeOpen(null),
@@ -7813,39 +7866,43 @@ function relTime(block, now) {
    Geschrieben wird erst beim Verlassen des Feldes, nicht bei jedem
    Tastendruck - sonst landete jeder einzelne Buchstabe im Verlauf für
    "Rückgängig" und ginge in den Abgleich. */
-function BlockZusatz({ block, farbe, onSave }) {
+function BlockZusatz({ block, farbe, onSave, onKurs }) {
     const [offen, setOffen] = useState(false);
     const [ort, setOrt] = useState(block.ort || "");
     const [notiz, setNotiz] = useState(block.notiz || "");
     useEffect(() => { setOrt(block.ort || ""); setNotiz(block.notiz || ""); }, [block.id]);
 
-    /* Termine aus Google werden bei jedem Abgleich neu aufgebaut - was man
-       hier hineinschriebe, wäre beim nächsten Mal wieder weg. Deshalb dort
-       nur anzeigen, was Google mitliefert. */
-    if (block.external) {
-        if (!block.ort)
-            return null;
-        return (React.createElement("div", { className: "flex items-start gap-2" },
-            React.createElement(OrtIcon, { size: 14, style: { color: "var(--muted)", marginTop: 3, flexShrink: 0 } }),
-            React.createElement("span", { className: "text-sm break-words" }, block.ort)));
-    }
-
+    /* Ein Termin aus Google wird bei jedem Abgleich neu geholt. Was hier
+       geändert wird, kann deshalb nicht am Termin hängen, sondern liegt
+       unter dem Namen der Lehrveranstaltung - und gilt damit für alle
+       Termine desselben Namens. Für eine Vorlesung ist genau das
+       gewollt. */
+    const fremd = !!block.external;
+    const schreiben = (patch) => fremd
+        ? onKurs(block.title, patch)
+        : onSave({ ...patch, synced: false });
     const sichern = (feld, wert) => {
         if ((block[feld] || "") === wert)
             return;
-        onSave({ [feld]: wert, synced: false });
+        schreiben({ [feld]: wert });
     };
+    /* Ein Raum, den Google mitliefert, bleibt stehen - er wäre nach dem
+       nächsten Abgleich ohnehin wieder da. Fehlt er, darf man ihn selbst
+       eintragen. */
+    const ortFest = fremd && !!block.ort && !block.ortEigen;
     return (React.createElement("div", { className: "flex flex-col gap-2" },
         React.createElement("div", { className: "flex items-center gap-2" },
             React.createElement(OrtIcon, { size: 14, style: { color: "var(--muted)", flexShrink: 0 } }),
-            React.createElement("input", {
-                value: ort,
-                onChange: (e) => setOrt(e.target.value),
-                onBlur: () => sichern("ort", ort.trim()),
-                onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
-                placeholder: "Raum oder Ort — z. B. HS 3",
-                className: "pl-input px-2 py-1.5 rounded text-sm flex-1",
-            })),
+            ortFest
+                ? React.createElement("span", { className: "text-sm break-words" }, block.ort)
+                : React.createElement("input", {
+                    value: ort,
+                    onChange: (e) => setOrt(e.target.value),
+                    onBlur: () => sichern("ort", ort.trim()),
+                    onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
+                    placeholder: "Raum oder Ort — z. B. HS 3",
+                    className: "pl-input px-2 py-1.5 rounded text-sm flex-1",
+                })),
         React.createElement("textarea", {
             value: notiz,
             onChange: (e) => setNotiz(e.target.value),
@@ -7864,20 +7921,24 @@ function BlockZusatz({ block, farbe, onSave }) {
                 "aria-label": "Farbe ändern",
             }),
             block.color && React.createElement("button", {
-                onClick: () => { onSave({ color: null }); setOffen(false); },
+                onClick: () => { schreiben({ color: null }); setOffen(false); },
                 className: "pl-btn px-2 py-1 rounded mono text-xs",
-            }, "wieder wie die Kategorie")),
+            }, fremd ? "wieder wie im Kalender" : "wieder wie die Kategorie")),
         offen && React.createElement("div", { className: "pl-rise grid gap-1", style: { gridTemplateColumns: "repeat(12,1fr)" } },
             PALETTE.map((c) => React.createElement("button", {
                 key: c,
-                onClick: () => { onSave({ color: c }); setOffen(false); },
+                onClick: () => { schreiben({ color: c }); setOffen(false); },
                 className: "rounded-sm",
                 style: { background: c, height: 18, border: c === farbe ? "2px solid var(--ink)" : "none" },
                 "aria-label": "Farbe " + c,
-            })))));
+            }))),
+        /* Ohne diesen Satz wäre es verwirrend: Man ändert einen Termin
+           und plötzlich sehen alle gleichnamigen anders aus. */
+        fremd && React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" },
+            "Gilt für alle Termine mit dem Namen „", block.title, "\" — Kalendertermine werden bei jedem Abgleich neu geholt, deshalb merkt sich der Planer das am Namen.")));
 }
 
-function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, onDelete, onSync, onSave, onFocus, onMakeTodo, syncing }) {
+function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, onDelete, onSync, onSave, onKurs, onFocus, onMakeTodo, syncing }) {
     var _a, _b, _c;
     const [confirmDel, setConfirmDel] = useState(false);
     const c = blockColor(block);
@@ -7944,7 +8005,7 @@ function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, on
                     rel.live && React.createElement("span", { className: "pl-pulse w-1.5 h-1.5 rounded-full", style: { background: "#FFF" } }),
                     rel.label)),
             React.createElement("div", { className: "p-5 flex flex-col gap-4" },
-                React.createElement(BlockZusatz, { block: block, farbe: c, onSave: onSave }),
+                React.createElement(BlockZusatz, { block: block, farbe: c, onSave: onSave, onKurs: onKurs }),
                 (project || block.tplId || block.synced || block.external || todo) && (React.createElement("div", { className: "flex flex-wrap gap-1.5" },
                     project && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs", style: { border: `1px solid ${(_b = CATS[project.cat]) === null || _b === void 0 ? void 0 : _b.color}`, color: (_c = CATS[project.cat]) === null || _c === void 0 ? void 0 : _c.color } }, project.title)),
                     todo && (React.createElement("span", {
@@ -7988,7 +8049,11 @@ function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, on
                                 : { color: lift("#A03A5E"), borderColor: "#A03A5E" } },
                             React.createElement(Trash2, { size: 13 }),
                             confirmDel && "sicher?")))),
-                block.external && (React.createElement("p", { className: "mono text-xs pl-muted" }, "Dieser Termin kommt aus deinem Google Kalender und l\u00E4sst sich hier nicht \u00E4ndern."))))));
+                /* Fr\u00FCher stand hier "l\u00E4sst sich hier nicht \u00E4ndern". Seit
+                   Farbe und Notiz unter dem Namen der Lehrveranstaltung
+                   liegen, stimmt das nicht mehr - Zeit und Titel kommen
+                   aber weiterhin aus Google. */
+                block.external && (React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" }, "Titel, Zeit und Raum kommen aus deinem Google Kalender und werden dort ge\u00E4ndert. Farbe und Notiz geh\u00F6ren dir."))))));
 }
 /* ════════════════ Block-Editor ════════════════ */
 function BlockEditor({ block, onClose, onSave, onDelete, onSync, onRepeat, projects = [], syncing }) {
