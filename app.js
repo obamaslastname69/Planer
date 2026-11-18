@@ -2206,6 +2206,22 @@ const THEMA_NAMEN = {
     queenRookEndgame: "Damen- und Turmendspiel",
 };
 
+/* Welches Feld liegt unter diesem Punkt? Beim Ziehen entscheidet das
+   darüber, wo die Figur landet. Bei gedrehtem Brett ist die Rechnung
+   leicht falsch herum - deshalb steht sie hier für sich und wird
+   geprüft, statt mitten im Brett versteckt zu sein. */
+function feldAusPunkt(rechteck, x, y, unten) {
+    if (!rechteck || !rechteck.width || !rechteck.height)
+        return null;
+    const c = Math.floor((x - rechteck.left) / (rechteck.width / 8));
+    const z = Math.floor((y - rechteck.top) / (rechteck.height / 8));
+    if (c < 0 || c > 7 || z < 0 || z > 7)
+        return null;
+    const linien = unten === "w" ? LINIEN : LINIEN.slice().reverse();
+    const reihen = unten === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8];
+    return linien[c] + reihen[z];
+}
+
 /* Zugnummern wie in einem Schachbuch.
 
    Die laufende Nummer steht im letzten Feld der Stellung. Zieht Schwarz
@@ -4818,6 +4834,14 @@ function PlannerApp() {
         /* Jede neue Aufgabe blendet auf, statt hart umzuspringen */
         @keyframes pl-brett-auf{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
         .pl-brett-auf{animation:pl-brett-auf .32s cubic-bezier(.2,.8,.25,1);}
+        /* Am Handy nimmt das Brett die volle Breite, am Rechner darf es
+           deutlich groesser sein - dort ist Platz und man sieht mehr. */
+        .pl-brett{width:100%;max-width:420px;margin:0 auto;}
+        .pl-schach{width:100%;}
+        @media(min-width:768px){
+          .pl-brett{max-width:560px;}
+          .pl-schach{max-width:620px;margin:0 auto;}
+        }
         /* Beschriftungen, die nur am großen Schirm Platz haben */
         .pl-nur-breit{display:none;}
         @media(min-width:768px){.pl-nur-breit{display:inline;}}
@@ -5262,13 +5286,64 @@ function feldHintergrund({ hell, marke, zielLeer, zielBesetzt, imSchach, fehler 
     };
 }
 
-function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld, ruhig, onFeld }) {
+function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld, ruhig, ziehbar, onFeld }) {
     const reihen = unten === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8];
     const linien = unten === "w" ? LINIEN : LINIEN.slice().reverse();
     const besetzt = {};
     for (const f of figuren)
         if (!f.weg)
             besetzt[f.feld] = true;
+
+    /* Ziehen mit Finger oder Maus. Antippen bleibt daneben bestehen -
+       auf dem Handy ist Tippen oft genauer, am Rechner fühlt sich
+       Ziehen natürlicher an. Beides soll gehen, nicht entweder-oder. */
+    const brettRef = useRef(null);
+    const [zieht, setZieht] = useState(null);
+    /* Nach einem Zug feuert der Browser noch ein Klick-Ereignis auf dem
+       Startfeld. Ohne diese Sperre höbe es die Auswahl gleich wieder auf. */
+    const klickSperre = useRef(false);
+
+    const feldUnter = (x, y) => brettRef.current
+        ? feldAusPunkt(brettRef.current.getBoundingClientRect(), x, y, unten)
+        : null;
+
+    const aufsetzen = (e, feld) => {
+        if (!ziehbar || !ziehbar(feld))
+            return;
+        try { e.currentTarget.setPointerCapture(e.pointerId); }
+        catch (x) { }
+        if (gewaehlt !== feld)
+            onFeld(feld);
+        const r = brettRef.current ? brettRef.current.getBoundingClientRect() : null;
+        setZieht({ von: feld, x: e.clientX, y: e.clientY,
+            startX: e.clientX, startY: e.clientY, bewegt: false,
+            kachel: r ? r.width / 8 : 44 });
+    };
+    const bewegen = (e) => {
+        if (!zieht)
+            return;
+        const weit = Math.abs(e.clientX - zieht.startX) + Math.abs(e.clientY - zieht.startY) > 6;
+        setZieht({ ...zieht, x: e.clientX, y: e.clientY, bewegt: zieht.bewegt || weit });
+    };
+    const loslassen = (e) => {
+        if (!zieht)
+            return;
+        const z = zieht;
+        setZieht(null);
+        if (!z.bewegt)
+            return;   /* war nur ein Tipp - der Klick erledigt den Rest */
+        klickSperre.current = true;
+        /* Schickt der Browser nach dem Ziehen ausnahmsweise kein
+           Klick-Ereignis, bliebe die Sperre stehen und schluckte den
+           nächsten echten Tipp. Deshalb fällt sie von selbst wieder ab. */
+        setTimeout(() => { klickSperre.current = false; }, 400);
+        const ziel = feldUnter(e.clientX, e.clientY);
+        if (ziel && ziel !== z.von)
+            onFeld(ziel);
+    };
+
+    const ziehZiel = zieht && zieht.bewegt ? feldUnter(zieht.x, zieht.y) : null;
+    const ziehFigur = zieht ? figuren.find((f) => !f.weg && f.feld === zieht.von) : null;
 
     const felder = [];
     for (let r = 0; r < 8; r++) {
@@ -5278,16 +5353,30 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
             /* a1 ist dunkel: Linie + Reihe gerade heißt hell */
             const hell = (LINIEN.indexOf(linie) + reihe) % 2 === 0;
             const istZiel = ziele.indexOf(feld) > -1;
-            const marke = gewaehlt === feld ? 0.58
-                : (letzter && (letzter.from === feld || letzter.to === feld)) ? 0.34
-                    : 0;
+            const marke = (ziehZiel === feld && istZiel) ? 0.66
+                : gewaehlt === feld ? 0.58
+                    : (letzter && (letzter.from === feld || letzter.to === feld)) ? 0.34
+                        : 0;
+            const greifbar = !!(ziehbar && ziehbar(feld));
             felder.push(React.createElement("button", {
                 key: feld,
                 "aria-label": feld,
-                onClick: () => onFeld(feld),
+                onClick: () => {
+                    if (klickSperre.current) { klickSperre.current = false; return; }
+                    onFeld(feld);
+                },
+                onPointerDown: (e) => aufsetzen(e, feld),
+                onPointerMove: bewegen,
+                onPointerUp: loslassen,
+                onPointerCancel: () => setZieht(null),
                 style: Object.assign({
                     position: "relative", border: "none", padding: 0,
-                    cursor: "pointer", appearance: "none",
+                    appearance: "none",
+                    cursor: greifbar ? (zieht ? "grabbing" : "grab") : "pointer",
+                    /* Nur auf Feldern mit eigener Figur das Wischen des
+                       Browsers abschalten - sonst ließe sich die Seite
+                       über dem Brett gar nicht mehr scrollen. */
+                    touchAction: greifbar ? "none" : "manipulation",
                     transition: "background-image .12s linear",
                 }, feldHintergrund({
                     hell: hell, marke: marke,
@@ -5300,14 +5389,14 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
                 /* Koordinaten am Rand, in der Farbe des Nachbarfeldes */
                 c === 0 && React.createElement("span", { style: {
                         position: "absolute", top: "3%", left: "5%",
-                        fontSize: "min(2.3vw, 10px)", fontWeight: 600, lineHeight: 1,
+                        fontSize: "min(2.3vw, 13px)", fontWeight: 600, lineHeight: 1,
                         fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
                         color: hell ? BRETT_DUNKEL : BRETT_HELL, opacity: .85,
                         pointerEvents: "none",
                     } }, reihe),
                 r === 7 && React.createElement("span", { style: {
                         position: "absolute", bottom: "3%", right: "5%",
-                        fontSize: "min(2.3vw, 10px)", fontWeight: 600, lineHeight: 1,
+                        fontSize: "min(2.3vw, 13px)", fontWeight: 600, lineHeight: 1,
                         fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
                         color: hell ? BRETT_DUNKEL : BRETT_HELL, opacity: .85,
                         pointerEvents: "none",
@@ -5318,36 +5407,52 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
     const spalteVon = (feld) => unten === "w" ? LINIEN.indexOf(feld[0]) : 7 - LINIEN.indexOf(feld[0]);
     const reiheVon = (feld) => unten === "w" ? 8 - Number(feld[1]) : Number(feld[1]) - 1;
 
-    return (React.createElement("div", { style: {
-            position: "relative", width: "100%", maxWidth: 420, margin: "0 auto",
-            aspectRatio: "1 / 1", borderRadius: 5, overflow: "hidden",
-            border: "1px solid " + BRETT_RAND,
-            boxShadow: ruhig
-                ? "0 0 0 2.5px " + lift("#1E6E5A") + ", 0 0 22px -4px " + hexA(lift("#1E6E5A"), .55) + ", 0 10px 28px rgba(0,0,0,.30)"
-                : "0 10px 28px rgba(0,0,0,.30)",
-            transition: "box-shadow .25s ease",
-            touchAction: "manipulation",
-        } },
-        React.createElement("div", { style: {
-                position: "absolute", inset: 0, display: "grid",
-                gridTemplateColumns: "repeat(8, 1fr)", gridTemplateRows: "repeat(8, 1fr)",
-            } }, felder),
-        figuren.map((f) => React.createElement("div", {
-            key: f.id,
-            style: {
-                position: "absolute", left: 0, top: 0, width: "12.5%", height: "12.5%",
-                transform: "translate(" + spalteVon(f.feld) * 100 + "%, " + reiheVon(f.feld) * 100 + "%)",
-                transition: "transform .19s cubic-bezier(.2,.78,.28,1), opacity .18s linear",
-                opacity: f.weg ? 0 : 1,
-                zIndex: f.weg ? 1 : 2,
-                pointerEvents: "none", willChange: "transform",
-            },
-        }, React.createElement("svg", {
-            viewBox: "0 0 45 45",
-            style: { display: "block", width: "100%", height: "100%",
-                filter: "drop-shadow(0 1px 1.4px rgba(0,0,0,.32))" },
-            dangerouslySetInnerHTML: { __html: FIGUREN_SVG[f.art] || "" },
-        })))));
+    const figurBild = (art, schatten) => React.createElement("svg", {
+        viewBox: "0 0 45 45",
+        style: { display: "block", width: "100%", height: "100%", filter: schatten },
+        dangerouslySetInnerHTML: { __html: FIGUREN_SVG[art] || "" },
+    });
+
+    /* Die gezogene Figur liegt NEBEN dem Brett, nicht darin: Das Brett
+       schneidet an seinen Rändern ab (wegen der runden Ecken), und eine
+       über den Rand gezogene Figur verschwände dort sonst. */
+    return (React.createElement(React.Fragment, null,
+        React.createElement("div", { ref: brettRef, className: "pl-brett", style: {
+                position: "relative",
+                aspectRatio: "1 / 1", borderRadius: 5, overflow: "hidden",
+                border: "1px solid " + BRETT_RAND,
+                boxShadow: ruhig
+                    ? "0 0 0 2.5px " + lift("#1E6E5A") + ", 0 0 22px -4px " + hexA(lift("#1E6E5A"), .55) + ", 0 10px 28px rgba(0,0,0,.30)"
+                    : "0 10px 28px rgba(0,0,0,.30)",
+                transition: "box-shadow .25s ease",
+            } },
+            React.createElement("div", { style: {
+                    position: "absolute", inset: 0, display: "grid",
+                    gridTemplateColumns: "repeat(8, 1fr)", gridTemplateRows: "repeat(8, 1fr)",
+                } }, felder),
+            figuren.map((f) => {
+                const amFinger = !!(ziehFigur && ziehFigur.id === f.id && zieht && zieht.bewegt);
+                return React.createElement("div", {
+                    key: f.id,
+                    style: {
+                        position: "absolute", left: 0, top: 0, width: "12.5%", height: "12.5%",
+                        transform: "translate(" + spalteVon(f.feld) * 100 + "%, " + reiheVon(f.feld) * 100 + "%)",
+                        /* Während des Ziehens keine Laufanimation - die Figur
+                           soll am Finger kleben, nicht hinterherlaufen. */
+                        transition: amFinger ? "none" : "transform .19s cubic-bezier(.2,.78,.28,1), opacity .18s linear",
+                        opacity: f.weg ? 0 : amFinger ? 0.22 : 1,
+                        zIndex: f.weg ? 1 : 2,
+                        pointerEvents: "none", willChange: "transform",
+                    },
+                }, figurBild(f.art, "drop-shadow(0 1px 1.4px rgba(0,0,0,.32))"));
+            })),
+        ziehFigur && zieht && zieht.bewegt && React.createElement("div", { style: {
+                position: "fixed", pointerEvents: "none", zIndex: 60,
+                width: zieht.kachel, height: zieht.kachel,
+                left: zieht.x - zieht.kachel / 2,
+                top: zieht.y - zieht.kachel / 2,
+                transform: "scale(1.12)",
+            } }, figurBild(ziehFigur.art, "drop-shadow(0 5px 7px rgba(0,0,0,.45))"))));
 }
 
 /* Eine Kennzahl neben der Hauptzahl */
@@ -5404,7 +5509,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
     useEffect(() => { if (schachMoeglich()) laden(); }, [laden]);
 
     if (!schachMoeglich())
-        return (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-md md:mx-auto" },
+        return (React.createElement("div", { className: "px-4 md:px-6 pb-6 pl-schach" },
             React.createElement("p", { className: "mono text-xs pl-muted leading-relaxed" },
                 "Die Aufgaben konnten nicht geladen werden. Die Dateien „chess.min.js\" und „aufgaben.js\" müssen im selben Ordner wie „app.js\" liegen.")));
 
@@ -5434,6 +5539,16 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
             merken(s, neue, z);
             setSchritt(naechster + 1);
         }, 360);
+    };
+
+    /* Welche Figur darf man anfassen? Nur eine eigene, und nur solange
+       die Aufgabe läuft. Ohne das ließe sich auch beim Zurückblättern
+       oder nach dem Lösen ziehen. */
+    const darfZiehen = (feld) => {
+        if (!spiel || lage !== "laeuft" || fertig || blick !== null)
+            return false;
+        const f = figuren.find((x) => !x.weg && x.feld === feld);
+        return !!f && (f.art === f.art.toUpperCase() ? "w" : "b") === spiel.turn();
     };
 
     const feldTippen = (feld) => {
@@ -5540,7 +5655,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
             : offen > 1 ? { text: "Noch " + offen + " Züge zu finden", farbe: "var(--muted)" }
                 : { text: "Finde den besten Zug", farbe: "var(--muted)" };
 
-    return (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-md md:mx-auto" },
+    return (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 pl-schach" },
 
         /* Kennzahlen: eine Hauptzahl, daneben zwei kleine */
         React.createElement("div", { className: "pl-card rounded px-4 py-3 flex items-end justify-between gap-3" },
@@ -5599,6 +5714,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
                     imSchach: schau ? schau.imSchach : schachFeldVon(spiel),
                     fehlerFeld: fehlerFeld,
                     ruhig: !schau && lage === "geloest" && !patzer,
+                    ziehbar: darfZiehen,
                     onFeld: feldTippen,
                 })),
 

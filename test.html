@@ -815,6 +815,36 @@ window.PLANER_CLIENT_ID = "";
   gleich("Datum wird deutsch geschrieben", datumLesbar("2026-11-03"), "3. November");
   gleich("unbrauchbares Datum gibt nichts zurück", datumLesbar("quatsch"), "");
 
+  /* ── Schach: Ziehen mit Finger oder Maus ── */
+  gruppe("Schach — Punkt auf Feld umrechnen");
+  /* Ein Brett von 400 Pixeln, links oben bei (100, 50). Ein Feld ist
+     also 50 Pixel breit. */
+  var brett = { left: 100, top: 50, width: 400, height: 400 };
+  var treffer = function (x, y, unten) { return feldAusPunkt(brett, x, y, unten); };
+
+  /* Weiß unten: links oben ist a8, rechts unten h1 */
+  gleich("weiß unten, links oben", treffer(110, 60, "w"), "a8");
+  gleich("weiß unten, rechts unten", treffer(490, 440, "w"), "h1");
+  gleich("weiß unten, rechts oben", treffer(490, 60, "w"), "h8");
+  gleich("weiß unten, links unten", treffer(110, 440, "w"), "a1");
+  gleich("weiß unten, mitten drin", treffer(275, 275, "w"), "d4");
+
+  /* Schwarz unten ist das Brett gedreht - genau hier geht es leicht
+     falsch herum. */
+  gleich("schwarz unten, links oben", treffer(110, 60, "b"), "h1");
+  gleich("schwarz unten, rechts unten", treffer(490, 440, "b"), "a8");
+  gleich("schwarz unten, mitten drin", treffer(275, 275, "b"), "e5");
+
+  /* Genau auf einer Feldgrenze */
+  gleich("die Grenze gehört dem Feld rechts davon", treffer(150, 100, "w"), "b7");
+
+  /* Außerhalb des Bretts darf nichts herauskommen */
+  pruefe("links daneben", treffer(50, 200, "w") === null);
+  pruefe("rechts daneben", treffer(900, 200, "w") === null);
+  pruefe("darüber", treffer(200, 10, "w") === null);
+  pruefe("darunter", treffer(200, 800, "w") === null);
+  pruefe("ohne Brett kein Feld", feldAusPunkt(null, 200, 200, "w") === null);
+
   /* ── Schach: Zugliste ── */
   gruppe("Schach — Zugliste");
   /* Zieht Schwarz zuerst, gehört vor den ersten Zug "1…" und der
