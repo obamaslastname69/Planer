@@ -55,6 +55,8 @@ const Flame = mkIcon("Flame");
    nicht angefasst werden muss */
 ICONS.Search = "<circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/>";
 const Lupe = mkIcon("Search");
+ICONS.Ort = "<path d=\"M20 10c0 5-5.5 10.2-7.4 11.8a1 1 0 0 1-1.2 0C9.5 20.2 4 15 4 10a8 8 0 0 1 16 0\"/><circle cx=\"12\" cy=\"10\" r=\"3\"/>";
+const OrtIcon = mkIcon("Ort");
 /* Symbole für die untere Leiste und „Mehr". Nachgetragen, damit die
    lange Icon-Zeile oben nicht angefasst werden muss. */
 ICONS.Woche7 = "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/><path d=\"M15 3v18\"/>";
@@ -710,11 +712,16 @@ function localISO(dateObj, minutes) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
-/* Farbe eines Blocks: eigene Kategorie oder die Farbe aus Google */
+/* Farbe eines Blocks. Reihenfolge: eigene Farbe des Eintrags, sonst die
+   der Kategorie, bei Google-Terminen die von dort.
+
+   Die eigene Farbe gibt es, weil sonst alle Uni-Termine gleich aussahen -
+   im Wochenraster hält man Thermodynamik und Mikrobiologie aber gern
+   auseinander. */
 function blockColor(b) {
     if (b.external)
         return b.color || "#6F7A72";
-    return (CATS[b.cat] && CATS[b.cat].color) || "#6F7A72";
+    return b.color || (CATS[b.cat] && CATS[b.cat].color) || "#6F7A72";
 }
 /* ── Haptik & Serien ───────────────────────────────────────── */
 const buzz = (ms = 12) => {
@@ -1265,7 +1272,9 @@ function sammleTermine(data, cal, praefix, out) {
         const color = GC_COLORS[ev.colorId] || cal.color || null;
         const title = ev.summary || "Termin";
         const eid = praefix + "-" + (ev.id || uid());
-        const base = { title: title, cat: "extern", color: color, external: true, gcalRawId: String(ev.id || ""), calLabel: cal.label || "" };
+        /* Der Ort kommt bei Uni-Kalendern fast immer mit - dort steht die
+           Raumnummer. Wurde bisher einfach weggeworfen. */
+        const base = { title: title, cat: "extern", color: color, external: true, ort: (ev.location || "").trim(), gcalRawId: String(ev.id || ""), calLabel: cal.label || "" };
         /* Ganztägig: end.date ist der Tag NACH dem letzten Tag */
         if (ev.start && ev.start.date) {
             let d = new Date(ev.start.date + "T00:00:00");
@@ -1317,6 +1326,7 @@ async function pushToCalendar(block) {
         body = JSON.stringify({
             summary: block.title,
             start: { date: block.day },
+            location: block.ort || undefined,
             end: { date: dayKey(addDays(date, spanTage(block))) },
             reminders: { useDefault: false },
         });
@@ -1329,6 +1339,7 @@ async function pushToCalendar(block) {
         body = JSON.stringify({
             summary: block.title,
             start: { dateTime: s.toISOString(), timeZone: tz },
+            location: block.ort || undefined,
             end: { dateTime: e.toISOString(), timeZone: tz },
             reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 15 }] },
         });
@@ -2149,6 +2160,22 @@ const THEMA_NAMEN = {
     bishopEndgame: "Läuferendspiel", knightEndgame: "Springerendspiel",
     queenRookEndgame: "Damen- und Turmendspiel",
 };
+
+/* Zugnummern wie in einem Schachbuch.
+
+   Die laufende Nummer steht im letzten Feld der Stellung. Zieht Schwarz
+   zuerst, schreibt man "1… Dxh2+ 2. Kxh2" - die Auslassungspunkte sagen,
+   dass der Zug von Weiß davor nicht gezeigt wird. Ohne sie läse sich die
+   Liste so, als hätte Schwarz den ersten Zug der Partie gemacht. */
+function zugMarken(fen, farben) {
+    let n = Number(String(fen || "").split(" ")[5]) || 1;
+    return (farben || []).map((wer, i) => {
+        const marke = wer === "w" ? n + "." : (i === 0 ? n + "…" : null);
+        if (wer === "b")
+            n++;
+        return marke;
+    });
+}
 
 /* Eigene Aufgaben tragen keine Themennummern, sondern ihre Fehlerart */
 const ART_NAMEN = { matt: "Matt in 1", material: "Figur stand frei" };
@@ -4716,6 +4743,13 @@ function PlannerApp() {
         /* Am großen Schirm schwebt die Leiste 18px über dem Rand und
            braucht deshalb etwas mehr Luft unter dem Inhalt. */
         @media(min-width:768px){.pl-unterrand{padding-bottom:92px;}}
+        /* Zugliste: waagrecht schiebbar, aber ohne sichtbaren Balken -
+           der zerschnitte die schmale Zeile. */
+        .pl-zugliste{scrollbar-width:none;-ms-overflow-style:none;scroll-behavior:smooth;}
+        .pl-zugliste::-webkit-scrollbar{display:none;}
+        /* Jede neue Aufgabe blendet auf, statt hart umzuspringen */
+        @keyframes pl-brett-auf{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
+        .pl-brett-auf{animation:pl-brett-auf .32s cubic-bezier(.2,.8,.25,1);}
         /* Beschriftungen, die nur am großen Schirm Platz haben */
         .pl-nur-breit{display:none;}
         @media(min-width:768px){.pl-nur-breit{display:inline;}}
@@ -5267,6 +5301,12 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
     const [lage, setLage] = useState("leer");
     const [gezeigt, setGezeigt] = useState(false);
     const [patzer, setPatzer] = useState(false);
+    /* Jeder gespielte Zug wird als Abzug aufbewahrt: Stellung, Figuren
+       und der Zug in Schachschrift. Nur so kann man zurückblättern und
+       nachsehen, was man eigentlich gezogen hat. */
+    const [verlauf, setVerlauf] = useState([]);
+    /* null heißt "aktuelle Stellung", sonst die Nummer im Verlauf */
+    const [blick, setBlick] = useState(null);
     /* Wertung und Erledigtes nur beim Laden lesen - sonst springt
        mitten in der Aufgabe die Auswahl weg. */
     const standRef = useRef(stand);
@@ -5279,13 +5319,19 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
         const erledigt = Array.isArray(erledigtStatt) ? erledigtStatt : (s.erledigt || []);
         const a = aufgabeWaehlen(s.wertung || SCHACH_START, erledigt, s.versucht || 0);
         setGewaehlt(null); setLetzter(null); setFehlerFeld(null);
-        setGezeigt(false); setPatzer(false); setSchritt(0);
-        if (!a) { setLage("leer"); setAufgabe(null); return; }
+        setGezeigt(false); setPatzer(false); setSchritt(0); setBlick(null);
+        if (!a) { setLage("leer"); setAufgabe(null); setVerlauf([]); return; }
         const sp = new Chess(a.fen);
+        const figs = figurenAusFen(a.fen);
         setNr(a.nr); setAufgabe(a); setSpiel(sp);
-        setFiguren(figurenAusFen(a.fen));
+        setFiguren(figs);
+        setVerlauf([{ san: null, figuren: figs, letzter: null, imSchach: schachFeldVon(sp) }]);
         setLage("laeuft");
     }, []);
+
+    /* Einen gespielten Zug in den Verlauf aufnehmen */
+    const merken = (s, figs, z) => setVerlauf((v) => [...v,
+        { san: z.san, wer: z.color, figuren: figs, letzter: { from: z.from, to: z.to }, imSchach: schachFeldVon(s) }]);
 
     useEffect(() => { if (schachMoeglich()) laden(); }, [laden]);
 
@@ -5313,14 +5359,23 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
             const z = s.move({ from: gegen.slice(0, 2), to: gegen.slice(2, 4), promotion: gegen[4] || "q" });
             if (!z)
                 return;
+            const neue = figurenNachZug(figs, z);
             setLetzter({ from: z.from, to: z.to });
-            setFiguren(figurenNachZug(figs, z));
+            setFiguren(neue);
             setSpiel(nachbauen(s));
+            merken(s, neue, z);
             setSchritt(naechster + 1);
         }, 360);
     };
 
     const feldTippen = (feld) => {
+        /* Wer gerade zurückblättert, kommt mit einem Tipp aufs Brett
+           wieder in die laufende Stellung - das ist die natürlichste
+           Geste und erspart einen eigenen Knopf. */
+        if (blick !== null) {
+            setBlick(null);
+            return;
+        }
         if (!spiel || lage !== "laeuft" || fertig)
             return;
         if (gewaehlt && ziele.indexOf(feld) > -1) {
@@ -5348,6 +5403,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
             setFiguren(neueFiguren);
             setSpiel(probe);
             setLetzter({ from: z.from, to: z.to });
+            merken(probe, neueFiguren, z);
             antwortSpielen(probe, neueFiguren, schritt + 1);
             return;
         }
@@ -5377,11 +5433,29 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
             setFiguren(figs);
             setLetzter({ from: z.from, to: z.to });
             setSpiel(new Chess(s.fen()));
+            merken(s, figs, z);
             i++; setSchritt(i);
             setTimeout(weiter, 620);
         };
         weiter();
     };
+
+    /* Was gerade auf dem Brett liegen soll: entweder die aktuelle
+       Stellung oder ein Abzug aus dem Verlauf, wenn zurückgeblättert
+       wird. */
+    const schau = blick !== null && verlauf[blick] ? verlauf[blick] : null;
+    const letzterZug = verlauf.length - 1;
+    const blaettern = (ziel) => {
+        if (ziel < 0 || ziel > letzterZug)
+            return;
+        setGewaehlt(null);
+        setBlick(ziel === letzterZug ? null : ziel);
+    };
+    const jetzt = blick === null ? letzterZug : blick;
+
+    const gespielt = verlauf.slice(1);
+    const marken = zugMarken(aufgabe && aufgabe.fen, gespielt.map((v) => v.wer));
+    const zuege = gespielt.map((v, i) => ({ san: v.san, marke: marken[i], nr: i + 1 }));
 
     const themen = !aufgabe ? []
         : aufgabe.eigen ? [ART_NAMEN[aufgabe.art] || "Eigene Partie"]
@@ -5447,11 +5521,50 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
                                 ? "Deine Partie · " + datumLesbar(aufgabe.datum)
                                 : "Wertung " + aufgabe.wertung)),
 
+                React.createElement("div", { key: "brett-" + nr, className: "pl-brett-auf" },
                 React.createElement(Brett, {
-                    figuren: figuren, unten: meineFarbe, gewaehlt: gewaehlt, ziele: ziele,
-                    letzter: letzter, imSchach: schachFeldVon(spiel), fehlerFeld: fehlerFeld,
-                    ruhig: lage === "geloest" && !patzer, onFeld: feldTippen,
-                }),
+                    figuren: schau ? schau.figuren : figuren,
+                    unten: meineFarbe,
+                    gewaehlt: schau ? null : gewaehlt,
+                    ziele: schau ? [] : ziele,
+                    letzter: schau ? schau.letzter : letzter,
+                    imSchach: schau ? schau.imSchach : schachFeldVon(spiel),
+                    fehlerFeld: fehlerFeld,
+                    ruhig: !schau && lage === "geloest" && !patzer,
+                    onFeld: feldTippen,
+                })),
+
+                /* Die Zugliste. Erst wenn wirklich etwas gezogen wurde -
+                   eine leere Zeile ueber dem Brett waere nur Rauschen. */
+                verlauf.length > 1 && React.createElement("div", { className: "flex items-center gap-1.5" },
+                    React.createElement("button", {
+                        onClick: () => blaettern(jetzt - 1), disabled: jetzt <= 0,
+                        className: "pl-btn px-1.5 py-1 rounded flex items-center shrink-0",
+                        "aria-label": "einen Zug zurück",
+                    }, React.createElement(ChevronLeft, { size: 13 })),
+                    React.createElement("div", { className: "pl-zugliste flex-1 flex items-center gap-1 overflow-x-auto" },
+                        zuege.map((v) => {
+                            const hier = jetzt === v.nr;
+                            return React.createElement("button", {
+                                key: v.nr,
+                                onClick: () => blaettern(v.nr),
+                                className: "mono shrink-0 rounded",
+                                style: {
+                                    fontSize: 11, padding: "3px 6px", border: "none", cursor: "pointer",
+                                    whiteSpace: "nowrap",
+                                    background: hier ? "var(--ink)" : "transparent",
+                                    color: hier ? "var(--paper)" : "var(--ink)",
+                                    transition: "background .14s linear, color .14s linear",
+                                },
+                            },
+                                v.marke && React.createElement("span", { style: { opacity: hier ? .65 : .45, marginRight: 3 } }, v.marke),
+                                v.san);
+                        })),
+                    React.createElement("button", {
+                        onClick: () => blaettern(jetzt + 1), disabled: jetzt >= letzterZug,
+                        className: "pl-btn px-1.5 py-1 rounded flex items-center shrink-0",
+                        "aria-label": "einen Zug vor",
+                    }, React.createElement(ChevronRight, { size: 13 }))),
 
                 React.createElement("div", { className: "flex items-center justify-between gap-2", style: { minHeight: 20 } },
                     React.createElement("span", { className: "mono", style: { fontSize: 12, color: meldung.farbe } }, meldung.text),
@@ -6502,7 +6615,13 @@ function Grid({ visibleDays, todayKey, now, blocksFor, onSlot, onBlock, onMove, 
                                             } },
                                             b.cont ? "▸" : "",
                                             b.title || "—",
-                                            b.goesOn ? "▸" : "")))));
+                                            b.goesOn ? "▸" : ""),
+                                        /* Der Raum nur, wenn der Block hoch genug
+                                           ist - sonst quetscht er den Titel weg. */
+                                        b.ort && h >= 34 && React.createElement("div", { className: "mono truncate", style: {
+                                                fontSize: Math.max(8, fs - 2), lineHeight: 1.25,
+                                                color: hexA(lift(c), .72),
+                                            } }, b.ort)))));
                         }),
                         k === todayKey && showNow && (React.createElement("div", { className: "absolute left-0 right-0 pointer-events-none z-10", style: { top: (nowMin - von * 60) * ppm } },
                             /* Punkt am linken Rand: so findet das Auge die
@@ -7685,6 +7804,79 @@ function relTime(block, now) {
         return { label: `vor ${durLabel(m)} vorbei`, past: true };
     return { label: `vor ${Math.round(m / 60 / 24)} Tagen`, past: true };
 }
+/* Ort, Notiz und eine eigene Farbe für einen Eintrag.
+
+   Ein Eintrag hatte bisher nur Titel, Beginn, Dauer und Kategorie. Für
+   eine Lehrveranstaltung fehlte damit das Wichtigste: in welchem Raum
+   sie stattfindet.
+
+   Geschrieben wird erst beim Verlassen des Feldes, nicht bei jedem
+   Tastendruck - sonst landete jeder einzelne Buchstabe im Verlauf für
+   "Rückgängig" und ginge in den Abgleich. */
+function BlockZusatz({ block, farbe, onSave }) {
+    const [offen, setOffen] = useState(false);
+    const [ort, setOrt] = useState(block.ort || "");
+    const [notiz, setNotiz] = useState(block.notiz || "");
+    useEffect(() => { setOrt(block.ort || ""); setNotiz(block.notiz || ""); }, [block.id]);
+
+    /* Termine aus Google werden bei jedem Abgleich neu aufgebaut - was man
+       hier hineinschriebe, wäre beim nächsten Mal wieder weg. Deshalb dort
+       nur anzeigen, was Google mitliefert. */
+    if (block.external) {
+        if (!block.ort)
+            return null;
+        return (React.createElement("div", { className: "flex items-start gap-2" },
+            React.createElement(OrtIcon, { size: 14, style: { color: "var(--muted)", marginTop: 3, flexShrink: 0 } }),
+            React.createElement("span", { className: "text-sm break-words" }, block.ort)));
+    }
+
+    const sichern = (feld, wert) => {
+        if ((block[feld] || "") === wert)
+            return;
+        onSave({ [feld]: wert, synced: false });
+    };
+    return (React.createElement("div", { className: "flex flex-col gap-2" },
+        React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement(OrtIcon, { size: 14, style: { color: "var(--muted)", flexShrink: 0 } }),
+            React.createElement("input", {
+                value: ort,
+                onChange: (e) => setOrt(e.target.value),
+                onBlur: () => sichern("ort", ort.trim()),
+                onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); },
+                placeholder: "Raum oder Ort — z. B. HS 3",
+                className: "pl-input px-2 py-1.5 rounded text-sm flex-1",
+            })),
+        React.createElement("textarea", {
+            value: notiz,
+            onChange: (e) => setNotiz(e.target.value),
+            onBlur: () => sichern("notiz", notiz.trim()),
+            placeholder: "Notiz — Vortragende, Unterlagen, was mitzubringen ist …",
+            rows: 2,
+            className: "pl-input px-2 py-1.5 rounded text-sm",
+            style: { resize: "vertical" },
+        }),
+        React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement("span", { className: "mono text-xs pl-muted" }, "Farbe"),
+            React.createElement("button", {
+                onClick: () => setOffen(!offen),
+                className: "w-6 h-6 rounded-sm shrink-0",
+                style: { background: farbe, border: "1px solid var(--line)" },
+                "aria-label": "Farbe ändern",
+            }),
+            block.color && React.createElement("button", {
+                onClick: () => { onSave({ color: null }); setOffen(false); },
+                className: "pl-btn px-2 py-1 rounded mono text-xs",
+            }, "wieder wie die Kategorie")),
+        offen && React.createElement("div", { className: "pl-rise grid gap-1", style: { gridTemplateColumns: "repeat(12,1fr)" } },
+            PALETTE.map((c) => React.createElement("button", {
+                key: c,
+                onClick: () => { onSave({ color: c }); setOffen(false); },
+                className: "rounded-sm",
+                style: { background: c, height: 18, border: c === farbe ? "2px solid var(--ink)" : "none" },
+                "aria-label": "Farbe " + c,
+            })))));
+}
+
 function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, onDelete, onSync, onSave, onFocus, onMakeTodo, syncing }) {
     var _a, _b, _c;
     const [confirmDel, setConfirmDel] = useState(false);
@@ -7752,6 +7944,7 @@ function BlockDetail({ block, now, projects, todo, onClose, onEdit, onStatus, on
                     rel.live && React.createElement("span", { className: "pl-pulse w-1.5 h-1.5 rounded-full", style: { background: "#FFF" } }),
                     rel.label)),
             React.createElement("div", { className: "p-5 flex flex-col gap-4" },
+                React.createElement(BlockZusatz, { block: block, farbe: c, onSave: onSave }),
                 (project || block.tplId || block.synced || block.external || todo) && (React.createElement("div", { className: "flex flex-wrap gap-1.5" },
                     project && (React.createElement("span", { className: "px-2 py-1 rounded mono text-xs", style: { border: `1px solid ${(_b = CATS[project.cat]) === null || _b === void 0 ? void 0 : _b.color}`, color: (_c = CATS[project.cat]) === null || _c === void 0 ? void 0 : _c.color } }, project.title)),
                     todo && (React.createElement("span", {

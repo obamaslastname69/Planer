@@ -600,6 +600,40 @@ window.PLANER_CLIENT_ID = "";
   pruefe("der Postfach-Schluessel steht nicht im Standard-Zustand",
     JSON.stringify(DEFAULT_STATE).indexOf("postfach") === -1);
 
+  /* ── Einträge: Farbe, Ort, Notiz ── */
+  gruppe("Einträge — Farbe und Ort");
+  gleich("ohne eigene Farbe gilt die der Kategorie",
+    blockColor({ cat: "uni" }), (CATS.uni || {}).color);
+  gleich("eine eigene Farbe schlägt die Kategorie",
+    blockColor({ cat: "uni", color: "#C2410C" }), "#C2410C");
+  gleich("bei Google-Terminen zählt die Farbe von dort",
+    blockColor({ external: true, color: "#0B6E8F", cat: "uni" }), "#0B6E8F");
+  gleich("ohne alles ein unauffälliges Grau",
+    blockColor({ cat: "gibtsnicht" }), "#6F7A72");
+  /* Die eigene Farbe soll sich auch wieder abschalten lassen */
+  gleich("Farbe entfernt heißt wieder Kategorie",
+    blockColor({ cat: "uni", color: null }), (CATS.uni || {}).color);
+
+  /* Der Ort kommt bei Uni-Kalendern aus dem Google-Feld "location" -
+     dort steht die Raumnummer. Wurde früher weggeworfen. */
+  var ausGoogle = [];
+  sammleTermine({ items: [{
+    id: "ev1", summary: "Mikrobiologie UE", location: "Seminarraum 2, Floragasse",
+    start: { dateTime: "2026-11-18T10:00:00+01:00" },
+    end: { dateTime: "2026-11-18T12:00:00+01:00" },
+  }] }, { label: "Uni", color: "#2B4B8F" }, "c1", ausGoogle);
+  pruefe("ein Google-Termin wird übernommen", ausGoogle.length === 1);
+  gleich("und bringt die Raumnummer mit", ausGoogle[0].ort, "Seminarraum 2, Floragasse");
+  gleich("der Titel stimmt auch", ausGoogle[0].title, "Mikrobiologie UE");
+  /* Ohne Ortsangabe darf dort nicht "undefined" stehen */
+  var ohneOrt = [];
+  sammleTermine({ items: [{
+    id: "ev2", summary: "Termin ohne Ort",
+    start: { dateTime: "2026-11-18T14:00:00+01:00" },
+    end: { dateTime: "2026-11-18T15:00:00+01:00" },
+  }] }, { label: "Uni" }, "c1", ohneOrt);
+  gleich("ohne Ortsangabe bleibt das Feld leer", ohneOrt[0].ort, "");
+
   /* ── Schach: der Aufgabensatz ── */
   gruppe("Schach — Aufgabensatz");
   var aufg = aufgabenListe();
@@ -702,6 +736,25 @@ window.PLANER_CLIENT_ID = "";
 
   gleich("Datum wird deutsch geschrieben", datumLesbar("2026-11-03"), "3. November");
   gleich("unbrauchbares Datum gibt nichts zurück", datumLesbar("quatsch"), "");
+
+  /* ── Schach: Zugliste ── */
+  gruppe("Schach — Zugliste");
+  /* Zieht Schwarz zuerst, gehört vor den ersten Zug "1…" und der
+     Gegenzug von Weiß bekommt schon die 2. Beim ersten Versuch stand
+     dort "Dxh2+ 1. Kxh2" — das liest sich, als hätte Schwarz die Partie
+     eröffnet. */
+  gleich("Schwarz zuerst: 1…, dann 2.",
+    zugMarken("8/8/8/8/8/8/8/8 b - - 0 1", ["b", "w", "b"]), ["1…", "2.", null]);
+  gleich("Weiß zuerst: 26., dann 27.",
+    zugMarken("8/8/8/8/8/8/8/8 w - - 0 26", ["w", "b", "w"]), ["26.", null, "27."]);
+  gleich("nur ein Zug von Weiß", zugMarken("8/8/8/8/8/8/8/8 w - - 0 7", ["w"]), ["7."]);
+  gleich("nur ein Zug von Schwarz", zugMarken("8/8/8/8/8/8/8/8 b - - 0 7", ["b"]), ["7…"]);
+  gleich("ohne Züge auch keine Nummern", zugMarken("8/8/8/8/8/8/8/8 w - - 0 1", []), []);
+  gleich("unbrauchbare Stellung zählt ab 1",
+    zugMarken("quatsch", ["w"]), ["1."]);
+  /* Über mehrere Paare hinweg darf die Zählung nicht verrutschen */
+  gleich("vier Züge, zwei Nummern",
+    zugMarken("8/8/8/8/8/8/8/8 w - - 0 3", ["w", "b", "w", "b"]), ["3.", null, "4.", null]);
 
   /* ── Schach: Figuren nachführen ── */
   gruppe("Schach — Figuren nachführen");
