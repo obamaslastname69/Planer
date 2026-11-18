@@ -55,6 +55,20 @@ const Flame = mkIcon("Flame");
    nicht angefasst werden muss */
 ICONS.Search = "<circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/>";
 const Lupe = mkIcon("Search");
+/* Symbole für die untere Leiste und „Mehr". Nachgetragen, damit die
+   lange Icon-Zeile oben nicht angefasst werden muss. */
+ICONS.Woche7 = "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/><path d=\"M15 3v18\"/>";
+ICONS.Bauer = "<circle cx=\"12\" cy=\"6.2\" r=\"2.6\"/><path d=\"M9.7 9.3c-1 .7-1.6 1.7-1.6 2.9 0 1.2.6 2.2 1.5 2.9L9 18h6l-.6-2.9c.9-.7 1.5-1.7 1.5-2.9 0-1.2-.6-2.2-1.6-2.9\"/><path d=\"M7 21h10l-.7-3H7.7Z\"/>";
+ICONS.Hut = "<path d=\"M12 4 2 9l10 5 10-5-10-5Z\"/><path d=\"M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5\"/><path d=\"M22 9v5\"/>";
+ICONS.Saeulen = "<path d=\"M3 3v18h18\"/><path d=\"M7 16V10\"/><path d=\"M12 16V6\"/><path d=\"M17 16v-3\"/>";
+ICONS.Topf = "<path d=\"M4 11h16v5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-5Z\"/><path d=\"M4 13H2.5\"/><path d=\"M20 13h1.5\"/><path d=\"M9 7.5c0-1 1.5-1.5 1.5-3\"/><path d=\"M14 7.5c0-1 1.5-1.5 1.5-3\"/>";
+ICONS.Buch = "<path d=\"M12 7v14\"/><path d=\"M3 18V4a1 1 0 0 1 1-1h5a3 3 0 0 1 3 3 3 3 0 0 1 3-3h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-6a2 2 0 0 0-2 2 2 2 0 0 0-2-2H4a1 1 0 0 1-1-1Z\"/>";
+const Woche7 = mkIcon("Woche7");
+const Bauer = mkIcon("Bauer");
+const Hut = mkIcon("Hut");
+const Saeulen = mkIcon("Saeulen");
+const Topf = mkIcon("Topf");
+const Buch = mkIcon("Buch");
 const Undo2 = mkIcon("Undo2");
 const Timer = mkIcon("Timer");
 const Moon = mkIcon("Moon");
@@ -510,7 +524,16 @@ async function pushZeitenMelden(weckzeiten) {
     });
     if (!antwort.ok)
         throw new Error("Dienst antwortet mit " + antwort.status);
-    return antwort.json();
+    /* Der Dienst hat schon einfachen Text statt JSON geschickt. Ohne
+       diese Klammer stand dann die rohe englische Fehlermeldung des
+       Browsers mitten in der App: "Unexpected token 'P' ... is not
+       valid JSON". Das versteht niemand. */
+    try {
+        return await antwort.json();
+    }
+    catch (e) {
+        throw new Error("Der Erinnerungsdienst hat unverständlich geantwortet");
+    }
 }
 async function pushAbmelden() {
     try {
@@ -2862,6 +2885,7 @@ function PlannerApp() {
     const [recipePaste, setRecipePaste] = useState(false);
     /* Suche über alle Tabs */
     const [sucheOffen, setSucheOffen] = useState(false);
+    const [mehrOffen, setMehrOffen] = useState(false);
     const [recipeFilter, setRecipeFilter] = useState("alle");
     const [recipeQuery, setRecipeQuery] = useState("");
     const [recipeKi, setRecipeKi] = useState(false);
@@ -4685,68 +4709,36 @@ function PlannerApp() {
         @keyframes pl-roll-down{from{transform:translateY(-105%);opacity:0}to{transform:translateY(0);opacity:1}}
         .pl-roll-up{animation:pl-roll-up .2s cubic-bezier(.2,.9,.3,1);}
         .pl-roll-down{animation:pl-roll-down .2s cubic-bezier(.2,.9,.3,1);}
-        /* Acht Tabs passen auf dem Handy nicht in eine Zeile - "Schach"
-           hing rechts hinaus. Zwei Reihen zu vier, am grossen Schirm
-           wieder eine. Raster statt Umbruch, damit die Reihen gleich
-           lang sind und nicht 5 und 3 entstehen. */
-        .pl-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;}
-        @media(min-width:768px){.pl-tabs{grid-template-columns:repeat(8,1fr);}}
+        /* Platz für die untere Leiste. Ohne das verschwindet die letzte
+           Zeile jeder Ansicht dahinter - und auf Geräten mit Balken am
+           unteren Rand zusätzlich dessen Höhe. */
+        .pl-unterrand{padding-bottom:calc(60px + env(safe-area-inset-bottom));}
+        /* Am großen Schirm schwebt die Leiste 18px über dem Rand und
+           braucht deshalb etwas mehr Luft unter dem Inhalt. */
+        @media(min-width:768px){.pl-unterrand{padding-bottom:92px;}}
+        /* Beschriftungen, die nur am großen Schirm Platz haben */
+        .pl-nur-breit{display:none;}
+        @media(min-width:768px){.pl-nur-breit{display:inline;}}
+        /* Die untere Leiste: am Handy am Rand festgeklebt, am großen
+           Schirm freischwebend - über die volle Breite sähe sie dort
+           aus wie ein abgeschnittener Fuß. */
+        .pl-leiste{position:fixed;left:0;right:0;bottom:0;z-index:40;
+          border-top:1px solid var(--line);
+          padding-bottom:env(safe-area-inset-bottom);}
+        @media(min-width:768px){
+          .pl-leiste{left:50%;right:auto;bottom:18px;transform:translateX(-50%);
+            border:1px solid var(--line);border-radius:999px;overflow:hidden;
+            box-shadow:0 10px 30px rgba(0,0,0,.22);padding-bottom:0;}
+          .pl-leiste > div{min-width:340px;}
+        }
       `),
-        React.createElement("div", { className: "px-4 pt-4 pb-2 md:px-6" },
-            React.createElement("div", { className: "pl-tabs" }, [["heute", "Heute"], ["woche", "Woche"], ["lernen", "Lernen"], ["training", "Training"], ["auswerten", "Bilanz"], ["rezepte", "Rezepte"], ["bibel", "Bibel"], ["schach", "Schach"]].map(([k, lbl]) => (React.createElement("button", { key: k, onClick: () => goView(k), className: "py-2.5 rounded mono text-xs", style: view === k
-                    ? { background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--ink)" }
-                    : { background: "var(--card)", color: "var(--ink)", border: "1px solid var(--line)" } },
-                lbl,
-                k === "auswerten" && weekStats.pending.length > 0 && (React.createElement("span", { className: "ml-1.5", style: { color: view === k ? "#F0B429" : "#A03A5E" } }, weekStats.pending.length)))))),
-            /* Umbrechen statt überlaufen: Auf dem Handy passten Konto,
-               laden und sichern nicht mehr in die Zeile, schoben sich nach
-               rechts hinaus und zogen eine weiße Fläche hinter sich her. */
-            React.createElement("div", { className: "mt-2 flex flex-wrap items-center gap-2" },
-                canUndo && (React.createElement("button", { onClick: undo, className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
-                    React.createElement(Undo2, { size: 12 }),
-                    " R\u00FCckg\u00E4ngig")),
-                React.createElement("button", {
-                    onClick: () => setSucheOffen(true),
-                    className: "pl-btn px-2 py-1 rounded flex items-center",
-                    title: "Suchen"
-                }, React.createElement(Lupe, { size: 13 })),
-                React.createElement("button", {
-                    onClick: () => setAssiOffen(true),
-                    className: "pl-btn px-2.5 py-1 rounded mono text-xs",
-                    title: "Assistent fragen"
-                }, "Claude"),
-                React.createElement("button", {
-                    onClick: toggleTheme,
-                    className: "pl-btn px-2 py-1 rounded flex items-center",
-                    title: dark ? "Helles Erscheinungsbild" : "Dunkles Erscheinungsbild"
-                }, React.createElement(dark ? Sun : Moon, { size: 13 })),
-                React.createElement("button", { onClick: () => syncCloud(false), disabled: cloud.state === "busy", className: "pl-btn px-2.5 py-1 rounded flex items-center gap-1.5 mono text-xs" },
-                    React.createElement(RefreshCw, { size: 12, className: cloud.state === "busy" ? "animate-spin" : "" }),
-                    "Ger\u00E4te abgleichen"),
-                /* maxWidth, weil die Meldung nicht umbricht: Eine lange
-                   Zeile schob sonst die ganze Leiste nach rechts hinaus. */
-                cloud.msg && (React.createElement("span", { className: "mono text-xs truncate", style: { maxWidth: "100%", color: cloud.state === "error" ? "#A03A5E" : cloud.state === "ok" ? "#1E6E5A" : cloud.state === "schlaeft" ? lift("#8A4E1C") : "var(--muted)" } }, cloud.msg)),
-                /* Ausweg, falls doch mal ein anderes Konto gebraucht wird —
-                   sonst käme man am gemerkten nicht mehr vorbei */
-                kontoName && (React.createElement("button", {
-                    onClick: () => { gcKontoVergessen(); gcClearToken(); setKontoName(""); setCloud({ state: "idle", msg: "Konto vergessen — beim nächsten Abgleich neu wählen" }); },
-                    className: "pl-btn px-2 py-1 rounded mono text-xs",
-                    title: "Angemeldet als " + kontoName + " — hier wechseln",
-                }, "Konto")),
-                React.createElement("button", {
-                    onClick: cloudLaden, disabled: cloud.state === "busy",
-                    className: "pl-btn px-2 py-1 rounded mono text-xs",
-                    title: "Cloud-Stand auf dieses Gerät holen"
-                }, "↓ laden"),
-                React.createElement("button", {
-                    onClick: cloudSpeichern, disabled: cloud.state === "busy",
-                    className: "pl-btn px-2 py-1 rounded mono text-xs",
-                    title: "Dieses Gerät in die Cloud schreiben"
-                }, "↑ sichern")),
-            sync.msg && (React.createElement("div", { className: "mt-2 mono text-xs flex items-center gap-2", style: { color: sync.status === "error" ? "#A03A5E" : "var(--muted)" } },
-                sync.status === "error" && React.createElement(AlertCircle, { size: 13 }),
-                sync.msg))),
-        React.createElement("div", { onTouchStart: onTouchStart, onTouchMove: onTouchMove, onTouchEnd: onTouchEnd, onClickCapture: onClickCapture, className: slide === "l" ? "pl-in-l" : slide === "r" ? "pl-in-r" : "" },
+        React.createElement(ObereLeiste, {
+            sync: sync, cloud: cloud, canUndo: canUndo, onUndo: undo,
+            onSuche: () => setSucheOffen(true),
+            onAssi: () => setAssiOffen(true),
+            onAbgleich: () => syncCloud(false),
+        }),
+        React.createElement("div", { onTouchStart: onTouchStart, onTouchMove: onTouchMove, onTouchEnd: onTouchEnd, onClickCapture: onClickCapture, className: "pl-unterrand " + (slide === "l" ? "pl-in-l" : slide === "r" ? "pl-in-r" : "") },
             view === "heute" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(TodayView, { dayK: selectedDay, blocks: blocksFor(selectedDay), now: now, isToday: selectedDay === todayKey, routines: state.routines, checks: state.checks, onToggleCheck: toggleCheck, onBlock: (b) => setDetailId(b.id), onStatus: setBlockStatus, onAdd: addTerminHere, onSlot: handleSlotClick, onMove: moveBlock, ppm: ppm, todos: state.todos, todoPlan: todoPlan, onAddTodo: addTodo, onToggleTodo: toggleTodo, onRemoveTodo: removeTodo, onPlanTodo: startPlacing, onOpenBlock: (id) => setDetailId(id), pendingPick: manualPick, onImportTodoist: importTodoist, onShiftDay: (dir) => {
                         const nd = addDays(new Date(selectedDay + "T00:00:00"), dir);
@@ -4764,20 +4756,25 @@ function PlannerApp() {
                         React.createElement("div", { className: "flex items-center gap-2" },
                             React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
                                 React.createElement(ChevronLeft, { size: 16 })),
-                            React.createElement("div", null,
-                                React.createElement("div", { className: "mono text-xs pl-muted" },
-                                    "KW ",
-                                    isoWeek(weekStart)),
-                                React.createElement("div", { className: "mono text-sm font-medium" }, weekLabel)),
+                            /* Eine Zeile statt zwei: "KW 47" und der Zeitraum
+                               standen untereinander und machten den Kopf
+                               unnötig hoch. */
+                            React.createElement("div", { className: "flex items-baseline gap-2 min-w-0" },
+                                React.createElement("span", { className: "mono text-sm font-medium" }, weekLabel),
+                                React.createElement("span", { className: "mono text-xs pl-muted shrink-0" },
+                                    "KW " + isoWeek(weekStart))),
                             React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, 7)), className: "pl-btn p-2 rounded", "aria-label": "Woche vor" },
                                 React.createElement(ChevronRight, { size: 16 }))),
                         React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("button", { onClick: fetchCal, disabled: sync.status === "loading", className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs" },
+                            /* Auf dem Handy nur die Sinnbilder: mit Beschriftung
+                               brach die Zeile um und der Kopf wurde doppelt
+                               so hoch. Am großen Schirm steht der Text dabei. */
+                            React.createElement("button", { onClick: fetchCal, disabled: sync.status === "loading", className: "pl-btn px-2.5 py-2 rounded flex items-center gap-2 mono text-xs", title: "Termine aus dem Google-Kalender holen" },
                                 React.createElement(RefreshCw, { size: 14, className: sync.status === "loading" ? "animate-spin" : "" }),
-                                "Kalender"),
-                            React.createElement("button", { onClick: syncWeek, disabled: sync.status === "loading", className: "pl-btn px-3 py-2 rounded flex items-center gap-2 mono text-xs" },
+                                React.createElement("span", { className: "pl-nur-breit" }, "Kalender")),
+                            React.createElement("button", { onClick: syncWeek, disabled: sync.status === "loading", className: "pl-btn px-2.5 py-2 rounded flex items-center gap-2 mono text-xs", title: "Diese Woche in den Google-Kalender schreiben" },
                                 React.createElement(UploadCloud, { size: 14 }),
-                                "sichern"))),
+                                React.createElement("span", { className: "pl-nur-breit" }, "sichern")))),
                     manualPick && (React.createElement("div", { className: "pl-rise mt-2 px-3 py-2.5 rounded flex flex-col gap-2", style: { background: hexA(((_a = CATS[manualPick.cat]) === null || _a === void 0 ? void 0 : _a.color) || "#6F7A72", 0.14) } },
                         React.createElement("div", { className: "flex items-center gap-2" },
                             React.createElement("span", { className: "text-sm font-medium truncate flex-1", style: { color: (_b = CATS[manualPick.cat]) === null || _b === void 0 ? void 0 : _b.color } }, manualPick.title),
@@ -4923,6 +4920,22 @@ function PlannerApp() {
         sucheOffen && (React.createElement(SearchSheet, {
             state: state, onClose: () => setSucheOffen(false), onZiel: suchZiel,
         })),
+        mehrOffen && (React.createElement(MehrSheet, {
+            view: view, dark: dark, cloud: cloud, kontoName: kontoName,
+            onView: goView, onClose: () => setMehrOffen(false),
+            onAbgleich: () => syncCloud(false),
+            onLaden: cloudLaden, onSichern: cloudSpeichern,
+            onKonto: () => {
+                gcKontoVergessen(); gcClearToken(); setKontoName("");
+                setCloud({ state: "idle", msg: "Konto vergessen — beim nächsten Abgleich neu wählen" });
+            },
+            onTheme: toggleTheme,
+        })),
+        React.createElement(UntereLeiste, {
+            view: view, mehrOffen: mehrOffen, onView: goView,
+            onMehr: () => setMehrOffen(true),
+            offen: weekStats.pending.length,
+        }),
         recipePaste && (React.createElement(RecipePasteSheet, {
             onClose: () => setRecipePaste(false),
             onFertig: (r) => {
@@ -4939,6 +4952,185 @@ function PlannerApp() {
             onDelete: () => { removeRecipe(bearbeitetesRezept.id); setRecipeEdit(null); },
         }))));
 }
+/* ════════════════ Navigation ════════════════
+   Vorher lagen drei Leisten übereinander, bevor überhaupt Inhalt kam:
+   acht Reiter in zwei Zeilen, darunter Suche/Claude/Abgleich/laden/
+   sichern, darunter stellenweise noch To-dos/Projekte/Vorlage. Auf dem
+   Handy waren das 193 von 812 Pixeln - ein Viertel des Bildschirms,
+   bevor etwas zu sehen war.
+
+   Jetzt: unten eine Leiste mit den drei täglichen Bereichen und „Mehr"
+   für den Rest - am unteren Rand, weil der Daumen dort hinreicht. Oben
+   nur noch eine schmale Zeile mit Suche, Assistent und dem Zustand des
+   Abgleichs. Laden, sichern und Erscheinungsbild sind Einstellungen und
+   keine täglichen Handgriffe; sie liegen unter „Mehr". */
+
+const HAUPT_BEREICHE = [
+    ["woche", "Woche", Woche7],
+    ["heute", "Heute", Calendar],
+    ["schach", "Schach", Bauer],
+];
+const MEHR_BEREICHE = [
+    ["lernen", "Lernen", Hut],
+    ["training", "Training", Flame],
+    ["auswerten", "Bilanz", Saeulen],
+    ["rezepte", "Rezepte", Topf],
+    ["bibel", "Bibel", Buch],
+];
+
+function LeistenKnopf({ aktiv, icon: Icon, label, hinweis, onClick }) {
+    return (React.createElement("button", {
+        onClick: onClick,
+        className: "flex flex-col items-center justify-center gap-1 relative",
+        style: {
+            flex: 1, border: "none", background: "transparent", cursor: "pointer",
+            padding: "7px 2px 6px", minHeight: 52,
+            color: aktiv ? "var(--ink)" : "var(--muted)",
+            transition: "color .15s linear",
+        },
+    },
+        React.createElement(Icon, { size: 19, style: { strokeWidth: aktiv ? 2.1 : 1.7 } }),
+        React.createElement("span", { className: "mono", style: {
+                fontSize: 9.5, letterSpacing: ".06em", lineHeight: 1,
+                fontWeight: aktiv ? 600 : 400,
+            } }, label),
+        hinweis > 0 && React.createElement("span", { style: {
+                position: "absolute", top: 5, right: "50%", marginRight: -17,
+                minWidth: 15, height: 15, borderRadius: 999, padding: "0 4px",
+                background: lift("#A03A5E"), color: "#FAFAF8",
+                fontSize: 9, lineHeight: "15px", textAlign: "center",
+                fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+            } }, hinweis)));
+}
+
+function UntereLeiste({ view, mehrOffen, onView, onMehr, offen }) {
+    const imMehr = MEHR_BEREICHE.some(([k]) => k === view);
+    return (React.createElement("nav", { className: "pl-leiste", style: {
+            background: hexA(surf("#FAFAF8", "#1B1F1C"), .94),
+            backdropFilter: "saturate(1.4) blur(10px)",
+            WebkitBackdropFilter: "saturate(1.4) blur(10px)",
+        } },
+        React.createElement("div", { className: "flex md:max-w-md md:mx-auto" },
+            HAUPT_BEREICHE.map(([k, lbl, Icon]) => React.createElement(LeistenKnopf, {
+                key: k, aktiv: view === k, icon: Icon, label: lbl,
+                onClick: () => onView(k),
+            })),
+            React.createElement(LeistenKnopf, {
+                aktiv: imMehr || mehrOffen, icon: LayoutGrid, label: "Mehr",
+                hinweis: offen, onClick: onMehr,
+            }))));
+}
+
+/* Die schmale Zeile oben: nur was täglich gebraucht wird. Der Zustand
+   des Abgleichs steht links - aber nur, wenn es etwas zu sagen gibt.
+   Läuft alles, soll dort nichts stehen. */
+function ObereLeiste({ sync, cloud, canUndo, onUndo, onSuche, onAssi, onAbgleich }) {
+    const meldung = (cloud && cloud.msg) || (sync && sync.msg) || "";
+    const schlecht = (cloud && cloud.state === "error") || (sync && sync.status === "error");
+    const laeuft = cloud && cloud.state === "busy";
+    return (React.createElement("div", { className: "px-4 md:px-6 pt-3 pb-2 flex items-center gap-2" },
+        React.createElement("button", {
+            onClick: onAbgleich,
+            className: "flex items-center gap-1.5 min-w-0 mono text-xs",
+            style: {
+                border: "none", background: "transparent", padding: "2px 0",
+                cursor: "pointer", flex: 1, textAlign: "left",
+                color: schlecht ? lift("#A03A5E") : "var(--muted)",
+            },
+            title: "Geräte abgleichen",
+        },
+            React.createElement(schlecht ? AlertCircle : RefreshCw, {
+                size: 13, className: laeuft ? "animate-spin" : "",
+                style: { flexShrink: 0 },
+            }),
+            React.createElement("span", { className: "truncate", style: { minWidth: 0 } },
+                meldung || "Abgleichen")),
+        canUndo && React.createElement("button", {
+            onClick: onUndo, className: "pl-btn px-2 py-1.5 rounded flex items-center gap-1 mono text-xs",
+            title: "Letzte Änderung zurücknehmen",
+        }, React.createElement(Undo2, { size: 12 }), "Zurück"),
+        React.createElement("button", {
+            onClick: onSuche, className: "pl-btn px-2 py-1.5 rounded flex items-center",
+            title: "Suchen",
+        }, React.createElement(Lupe, { size: 14 })),
+        React.createElement("button", {
+            onClick: onAssi, className: "pl-btn px-2.5 py-1.5 rounded mono text-xs",
+            title: "Assistent fragen",
+        }, "Claude")));
+}
+
+/* „Mehr": die selteneren Bereiche als große Felder, darunter die
+   Einstellungen. Alles, was vorher oben in der Werkzeugzeile stand und
+   dort jeden Tag Platz weggenommen hat, ohne täglich gebraucht zu
+   werden. */
+function MehrSheet({ view, offen, dark, cloud, kontoName, onView, onClose,
+    onAbgleich, onLaden, onSichern, onKonto, onTheme }) {
+    return (React.createElement("div", {
+        onClick: onClose,
+        className: "fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6",
+        style: { background: "rgba(25,29,26,.42)" },
+    },
+        React.createElement("div", {
+            onClick: (e) => e.stopPropagation(),
+            className: "pl-card w-full md:max-w-md pl-zoom",
+            style: {
+                borderRadius: "14px 14px 0 0", maxHeight: "86vh", overflowY: "auto",
+                paddingBottom: "calc(18px + env(safe-area-inset-bottom))",
+            },
+        },
+            React.createElement("div", { className: "px-5 pt-4 pb-3 flex items-center justify-between" },
+                React.createElement("span", { className: "mono pl-muted uppercase tracking-widest", style: { fontSize: 9 } }, "Bereiche"),
+                React.createElement("button", { onClick: onClose, className: "pl-btn p-1.5 rounded flex items-center" },
+                    React.createElement(X, { size: 14 }))),
+
+            React.createElement("div", { className: "px-4 grid gap-2", style: { gridTemplateColumns: "repeat(3, 1fr)" } },
+                MEHR_BEREICHE.map(([k, lbl, Icon]) => React.createElement("button", {
+                    key: k,
+                    onClick: () => { onView(k); onClose(); },
+                    className: "rounded flex flex-col items-center justify-center gap-2",
+                    style: {
+                        padding: "16px 4px", cursor: "pointer",
+                        border: "1px solid " + (view === k ? "var(--ink)" : "var(--line)"),
+                        background: view === k ? "var(--ink)" : "transparent",
+                        color: view === k ? "var(--paper)" : "var(--ink)",
+                    },
+                },
+                    React.createElement(Icon, { size: 20 }),
+                    React.createElement("span", { className: "mono", style: { fontSize: 10 } }, lbl)))),
+
+            React.createElement("div", { className: "px-5 pt-5 pb-2" },
+                React.createElement("span", { className: "mono pl-muted uppercase tracking-widest", style: { fontSize: 9 } }, "Einstellungen")),
+
+            React.createElement("div", { className: "px-4 flex flex-col gap-2" },
+                React.createElement("button", {
+                    onClick: onAbgleich, disabled: cloud.state === "busy",
+                    className: "pl-btn px-3 py-2.5 rounded flex items-center gap-2 mono text-xs",
+                },
+                    React.createElement(RefreshCw, { size: 13, className: cloud.state === "busy" ? "animate-spin" : "" }),
+                    "Geräte abgleichen"),
+                cloud.msg && React.createElement("p", { className: "mono text-xs px-1", style: {
+                        color: cloud.state === "error" ? lift("#A03A5E") : "var(--muted)",
+                    } }, cloud.msg),
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("button", { onClick: onLaden, disabled: cloud.state === "busy",
+                        className: "pl-btn flex-1 px-3 py-2.5 rounded mono text-xs",
+                        title: "Cloud-Stand auf dieses Gerät holen" }, "↓ laden"),
+                    React.createElement("button", { onClick: onSichern, disabled: cloud.state === "busy",
+                        className: "pl-btn flex-1 px-3 py-2.5 rounded mono text-xs",
+                        title: "Dieses Gerät in die Cloud schreiben" }, "↑ sichern")),
+                React.createElement("button", {
+                    onClick: onTheme, className: "pl-btn px-3 py-2.5 rounded flex items-center gap-2 mono text-xs",
+                },
+                    React.createElement(dark ? Sun : Moon, { size: 13 }),
+                    dark ? "Helles Erscheinungsbild" : "Dunkles Erscheinungsbild"),
+                /* Ausweg, falls doch mal ein anderes Konto gebraucht wird -
+                   sonst käme man am gemerkten nicht mehr vorbei */
+                kontoName && React.createElement("button", {
+                    onClick: onKonto, className: "pl-btn px-3 py-2.5 rounded mono text-xs text-left",
+                    title: "Angemeldet als " + kontoName,
+                }, "Konto wechseln · " + kontoName)))));
+}
+
 /* ════════════════ Schach ════════════════ */
 
 /* Das Brett besteht aus zwei Schichten: unten die 64 Felder, die
