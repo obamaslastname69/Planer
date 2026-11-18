@@ -35,6 +35,15 @@ Aus der offenen Lichess-Aufgabendatenbank, **CC0** (gemeinfrei).
 4000 Aufgaben mit Wertung 400 bis 1599, ausgewählt mit einer
 Themenquote je Wertungsband. Jede wurde mit chess.js nachgerechnet.
 
+## Aufgaben aus eigenen Partien — `eigene-aufgaben.js`
+
+Erzeugt aus Jonathans eigenen Partien auf chess.com, abgerufen über die
+offene Schnittstelle `api.chess.com/pub` (keine Anmeldung nötig).
+
+Es sind seine eigenen Partien — niemand sonst hat daran Rechte. In der
+Datei stehen nur Stellungen, der jeweils beste Zug, das Datum und der
+Verweis auf die Partie.
+
 ## Schriften
 
 Space Grotesk und IBM Plex Mono, geladen von Google Fonts,

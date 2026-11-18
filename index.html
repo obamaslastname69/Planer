@@ -53,7 +53,7 @@
         lokal
           ? 'Die Datei "' + name + '" wurde nicht gefunden.\n\n' +
             'Alle Dateien müssen im selben Ordner liegen und exakt so heißen:\n\n' +
-            'index.html\napp.js\nverse.js\nchess.min.js\naufgaben.js\nconfig.js\nstyle.css\nmanifest.json\nsw.js\nicon.svg\n\n' +
+            'index.html\napp.js\nverse.js\nchess.min.js\naufgaben.js\neigene-aufgaben.js\nconfig.js\nstyle.css\nmanifest.json\nsw.js\nicon.svg\n\n' +
             'Häufigster Grund: beim zweiten Download hat der Browser die Datei ' +
             '"app (1).js" genannt. Dann die alte löschen und die neue in "app.js" umbenennen.'
           : 'Konnte nicht aus dem Netz geladen werden:\n' + file);
@@ -93,6 +93,7 @@
 <script src="verse.js"></script>
 <script src="chess.min.js"></script>
 <script src="aufgaben.js"></script>
+<script src="eigene-aufgaben.js"></script>
 <script src="app.js" onerror="window.__appMissing=true"></script>
 <script>
   /* Notbremse: index.html?reset loescht Zwischenspeicher und Service Worker */

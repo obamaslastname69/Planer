@@ -1940,6 +1940,28 @@ function aufgabenListe() {
             themen: t[3] ? t[3].split(",").map(Number) : [],
         });
     }
+    /* Die eigenen Aufgaben kommen HINTEN dran. Sie vorne einzufügen
+       würde alle Platznummern verschieben, und die App merkt sich
+       Gelöstes als Platznummer - Jonathans Fortschritt zeigte danach
+       auf völlig andere Stellungen. */
+    const eigen = (typeof window !== "undefined" && window.EIGENE_AUFGABEN) || "";
+    for (const zeile of eigen.split("\n")) {
+        if (!zeile)
+            continue;
+        const t = zeile.split("|");
+        if (t.length < 6)
+            continue;
+        aus.push({
+            fen: t[0],
+            loesung: t[1].split(" "),
+            wertung: +t[2],
+            themen: [],
+            eigen: true,
+            art: t[3],
+            datum: t[4],
+            adresse: t[5],
+        });
+    }
     AUFGABEN_LISTE = aus;
     return aus;
 }
@@ -1948,24 +1970,45 @@ const schachMoeglich = () => typeof Chess === "function" && aufgabenListe().leng
 
 /* Eine Aufgabe nahe der eigenen Wertung, die noch nicht gelöst wurde.
    Die Spanne wächst, falls in der Nähe nichts Offenes mehr liegt. */
-function aufgabeWaehlen(wertung, erledigt) {
-    const alle = aufgabenListe();
-    if (!alle.length)
-        return null;
-    const weg = new Set(erledigt || []);
-    for (const spanne of [110, 200, 320, 500, 99999]) {
+function aufgabeFertig(alle, nr) {
+    const a = alle[nr];
+    return { nr: nr, fen: a.fen, loesung: a.loesung, wertung: a.wertung,
+        themen: a.themen, eigen: !!a.eigen, art: a.art, datum: a.datum, adresse: a.adresse };
+}
+
+/* Aus den fremden Aufgaben eine nahe der eigenen Wertung, aus den
+   eigenen irgendeine offene - bei denen zählt nicht die Schwierigkeit,
+   sondern dass es die eigene Partie war. */
+function aufgabeAusTopf(alle, weg, wertung, eigene) {
+    const spannen = eigene ? [99999] : [110, 200, 320, 500, 99999];
+    for (const spanne of spannen) {
         const topf = [];
         for (let i = 0; i < alle.length; i++) {
-            if (weg.has(i))
+            if (weg.has(i) || !!alle[i].eigen !== eigene)
                 continue;
             if (Math.abs(alle[i].wertung - wertung) <= spanne)
                 topf.push(i);
         }
-        if (topf.length) {
-            const nr = topf[Math.floor(Math.random() * topf.length)];
-            return { nr: nr, fen: alle[nr].fen, loesung: alle[nr].loesung,
-                wertung: alle[nr].wertung, themen: alle[nr].themen };
-        }
+        if (topf.length)
+            return aufgabeFertig(alle, topf[Math.floor(Math.random() * topf.length)]);
+    }
+    return null;
+}
+
+/* Jede vierte Aufgabe kommt aus einer eigenen Partie, solange dort noch
+   offene liegen. Bewusst eingestreut und nicht dem Zufall überlassen -
+   an eigenen Fehlern lernt man am meisten, und wer sie dem Zufall
+   überlässt, sieht sie neben 4000 fremden so gut wie nie. */
+function aufgabeWaehlen(wertung, erledigt, versucht) {
+    const alle = aufgabenListe();
+    if (!alle.length)
+        return null;
+    const weg = new Set(erledigt || []);
+    const eigeneDran = ((versucht || 0) % 4) === 3;
+    for (const eigene of (eigeneDran ? [true, false] : [false, true])) {
+        const treffer = aufgabeAusTopf(alle, weg, wertung, eigene);
+        if (treffer)
+            return treffer;
     }
     return null;   /* alles gelöst - dann fängt die App von vorne an */
 }
@@ -2083,6 +2126,21 @@ const THEMA_NAMEN = {
     bishopEndgame: "Läuferendspiel", knightEndgame: "Springerendspiel",
     queenRookEndgame: "Damen- und Turmendspiel",
 };
+
+/* Eigene Aufgaben tragen keine Themennummern, sondern ihre Fehlerart */
+const ART_NAMEN = { matt: "Matt in 1", material: "Figur stand frei" };
+
+/* "2026-11-03" wird zu "3. November" - für den Hinweis, aus welcher
+   Partie die Stellung stammt. */
+const DEUTSCHE_MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember"];
+function datumLesbar(d) {
+    const t = String(d || "").split("-");
+    if (t.length !== 3)
+        return "";
+    const m = DEUTSCHE_MONATE[Number(t[1]) - 1];
+    return m ? Number(t[2]) + ". " + m : "";
+}
 
 /* Aus den gespeicherten Nummern wieder deutsche Namen machen */
 function themenLesbar(nummern) {
@@ -5027,7 +5085,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
     const laden = useCallback((erledigtStatt) => {
         const s = standRef.current || SCHACH_LEER;
         const erledigt = Array.isArray(erledigtStatt) ? erledigtStatt : (s.erledigt || []);
-        const a = aufgabeWaehlen(s.wertung || SCHACH_START, erledigt);
+        const a = aufgabeWaehlen(s.wertung || SCHACH_START, erledigt, s.versucht || 0);
         setGewaehlt(null); setLetzter(null); setFehlerFeld(null);
         setGezeigt(false); setPatzer(false); setSchritt(0);
         if (!a) { setLage("leer"); setAufgabe(null); return; }
@@ -5133,7 +5191,9 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
         weiter();
     };
 
-    const themen = aufgabe ? themenLesbar(aufgabe.themen) : [];
+    const themen = !aufgabe ? []
+        : aufgabe.eigen ? [ART_NAMEN[aufgabe.art] || "Eigene Partie"]
+            : themenLesbar(aufgabe.themen);
     const offen = aufgabe ? Math.ceil((aufgabe.loesung.length - schritt) / 2) : 0;
     const zuletzt = stand.zuletzt;
     const zeigeDelta = lage === "geloest" && zuletzt && typeof zuletzt.delta === "number";
@@ -5187,8 +5247,13 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
                            dort nur noch, welche Seite du geführt hast. */
                         React.createElement("span", { className: "text-sm font-medium" },
                             (meineFarbe === "w" ? "Weiß" : "Schwarz") + (lage === "geloest" ? "" : " am Zug"))),
-                    React.createElement("span", { className: "mono pl-muted", style: { fontSize: 11 } },
-                        "Wertung " + aufgabe.wertung)),
+                        /* Bei einer eigenen Stellung ist die Herkunft
+                           wichtiger als die Wertung - und sie steht an
+                           derselben Stelle, damit nichts breiter wird. */
+                        React.createElement("span", { className: "mono pl-muted", style: { fontSize: 11 } },
+                            aufgabe.eigen
+                                ? "Deine Partie · " + datumLesbar(aufgabe.datum)
+                                : "Wertung " + aufgabe.wertung)),
 
                 React.createElement(Brett, {
                     figuren: figuren, unten: meineFarbe, gewaehlt: gewaehlt, ziele: ziele,
@@ -5198,12 +5263,21 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
 
                 React.createElement("div", { className: "flex items-center justify-between gap-2", style: { minHeight: 20 } },
                     React.createElement("span", { className: "mono", style: { fontSize: 12, color: meldung.farbe } }, meldung.text),
-                    themen.length > 0 && lage === "geloest" && React.createElement("div", { className: "flex gap-1 flex-wrap justify-end" },
+                    themen.length > 0 && lage === "geloest" && React.createElement("div", { className: "flex gap-1 flex-wrap justify-end items-center" },
                         themen.map((t) => React.createElement("span", {
                             key: t, className: "mono", style: {
                                 fontSize: 10, padding: "2px 7px", borderRadius: 999,
                                 border: "1px solid var(--line)", color: "var(--muted)",
-                            } }, t)))),
+                            } }, t)),
+                        /* Bei der eigenen Partie der Weg zurück zur Partie -
+                           erst nach dem Lösen, vorher wäre es ein Spoiler. */
+                        aufgabe.eigen && aufgabe.adresse && React.createElement("a", {
+                            href: aufgabe.adresse, target: "_blank", rel: "noreferrer noopener",
+                            className: "mono", style: {
+                                fontSize: 10, padding: "2px 7px", borderRadius: 999,
+                                border: "1px solid var(--line)", color: "var(--ink)",
+                                textDecoration: "none", whiteSpace: "nowrap",
+                            } }, "Partie ansehen"))),
 
                 React.createElement("div", { className: "flex gap-2" },
                     lage === "geloest"

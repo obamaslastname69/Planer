@@ -53,6 +53,7 @@ window.PLANER_CLIENT_ID = "";
 <script src="verse.js"></script>
 <script src="chess.min.js"></script>
 <script src="aufgaben.js"></script>
+<script src="eigene-aufgaben.js"></script>
 <script src="app.js"></script>
 
 <script>
@@ -602,16 +603,18 @@ window.PLANER_CLIENT_ID = "";
   /* ── Schach: der Aufgabensatz ── */
   gruppe("Schach — Aufgabensatz");
   var aufg = aufgabenListe();
-  gleich("4000 Aufgaben", aufg.length, 4000);
+  var fremd = aufg.filter(function (a) { return !a.eigen; });
+  var eigene = aufg.filter(function (a) { return a.eigen; });
+  gleich("4000 Aufgaben von Lichess", fremd.length, 4000);
   pruefe("chess.js ist geladen", typeof Chess === "function");
   pruefe("Schach ist damit möglich", schachMoeglich());
 
   var wertungenOk = true, sortiert = true, themenOk = true, laengeOk = true;
   var verz = window.AUFGABEN_THEMEN || [];
-  for (var i = 0; i < aufg.length; i++) {
-    var a = aufg[i];
+  for (var i = 0; i < fremd.length; i++) {
+    var a = fremd[i];
     if (!(a.wertung >= 400 && a.wertung <= 1599)) wertungenOk = false;
-    if (i > 0 && aufg[i - 1].wertung > a.wertung) sortiert = false;
+    if (i > 0 && fremd[i - 1].wertung > a.wertung) sortiert = false;
     if (a.loesung.length % 2 !== 1 || a.loesung.length > 3) laengeOk = false;
     for (var j = 0; j < a.themen.length; j++)
       if (!verz[a.themen[j]]) themenOk = false;
@@ -640,8 +643,65 @@ window.PLANER_CLIENT_ID = "";
       if (!ersterFehler) ersterFehler = a.fen + " — " + e.message;
     }
   }
-  pruefe("alle 4000 Aufgaben sind regelkonform spielbar", kaputt === 0,
+  pruefe("alle " + aufg.length + " Aufgaben sind regelkonform spielbar", kaputt === 0,
     kaputt + " kaputt, erste: " + ersterFehler);
+
+  /* ── Schach: Aufgaben aus eigenen Partien ── */
+  gruppe("Schach — eigene Partien");
+  pruefe("es gibt Aufgaben aus eigenen Partien", eigene.length > 0);
+
+  /* Das Wichtigste überhaupt: Die eigenen Aufgaben hängen HINTEN dran.
+     Würden sie vorne eingefügt, zeigte Jonathans gespeicherter
+     Fortschritt (Platznummern!) plötzlich auf andere Stellungen. */
+  var ersteVier = 0;
+  for (var i = 0; i < 4000; i++) if (!aufg[i].eigen) ersteVier++;
+  gleich("die ersten 4000 Plätze sind unverändert die von Lichess", ersteVier, 4000);
+  pruefe("die eigenen hängen hinten dran",
+    aufg.length > 4000 && aufg[4000].eigen === true);
+  /* Feste Anker: Verschiebt sich die Liste je, fällt es hier auf. */
+  gleich("Platz 0 ist dieselbe Stellung wie bisher", aufg[0].fen,
+    "5r1k/pppb2p1/4p2p/6q1/3P4/2PB2P1/PP5P/5RK1 w - - 0 26");
+  gleich("Platz 3999 ist dieselbe Stellung wie bisher", aufg[3999].fen,
+    "3rr3/pppbRpk1/6pp/8/2PP4/5N1P/P2K1PP1/4R3 w - - 2 30");
+
+  var ohneDatum = 0, ohneAdresse = 0, falscheArt = 0, keinSchlag = 0, keinMatt = 0, einZug = 0;
+  for (var i = 0; i < eigene.length; i++) {
+    var e = eigene[i];
+    if (!e.datum || !/^\d{4}-\d{2}-\d{2}$/.test(e.datum)) ohneDatum++;
+    if (!e.adresse || e.adresse.indexOf("chess.com") === -1) ohneAdresse++;
+    if (e.art !== "matt" && e.art !== "material") falscheArt++;
+    if (e.loesung.length !== 1) einZug++;
+    var s = new Chess(e.fen);
+    var z = s.move({ from: e.loesung[0].slice(0, 2), to: e.loesung[0].slice(2, 4), promotion: "q" });
+    if (!z) continue;
+    if (e.art === "matt" && !s.in_checkmate()) keinMatt++;
+    if (e.art === "material" && !z.captured) keinSchlag++;
+  }
+  gleich("jede hat ein gültiges Datum", ohneDatum, 0);
+  gleich("jede verweist auf die Partie", ohneAdresse, 0);
+  gleich("jede hat eine bekannte Fehlerart", falscheArt, 0);
+  gleich("jede ist in einem Zug gelöst", einZug, 0);
+  gleich("jede Matt-Aufgabe setzt wirklich matt", keinMatt, 0);
+  gleich("jede Material-Aufgabe ist ein Schlagzug", keinSchlag, 0);
+
+  /* Jede vierte Aufgabe soll aus einer eigenen Partie kommen */
+  pruefe("beim vierten Versuch kommt eine eigene Partie",
+    (aufgabeWaehlen(700, [], 3) || {}).eigen === true);
+  pruefe("sonst kommt eine von Lichess",
+    [0, 1, 2].every(function (v) { return (aufgabeWaehlen(700, [], v) || {}).eigen !== true; }));
+  /* Sind die eigenen alle gelöst, darf es trotzdem weitergehen */
+  var alleEigenen = [];
+  for (var i = 0; i < aufg.length; i++) if (aufg[i].eigen) alleEigenen.push(i);
+  pruefe("sind die eigenen durch, kommt wieder Lichess",
+    (aufgabeWaehlen(700, alleEigenen, 3) || {}).eigen !== true);
+  /* Eine eigene Aufgabe wird auch dann ausgewählt, wenn die Wertung
+     weit auseinanderliegt - sie zählt wegen der Herkunft, nicht wegen
+     der Schwierigkeit. */
+  pruefe("eigene kommen auch bei hoher Wertung noch",
+    (aufgabeWaehlen(1550, [], 3) || {}).eigen === true);
+
+  gleich("Datum wird deutsch geschrieben", datumLesbar("2026-11-03"), "3. November");
+  gleich("unbrauchbares Datum gibt nichts zurück", datumLesbar("quatsch"), "");
 
   /* ── Schach: Figuren nachführen ── */
   gruppe("Schach — Figuren nachführen");
