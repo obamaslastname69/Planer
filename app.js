@@ -2958,9 +2958,6 @@ function PlannerApp() {
         const i = STUDY_WEEKS.findIndex((w) => t >= w.from && t <= w.to);
         return i === -1 ? (t < STUDY_WEEKS[0].from ? 0 : STUDY_WEEKS.length - 1) : i;
     });
-    const [slide, setSlide] = useState(null);
-    const touchRef = useRef(null);
-    const suppressClick = useRef(false);
     const [panel, setPanel] = useState("todos");
     const [editor, setEditor] = useState(null);
     /* Rezepte: geöffnet zum Lesen bzw. zum Bearbeiten (jeweils die id) */
@@ -4190,60 +4187,19 @@ function PlannerApp() {
         }
         addBlock(day, minutes);
     };
-    /* Wischen zwischen den Ansichten */
-    const VIEWS = ["heute", "woche", "lernen", "training", "auswerten", "rezepte", "bibel", "schach"];
-    const goView = (k, dir) => {
+    /* Früher ließ sich hier zwischen den Ansichten wischen. Das ist
+       bewusst entfernt: Es blätterte durch alle acht alten Ansichten in
+       einer Reihenfolge, die seit der unteren Leiste niemand mehr sieht -
+       man landete also irgendwo. Seit die Leiste die Navigation ist, war
+       die Geste überflüssig, und beim Ziehen der Schachfiguren hat sie
+       zusätzlich gestört. Mit ihr sind die Schiebe-Animation und die
+       Klicksperre weggefallen, die nur sie gebraucht hat. */
+    const goView = (k) => {
         if (k === view)
             return;
         setView(k);
         if (k === "heute")
             setSelectedDay(todayKey);
-        if (dir) {
-            setSlide(dir);
-            setTimeout(() => setSlide(null), 300);
-        }
-    };
-    const onTouchStart = (e) => {
-        if (e.touches.length !== 1)
-            return;
-        touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, moved: false };
-    };
-    const onTouchMove = (e) => {
-        const t0 = touchRef.current;
-        if (!t0 || e.touches.length !== 1)
-            return;
-        const dx = e.touches[0].clientX - t0.x;
-        const dy = e.touches[0].clientY - t0.y;
-        if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.4)
-            t0.moved = true;
-    };
-    const onTouchEnd = (e) => {
-        const t0 = touchRef.current;
-        touchRef.current = null;
-        if (!t0)
-            return;
-        if (t0.moved) {
-            suppressClick.current = true;
-            setTimeout(() => { suppressClick.current = false; }, 400);
-        }
-        const t = e.changedTouches[0];
-        const dx = t.clientX - t0.x;
-        const dy = t.clientY - t0.y;
-        if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.4)
-            return;
-        const i = VIEWS.indexOf(view);
-        const ni = dx < 0 ? Math.min(VIEWS.length - 1, i + 1) : Math.max(0, i - 1);
-        if (ni === i)
-            return;
-        buzz(8);
-        goView(VIEWS[ni], dx < 0 ? "l" : "r");
-    };
-    const onClickCapture = (e) => {
-        if (!suppressClick.current)
-            return;
-        suppressClick.current = false;
-        e.stopPropagation();
-        e.preventDefault();
     };
     const toggleStudyTask = (k) => persist((prev) => ({
         ...prev,
@@ -4805,10 +4761,6 @@ function PlannerApp() {
         @keyframes pl-glow{0%,100%{box-shadow:0 0 0 0 rgba(30,110,90,0)}
           45%{box-shadow:0 0 0 6px rgba(30,110,90,.20)}}
         .pl-glow{animation:pl-glow 1.2s ease-out;}
-        @keyframes pl-in-l{from{opacity:.35;transform:translateX(26px)}to{opacity:1;transform:none}}
-        @keyframes pl-in-r{from{opacity:.35;transform:translateX(-26px)}to{opacity:1;transform:none}}
-        .pl-in-l{animation:pl-in-l .26s cubic-bezier(.2,.8,.2,1);}
-        .pl-in-r{animation:pl-in-r .26s cubic-bezier(.2,.8,.2,1);}
         @keyframes pl-zoom{from{opacity:0;transform:scale(.9) translateY(10px)}
           to{opacity:1;transform:scale(1) translateY(0)}}
         .pl-zoom{animation:pl-zoom .24s cubic-bezier(.2,.9,.3,1);}
@@ -4838,9 +4790,33 @@ function PlannerApp() {
            deutlich groesser sein - dort ist Platz und man sieht mehr. */
         .pl-brett{width:100%;max-width:420px;margin:0 auto;}
         .pl-schach{width:100%;}
+        .pl-schach-raster{display:flex;flex-direction:column;gap:12px;}
+        /* Am Rechner steht das Brett links und alles andere rechts
+           daneben. Untereinander war das Brett so klein, weil senkrecht
+           kein Platz mehr war - waagrecht ist auf einem PC dagegen
+           reichlich davon. Deshalb richtet sich die Groesse jetzt nach
+           der FENSTERHOEHE: 72vh, der Rest zieht nach rechts.
+           Fuenf feste Zeilen, damit das Brett sie ueberspannen kann,
+           ohne dass leere Zwischenzeilen entstehen. */
         @media(min-width:768px){
-          .pl-brett{max-width:560px;}
-          .pl-schach{max-width:620px;margin:0 auto;}
+          .pl-brett{max-width:min(72vh, 720px);}
+          .pl-schach{max-width:min(calc(72vh + 360px), 1120px);margin:0 auto;}
+          .pl-schach-raster{
+            display:grid;
+            grid-template-columns:min(72vh, 720px) minmax(230px, 320px);
+            /* Die sechste Zeile ist leer und nimmt die uebrige Hoehe auf -
+               sonst zoege das hohe Brett die rechte Spalte auseinander
+               und die Knoepfe stuenden einsam ganz unten. */
+            grid-template-rows:auto auto auto auto auto 1fr;
+            column-gap:22px;row-gap:12px;align-items:start;
+          }
+          .pl-k-brett{grid-column:1;grid-row:1 / -1;align-self:start;}
+          .pl-k-kennzahlen{grid-column:2;grid-row:1;}
+          .pl-k-amzug{grid-column:2;grid-row:2;}
+          .pl-k-zugliste{grid-column:2;grid-row:3;}
+          .pl-k-status{grid-column:2;grid-row:4;}
+          .pl-k-knoepfe{grid-column:2;grid-row:5;}
+          .pl-k-voll{grid-column:1 / -1;}
         }
         /* Beschriftungen, die nur am großen Schirm Platz haben */
         .pl-nur-breit{display:none;}
@@ -4864,7 +4840,7 @@ function PlannerApp() {
             onAssi: () => setAssiOffen(true),
             onAbgleich: () => syncCloud(false),
         }),
-        React.createElement("div", { onTouchStart: onTouchStart, onTouchMove: onTouchMove, onTouchEnd: onTouchEnd, onClickCapture: onClickCapture, className: "pl-unterrand " + (slide === "l" ? "pl-in-l" : slide === "r" ? "pl-in-r" : "") },
+        React.createElement("div", { className: "pl-unterrand" },
             view === "heute" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 md:max-w-2xl md:mx-auto" },
                 React.createElement(TodayView, { dayK: selectedDay, blocks: blocksFor(selectedDay), now: now, isToday: selectedDay === todayKey, routines: state.routines, checks: state.checks, onToggleCheck: toggleCheck, onBlock: (b) => setDetailId(b.id), onStatus: setBlockStatus, onAdd: addTerminHere, onSlot: handleSlotClick, onMove: moveBlock, ppm: ppm, todos: state.todos, todoPlan: todoPlan, onAddTodo: addTodo, onToggleTodo: toggleTodo, onRemoveTodo: removeTodo, onPlanTodo: startPlacing, onOpenBlock: (id) => setDetailId(id), pendingPick: manualPick, onImportTodoist: importTodoist, onShiftDay: (dir) => {
                         const nd = addDays(new Date(selectedDay + "T00:00:00"), dir);
@@ -5655,10 +5631,10 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
             : offen > 1 ? { text: "Noch " + offen + " Züge zu finden", farbe: "var(--muted)" }
                 : { text: "Finde den besten Zug", farbe: "var(--muted)" };
 
-    return (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 pl-schach" },
+    return (React.createElement("div", { className: "px-4 md:px-6 pb-6 pl-schach pl-schach-raster" },
 
         /* Kennzahlen: eine Hauptzahl, daneben zwei kleine */
-        React.createElement("div", { className: "pl-card rounded px-4 py-3 flex items-end justify-between gap-3" },
+        React.createElement("div", { className: "pl-card rounded px-4 py-3 flex items-end justify-between gap-3 pl-k-kennzahlen" },
             React.createElement("div", { className: "flex flex-col gap-0.5 min-w-0" },
                 React.createElement("span", { className: "mono pl-muted uppercase tracking-widest", style: { fontSize: 9 } }, "Deine Wertung"),
                 React.createElement("div", { className: "flex items-baseline gap-2" },
@@ -5675,7 +5651,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
                 React.createElement(SchachKachel, { titel: "Beste", wert: stand.besteSerie || 0 }))),
 
         lage === "leer" || !aufgabe
-            ? React.createElement("div", { className: "pl-card rounded p-5 flex flex-col gap-3" },
+            ? React.createElement("div", { className: "pl-card rounded p-5 flex flex-col gap-3 pl-k-voll" },
                 React.createElement("p", { className: "text-sm leading-relaxed" },
                     "Du hast alle 4000 Aufgaben gelöst. Beachtlich."),
                 /* Erst die Liste der gelösten Aufgaben leeren, sonst
@@ -5685,7 +5661,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
             : React.createElement(React.Fragment, null,
 
                 /* Wer am Zug ist, und wie schwer die Aufgabe ist */
-                React.createElement("div", { className: "flex items-center justify-between gap-2 px-0.5" },
+                React.createElement("div", { className: "flex items-center justify-between gap-2 px-0.5 pl-k-amzug" },
                     React.createElement("div", { className: "flex items-center gap-2" },
                         React.createElement("span", { style: {
                                 width: 11, height: 11, borderRadius: "50%", display: "inline-block",
@@ -5704,7 +5680,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
                                 ? "Deine Partie · " + datumLesbar(aufgabe.datum)
                                 : "Wertung " + aufgabe.wertung)),
 
-                React.createElement("div", { key: "brett-" + nr, className: "pl-brett-auf" },
+                React.createElement("div", { key: "brett-" + nr, className: "pl-brett-auf pl-k-brett" },
                 React.createElement(Brett, {
                     figuren: schau ? schau.figuren : figuren,
                     unten: meineFarbe,
@@ -5720,7 +5696,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
 
                 /* Die Zugliste. Erst wenn wirklich etwas gezogen wurde -
                    eine leere Zeile ueber dem Brett waere nur Rauschen. */
-                verlauf.length > 1 && React.createElement("div", { className: "flex items-center gap-1.5" },
+                verlauf.length > 1 && React.createElement("div", { className: "flex items-center gap-1.5 pl-k-zugliste" },
                     React.createElement("button", {
                         onClick: () => blaettern(jetzt - 1), disabled: jetzt <= 0,
                         className: "pl-btn px-1.5 py-1 rounded flex items-center shrink-0",
@@ -5750,7 +5726,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
                         "aria-label": "einen Zug vor",
                     }, React.createElement(ChevronRight, { size: 13 }))),
 
-                React.createElement("div", { className: "flex items-center justify-between gap-2", style: { minHeight: 20 } },
+                React.createElement("div", { className: "flex items-center justify-between gap-2 pl-k-status", style: { minHeight: 20 } },
                     React.createElement("span", { className: "mono", style: { fontSize: 12, color: meldung.farbe } }, meldung.text),
                     themen.length > 0 && lage === "geloest" && React.createElement("div", { className: "flex gap-1 flex-wrap justify-end items-center" },
                         themen.map((t) => React.createElement("span", {
@@ -5768,7 +5744,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
                                 textDecoration: "none", whiteSpace: "nowrap",
                             } }, "Partie ansehen"))),
 
-                React.createElement("div", { className: "flex gap-2" },
+                React.createElement("div", { className: "flex gap-2 pl-k-knoepfe" },
                     lage === "geloest"
                         ? React.createElement("button", { onClick: laden, className: "flex-1 py-3 rounded mono text-xs",
                             style: { background: "var(--ink)", color: "var(--paper)", fontWeight: 600 } }, "Nächste Aufgabe")
