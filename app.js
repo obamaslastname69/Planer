@@ -2206,6 +2206,21 @@ const THEMA_NAMEN = {
     queenRookEndgame: "Damen- und Turmendspiel",
 };
 
+/* Mitte eines Feldes, gemessen in Feldbreiten (0 bis 8). So kann die
+   Pfeilebene in einem viewBox="0 0 8 8" zeichnen und muss von der
+   tatsächlichen Brettgröße nichts wissen. Dreht sich das Brett, dreht
+   sich die Rechnung mit - dieselbe Stelle, an der es schon beim Ziehen
+   leicht falsch herum wäre. */
+function feldMitte(feld, unten) {
+    const datei = LINIEN.indexOf(String(feld || "")[0]);
+    const reihe = Number(String(feld || "")[1]);
+    if (datei < 0 || !(reihe >= 1 && reihe <= 8))
+        return null;
+    const spalte = unten === "w" ? datei : 7 - datei;
+    const zeile = unten === "w" ? 8 - reihe : reihe - 1;
+    return { x: spalte + 0.5, y: zeile + 0.5 };
+}
+
 /* Welches Feld liegt unter diesem Punkt? Beim Ziehen entscheidet das
    darüber, wo die Figur landet. Bei gedrehtem Brett ist die Rechnung
    leicht falsch herum - deshalb steht sie hier für sich und wird
@@ -5275,6 +5290,13 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
        Ziehen natürlicher an. Beides soll gehen, nicht entweder-oder. */
     const brettRef = useRef(null);
     const [zieht, setZieht] = useState(null);
+    /* Pfeile und Kreise, wie auf chess.com mit der rechten Maustaste
+       gezogen. Sie gehören nicht zum Spielstand, sondern sind Notizen
+       beim Nachdenken - deshalb liegen sie hier und nicht im
+       gespeicherten Zustand, und sie verschwinden bei jedem Zug. */
+    const [markierungen, setMarkierungen] = useState([]);
+    const rechtsVon = useRef(null);
+    useEffect(() => { setMarkierungen([]); }, [letzter]);
     /* Nach einem Zug feuert der Browser noch ein Klick-Ereignis auf dem
        Startfeld. Ohne diese Sperre höbe es die Auswahl gleich wieder auf. */
     const klickSperre = useRef(false);
@@ -5284,6 +5306,18 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
         : null;
 
     const aufsetzen = (e, feld) => {
+        /* Rechte Taste zeichnet, linke spielt. */
+        if (e.button === 2) {
+            rechtsVon.current = feld;
+            try { e.currentTarget.setPointerCapture(e.pointerId); }
+            catch (x) { }
+            return;
+        }
+        /* Jeder Griff mit der linken Taste wischt die Notizen weg -
+           so macht es chess.com auch, und man kommt nie in die Lage,
+           zwischen alten Pfeilen spielen zu müssen. */
+        if (markierungen.length)
+            setMarkierungen([]);
         if (!ziehbar || !ziehbar(feld))
             return;
         try { e.currentTarget.setPointerCapture(e.pointerId); }
@@ -5302,6 +5336,17 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
         setZieht({ ...zieht, x: e.clientX, y: e.clientY, bewegt: zieht.bewegt || weit });
     };
     const loslassen = (e) => {
+        if (rechtsVon.current !== null) {
+            const von = rechtsVon.current;
+            rechtsVon.current = null;
+            const nach = feldUnter(e.clientX, e.clientY) || von;
+            setMarkierungen((alt) => {
+                /* Dieselbe Markierung noch einmal gezogen heißt: wieder weg. */
+                const gleich = (m) => m.von === von && m.nach === nach;
+                return alt.some(gleich) ? alt.filter((m) => !gleich(m)) : [...alt, { von, nach }];
+            });
+            return;
+        }
         if (!zieht)
             return;
         const z = zieht;
@@ -5383,6 +5428,43 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
     const spalteVon = (feld) => unten === "w" ? LINIEN.indexOf(feld[0]) : 7 - LINIEN.indexOf(feld[0]);
     const reiheVon = (feld) => unten === "w" ? 8 - Number(feld[1]) : Number(feld[1]) - 1;
 
+    /* Die Pfeilebene. Zeichnet in Feldbreiten (viewBox 0 0 8 8), liegt
+       über den Figuren und fängt keine Klicks ab. */
+    const PFEIL = "#E06C2A";
+    const pfeilEbene = markierungen.length === 0 ? null
+        : React.createElement("svg", {
+            viewBox: "0 0 8 8", preserveAspectRatio: "none",
+            style: { position: "absolute", inset: 0, width: "100%", height: "100%",
+                pointerEvents: "none", zIndex: 3, opacity: .82 },
+        }, markierungen.map((m, i) => {
+            const a = feldMitte(m.von, unten), b = feldMitte(m.nach, unten);
+            if (!a || !b)
+                return null;
+            if (m.von === m.nach)
+                return React.createElement("circle", { key: i,
+                    cx: a.x, cy: a.y, r: 0.42, fill: "none",
+                    stroke: PFEIL, strokeWidth: 0.1 });
+            /* Der Pfeil endet kurz vor der Feldmitte, sonst verdeckt die
+               Spitze genau die Figur, um die es geht. */
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const laenge = Math.sqrt(dx * dx + dy * dy) || 1;
+            const ex = b.x - (dx / laenge) * 0.34, ey = b.y - (dy / laenge) * 0.34;
+            const sx = a.x + (dx / laenge) * 0.22, sy = a.y + (dy / laenge) * 0.22;
+            /* Schaft hört vor der Spitze auf, damit die Ecken der
+               Dreiecksspitze nicht über den Schaft hinausstehen. */
+            const kx = ex - (dx / laenge) * 0.3, ky = ey - (dy / laenge) * 0.3;
+            const nx = -dy / laenge, ny = dx / laenge;
+            const spitze = [
+                ex + "," + ey,
+                (kx + nx * 0.2) + "," + (ky + ny * 0.2),
+                (kx - nx * 0.2) + "," + (ky - ny * 0.2),
+            ].join(" ");
+            return React.createElement("g", { key: i },
+                React.createElement("line", { x1: sx, y1: sy, x2: kx, y2: ky,
+                    stroke: PFEIL, strokeWidth: 0.15, strokeLinecap: "round" }),
+                React.createElement("polygon", { points: spitze, fill: PFEIL }));
+        }));
+
     const figurBild = (art, schatten) => React.createElement("svg", {
         viewBox: "0 0 45 45",
         style: { display: "block", width: "100%", height: "100%", filter: schatten },
@@ -5393,7 +5475,11 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
        schneidet an seinen Rändern ab (wegen der runden Ecken), und eine
        über den Rand gezogene Figur verschwände dort sonst. */
     return (React.createElement(React.Fragment, null,
-        React.createElement("div", { ref: brettRef, className: "pl-brett", style: {
+        React.createElement("div", { ref: brettRef, className: "pl-brett",
+            /* Ohne das käme beim Pfeilzeichnen das Kontextmenü des
+               Browsers über das Brett. */
+            onContextMenu: (e) => e.preventDefault(),
+            style: {
                 position: "relative",
                 aspectRatio: "1 / 1", borderRadius: 5, overflow: "hidden",
                 border: "1px solid " + BRETT_RAND,
@@ -5421,7 +5507,8 @@ function Brett({ figuren, unten, gewaehlt, ziele, letzter, imSchach, fehlerFeld,
                         pointerEvents: "none", willChange: "transform",
                     },
                 }, figurBild(f.art, "drop-shadow(0 1px 1.4px rgba(0,0,0,.32))"));
-            })),
+            }),
+            pfeilEbene),
         ziehFigur && zieht && zieht.bewegt && React.createElement("div", { style: {
                 position: "fixed", pointerEvents: "none", zIndex: 60,
                 width: zieht.kachel, height: zieht.kachel,

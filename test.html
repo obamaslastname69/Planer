@@ -845,6 +845,42 @@ window.PLANER_CLIENT_ID = "";
   pruefe("darunter", treffer(200, 800, "w") === null);
   pruefe("ohne Brett kein Feld", feldAusPunkt(null, 200, 200, "w") === null);
 
+  /* ── Schach: Pfeile zeichnen ── */
+  gruppe("Schach — Feldmitte für Pfeile");
+  /* Gerechnet wird in Feldbreiten: 0 bis 8, die Mitte eines Feldes
+     liegt also immer auf ,5. Dieselbe Stelle, an der sich ein gedrehtes
+     Brett leicht rächt. */
+  gleich("weiß unten: a8 links oben", feldMitte("a8", "w"), { x: 0.5, y: 0.5 });
+  gleich("weiß unten: h1 rechts unten", feldMitte("h1", "w"), { x: 7.5, y: 7.5 });
+  gleich("weiß unten: e2", feldMitte("e2", "w"), { x: 4.5, y: 6.5 });
+  /* Gedreht muss dasselbe Feld spiegelbildlich liegen */
+  gleich("schwarz unten: a8 rechts unten", feldMitte("a8", "b"), { x: 7.5, y: 7.5 });
+  gleich("schwarz unten: h1 links oben", feldMitte("h1", "b"), { x: 0.5, y: 0.5 });
+  gleich("schwarz unten: e2", feldMitte("e2", "b"), { x: 3.5, y: 1.5 });
+  /* Unsinn darf nichts zurückgeben, sonst entstehen Pfeile ins Nichts */
+  pruefe("unbekannte Linie", feldMitte("z3", "w") === null);
+  pruefe("Reihe außerhalb", feldMitte("a9", "w") === null);
+  pruefe("leer", feldMitte("", "w") === null);
+  pruefe("gar nichts", feldMitte(null, "w") === null);
+  /* Jedes der 64 Felder muss auf dem Brett landen, in beiden Drehungen */
+  var alleDrauf = true;
+  "abcdefgh".split("").forEach(function (l) {
+    for (var r = 1; r <= 8; r++) ["w", "b"].forEach(function (u) {
+      var m = feldMitte(l + r, u);
+      if (!m || m.x < 0 || m.x > 8 || m.y < 0 || m.y > 8) alleDrauf = false;
+    });
+  });
+  pruefe("alle 64 Felder liegen in beiden Drehungen auf dem Brett", alleDrauf);
+  /* Keine zwei Felder dürfen auf derselben Stelle landen */
+  var stellen = {};
+  "abcdefgh".split("").forEach(function (l) {
+    for (var r = 1; r <= 8; r++) {
+      var m = feldMitte(l + r, "w");
+      stellen[m.x + ":" + m.y] = (stellen[m.x + ":" + m.y] || 0) + 1;
+    }
+  });
+  gleich("64 verschiedene Stellen", Object.keys(stellen).length, 64);
+
   /* ── Schach: Zugliste ── */
   gruppe("Schach — Zugliste");
   /* Zieht Schwarz zuerst, gehört vor den ersten Zug "1…" und der
