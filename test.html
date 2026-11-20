@@ -845,6 +845,62 @@ window.PLANER_CLIENT_ID = "";
   pruefe("darunter", treffer(200, 800, "w") === null);
   pruefe("ohne Brett kein Feld", feldAusPunkt(null, 200, 200, "w") === null);
 
+  /* ── Schach: der Computergegner ── */
+  gruppe("Schach — Computergegner");
+  gleich("drei Stufen", Object.keys(BOT_STUFEN), ["leicht", "normal", "stark"]);
+  pruefe("jede Stufe hat Tiefe und Zeitbudget",
+    Object.keys(BOT_STUFEN).every(function (k) {
+      return BOT_STUFEN[k].tiefe >= 1 && BOT_STUFEN[k].zeit >= 100 && BOT_STUFEN[k].name;
+    }));
+
+  /* Bewertung immer aus Sicht der Seite am Zug */
+  gleich("Grundstellung ist ausgeglichen", botBewerten(new Chess()), 0);
+  var dameMehr = "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  pruefe("eine Dame mehr zählt deutlich positiv", botBewerten(new Chess(dameMehr)) > 800);
+  /* Dieselbe Stellung aus Sicht des Gegners muss das Vorzeichen drehen */
+  var dameMehrSchwarz = "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1";
+  pruefe("aus der anderen Sicht genau umgekehrt",
+    botBewerten(new Chess(dameMehr)) === -botBewerten(new Chess(dameMehrSchwarz)));
+
+  /* Matt in einem Zug darf keine Stufe übersehen - das ist die
+     Mindestanforderung an einen Gegner. */
+  var mattStellung = "6k1/5ppp/R7/8/8/8/5PPP/6K1 w - - 0 1";
+  var setztMatt = function (stufe) {
+    var z = botZug(mattStellung, stufe);
+    if (!z) return false;
+    var p = new Chess(mattStellung);
+    p.move({ from: z.from, to: z.to, promotion: "q" });
+    return p.in_checkmate();
+  };
+  pruefe("Stufe Leicht setzt Matt in 1", setztMatt("leicht"));
+  pruefe("Stufe Normal setzt Matt in 1", setztMatt("normal"));
+  pruefe("Stufe Stark setzt Matt in 1", setztMatt("stark"));
+
+  /* Gibt es nur einen legalen Zug, muss er kommen */
+  var einerNur = "7k/6R1/8/8/8/8/8/K6R b - - 0 1";
+  gleich("nur ein legaler Zug vorhanden", new Chess(einerNur).moves().length, 1);
+  gleich("und genau den spielt der Bot",
+    (function () { var z = botZug(einerNur, "normal"); return z.from + z.to; })(), "h8g7");
+
+  /* Eine frei stehende Dame muss er nehmen */
+  var freieDame = "rnbqkbnr/pppp1ppp/8/4p3/3q4/5N2/PPPPPPPP/RNBQKB1R w KQkq - 0 3";
+  gleich("die frei stehende Dame wird genommen",
+    (function () { var z = botZug(freieDame, "normal"); return z.from + z.to; })(), "f3d4");
+
+  /* Ist die Partie aus, kommt kein Zug mehr */
+  pruefe("in einer Mattstellung gibt es keinen Zug",
+    botZug("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3", "normal") === null);
+
+  /* ── Schach: Partieende ── */
+  gruppe("Schach — Partieende benennen");
+  var fool = "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
+  pruefe("matt gesetzt worden", /Computer hat gewonnen/.test(botPartieEnde(new Chess(fool), "w")));
+  pruefe("selbst matt gesetzt", /du hast gewonnen/.test(botPartieEnde(new Chess(fool), "b")));
+  pruefe("Patt wird Patt genannt", /Patt/.test(botPartieEnde(new Chess("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1"), "b")));
+  pruefe("zu wenig Material", /Material/.test(botPartieEnde(new Chess("8/8/4k3/8/8/4K3/8/8 w - - 0 1"), "w")));
+  pruefe("eine laufende Partie hat kein Ende", botPartieEnde(new Chess(), "w") === null);
+  pruefe("ohne Stellung auch nicht", botPartieEnde(null, "w") === null);
+
   /* ── Schach: Pfeile zeichnen ── */
   gruppe("Schach — Feldmitte für Pfeile");
   /* Gerechnet wird in Feldbreiten: 0 bis 8, die Mitte eines Feldes

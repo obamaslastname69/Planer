@@ -1982,6 +1982,7 @@ const SCHACH_MIN = 400, SCHACH_MAX = 1599;
 const SCHACH_LEER = {
     wertung: SCHACH_START, geloest: 0, versucht: 0,
     serie: 0, besteSerie: 0, erledigt: [], zuletzt: null, fassung: 0,
+    botStufe: "normal",
 };
 
 /* Gelöste Aufgaben merkt sich die App als Platznummer in der Liste.
@@ -2235,6 +2236,207 @@ function feldAusPunkt(rechteck, x, y, unten) {
     const linien = unten === "w" ? LINIEN : LINIEN.slice().reverse();
     const reihen = unten === "w" ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8];
     return linien[c] + reihen[z];
+}
+
+/* ── Der Computergegner ─────────────────────────────────────
+   Selbst geschrieben, bewusst klein. Stockfish einzubauen hiesse
+   mehrere Megabyte auszuliefern, das Handy rechnen zu lassen, und es
+   steht unter GPL-3.0 - das Mitliefern zoege Lizenzpflichten fuer die
+   ganze App nach sich. Fuer einen Anfaenger reicht das hier weit.
+
+   Negamax mit Alpha-Beta, davor eine Ruhesuche nur ueber Schlagzuege:
+   Ohne sie bliebe der Sucher mitten im Abtausch stehen und hielte eine
+   gerade geschlagene Dame fuer einen Gewinn. */
+
+const BOT_WERT = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
+/* Feldwerte aus Sicht von Weiss, Platz 0 ist a8. Sie sagen nur grob,
+   wohin eine Figur gehoert: Bauern nach vorn, Springer in die Mitte,
+   der Koenig frueh in die Ecke. */
+const BOT_TAB = {
+    p: [0,0,0,0,0,0,0,0, 50,50,50,50,50,50,50,50, 10,10,20,30,30,20,10,10,
+        5,5,10,25,25,10,5,5, 0,0,0,20,20,0,0,0, 5,-5,-10,0,0,-10,-5,5,
+        5,10,10,-20,-20,10,10,5, 0,0,0,0,0,0,0,0],
+    n: [-50,-40,-30,-30,-30,-30,-40,-50, -40,-20,0,0,0,0,-20,-40,
+        -30,0,10,15,15,10,0,-30, -30,5,15,20,20,15,5,-30,
+        -30,0,15,20,20,15,0,-30, -30,5,10,15,15,10,5,-30,
+        -40,-20,0,5,5,0,-20,-40, -50,-40,-30,-30,-30,-30,-40,-50],
+    b: [-20,-10,-10,-10,-10,-10,-10,-20, -10,0,0,0,0,0,0,-10,
+        -10,0,5,10,10,5,0,-10, -10,5,5,10,10,5,5,-10,
+        -10,0,10,10,10,10,0,-10, -10,10,10,10,10,10,10,-10,
+        -10,5,0,0,0,0,5,-10, -20,-10,-10,-10,-10,-10,-10,-20],
+    r: [0,0,0,0,0,0,0,0, 5,10,10,10,10,10,10,5, -5,0,0,0,0,0,0,-5,
+        -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5,
+        -5,0,0,0,0,0,0,-5, 0,0,0,5,5,0,0,0],
+    q: [-20,-10,-10,-5,-5,-10,-10,-20, -10,0,0,0,0,0,0,-10,
+        -10,0,5,5,5,5,0,-10, -5,0,5,5,5,5,0,-5, 0,0,5,5,5,5,0,-5,
+        -10,5,5,5,5,5,0,-10, -10,0,5,0,0,0,0,-10, -20,-10,-10,-5,-5,-10,-10,-20],
+    k: [-30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30,
+        -20,-30,-30,-40,-40,-30,-30,-20, -10,-20,-20,-20,-20,-20,-20,-10,
+        20,20,0,0,0,0,20,20, 20,30,10,0,0,10,30,20],
+};
+const BOT_MATT = 99000;
+const BOT_MAX_STELLUNGEN = 60000;
+
+/* chess.js ist langsam - rund 3000 Stellungen je Sekunde. Eine feste
+   Suchtiefe hat deshalb nichts zu suchen: Tiefe 3 brauchte in einer
+   Mattstellung ueber sechs Sekunden, und solange stuende die App still.
+   Stattdessen ein Zeitbudget und schrittweise tiefer suchen (erst
+   Tiefe 1, dann 2, dann 3 ...). Ist die Zeit um, gilt das Ergebnis der
+   letzten VOLLSTAENDIG durchgerechneten Tiefe - ein halb geprueftes
+   waere schlechter als ein flaches, aber fertiges. */
+const BOT_STUFEN = {
+    leicht: { tiefe: 1, zeit: 350, rauschen: 70, name: "Leicht" },
+    normal: { tiefe: 3, zeit: 500, rauschen: 18, name: "Normal" },
+    stark: { tiefe: 5, zeit: 1000, rauschen: 0, name: "Stark" },
+};
+
+const botJetzt = () => (typeof performance !== "undefined" && performance.now)
+    ? performance.now() : Date.now();
+/* Die Uhr nicht bei jeder Stellung ablesen - das kostet selbst Zeit. */
+function botAus(z) {
+    if (z.aus)
+        return true;
+    if (z.n > z.max || ((z.n & 63) === 0 && botJetzt() > z.bis))
+        z.aus = true;
+    return z.aus;
+}
+
+/* Bewertung immer aus Sicht der Seite, die am Zug ist. */
+function botBewerten(s) {
+    const brett = s.board();
+    let punkte = 0;
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const f = brett[r][c];
+            if (!f)
+                continue;
+            /* Fuer Schwarz die Tabelle senkrecht spiegeln */
+            const platz = f.color === "w" ? r * 8 + c : (7 - r) * 8 + c;
+            const wert = BOT_WERT[f.type] + (BOT_TAB[f.type] ? BOT_TAB[f.type][platz] : 0);
+            punkte += f.color === "w" ? wert : -wert;
+        }
+    }
+    return s.turn() === "w" ? punkte : -punkte;
+}
+
+const botZiehen = (s, m) => s.move({ from: m.from, to: m.to, promotion: m.promotion || "q" });
+/* Schlagzuege zuerst, und davon die auf die teuerste Figur: So schneidet
+   Alpha-Beta am meisten weg. */
+const botSortieren = (zuege) => zuege.sort((a, b) =>
+    (BOT_WERT[b.captured] || 0) - (BOT_WERT[a.captured] || 0));
+
+function botRuhe(s, alpha, beta, z) {
+    const stand = botBewerten(s);
+    if (stand >= beta)
+        return beta;
+    if (stand > alpha)
+        alpha = stand;
+    if (botAus(z))
+        return alpha;
+    const schlaege = botSortieren(s.moves({ verbose: true }).filter((m) => m.captured));
+    for (const m of schlaege) {
+        z.n++;
+        botZiehen(s, m);
+        const w = -botRuhe(s, -beta, -alpha, z);
+        s.undo();
+        if (w >= beta)
+            return beta;
+        if (w > alpha)
+            alpha = w;
+    }
+    return alpha;
+}
+
+function botSuche(s, tiefe, alpha, beta, z) {
+    if (s.in_checkmate())
+        return -BOT_MATT - tiefe;   /* frueheres Matt zaehlt mehr */
+    if (s.in_stalemate() || s.in_draw())
+        return 0;
+    if (tiefe <= 0)
+        return botRuhe(s, alpha, beta, z);
+    if (botAus(z))
+        return botBewerten(s);
+    let bester = -Infinity;
+    for (const m of botSortieren(s.moves({ verbose: true }))) {
+        z.n++;
+        botZiehen(s, m);
+        const w = -botSuche(s, tiefe - 1, -beta, -alpha, z);
+        s.undo();
+        if (w > bester)
+            bester = w;
+        if (bester > alpha)
+            alpha = bester;
+        if (alpha >= beta)
+            break;
+    }
+    return bester;
+}
+
+/* Den Zug des Computers suchen. Gibt den Zug als { from, to, promotion }
+   zurueck, oder null wenn die Partie zu Ende ist. */
+function botZug(fen, stufe) {
+    const s = new Chess(fen);
+    const zuege = s.moves({ verbose: true });
+    if (!zuege.length)
+        return null;
+    /* Gibt es nur einen legalen Zug, braucht es keine Suche. */
+    if (zuege.length === 1)
+        return zuege[0];
+    const einst = BOT_STUFEN[stufe] || BOT_STUFEN.normal;
+    const z = { n: 0, max: BOT_MAX_STELLUNGEN, bis: botJetzt() + einst.zeit, aus: false };
+    const sortiert = botSortieren(zuege.slice());
+    let bester = sortiert[0];
+    for (let tiefe = 1; tiefe <= einst.tiefe; tiefe++) {
+        let besterWert = -Infinity, dieseRunde = null, vollstaendig = true;
+        for (const m of sortiert) {
+            z.n++;
+            botZiehen(s, m);
+            let w = -botSuche(s, tiefe - 1, -Infinity, Infinity, z);
+            s.undo();
+            /* Etwas Zufall auf den unteren Stufen, damit nicht immer
+               derselbe Zug kommt und auch mal etwas zu holen ist. Ein
+               Matt ist so hoch bewertet, dass der Zufall es nie
+               verdeckt. */
+            if (einst.rauschen)
+                w += Math.floor(Math.random() * (einst.rauschen * 2 + 1)) - einst.rauschen;
+            if (w > besterWert) {
+                besterWert = w;
+                dieseRunde = m;
+            }
+            if (botAus(z)) {
+                vollstaendig = false;
+                break;
+            }
+        }
+        /* Nur eine ganz durchgerechnete Tiefe darf den Zug bestimmen -
+           ausser in der ersten Runde: Dort ist ein halb geprueftes
+           Ergebnis immer noch besser als der ungeprueft erstsortierte
+           Zug. Genau daran hat der Bot auf "Leicht" ein Matt in einem
+           Zug uebersehen. */
+        if (dieseRunde && (vollstaendig || tiefe === 1))
+            bester = dieseRunde;
+        if (z.aus || besterWert >= BOT_MATT)
+            break;   /* Matt gefunden - tiefer suchen bringt nichts mehr */
+    }
+    return bester;
+}
+
+/* Wie die Partie ausgegangen ist, in einem Satz. */
+function botPartieEnde(s, meineFarbe) {
+    if (!s || !s.game_over())
+        return null;
+    if (s.in_checkmate())
+        return s.turn() === meineFarbe
+            ? "Matt. Der Computer hat gewonnen."
+            : "Matt — du hast gewonnen!";
+    if (s.in_stalemate())
+        return "Patt. Remis.";
+    if (s.insufficient_material && s.insufficient_material())
+        return "Remis — zum Mattsetzen reicht das Material nicht.";
+    if (s.in_threefold_repetition && s.in_threefold_repetition())
+        return "Remis durch dreimalige Stellungswiederholung.";
+    return "Remis.";
 }
 
 /* Zugnummern wie in einem Schachbuch.
@@ -3541,6 +3743,13 @@ function PlannerApp() {
             },
         };
     }, { undo: false });
+    /* Die Stufe des Computergegners merken - sie soll beim nächsten Mal
+       noch gelten. Ohne Undo: eine Einstellung gehört nicht in den
+       Verlauf der Änderungen. */
+    const schachStufe = (k) => persist((prev) => ({
+        ...prev,
+        schach: { ...schachStandAngleichen(prev.schach), botStufe: k },
+    }), { undo: false });
     /* Wenn wirklich alle Aufgaben durch sind: die Liste leeren, Wertung
        und Serien bleiben stehen - die sind ja verdient. */
     const schachZuruecksetzen = () => persist((prev) => ({
@@ -4957,7 +5166,7 @@ function PlannerApp() {
                 React.createElement(LearnView, { weeks: studyWeeks, exams: studyExams, done: state.studyDone || {}, onToggleTask: toggleStudyTask, onPlanTask: planStudyTask, weekIdx: Math.min(weekIdx, Math.max(0, studyWeeks.length - 1)), setWeekIdx: setWeekIdx, today: today, onWeekField: setWeekField, onAddTask: addStudyTask, onEditTask: editStudyTask, onDeleteTask: deleteStudyTask, onExamField: setExamField, onAddExam: addExam, onDeleteExam: deleteExam, onDeleteVorbei: deleteExamsVorbei, onReset: resetStudyPlan, lernProjekte: (state.projects || []).filter((p) => p.imLernen), projectStats: projectStats, onPlanProject: startPlacing, minuten: studyMinuten }))),
             view === "rezepte" && (React.createElement(RecipeList, { recipes: state.recipes || [], filter: recipeFilter, query: recipeQuery, onFilter: setRecipeFilter, onQuery: setRecipeQuery, onAdd: addRecipe, onOpen: (id) => setRecipeOpen(id), onKi: () => setRecipeKi(true), onEinfuegen: () => setRecipePaste(true) })),
             view === "bibel" && (React.createElement(BibelView, { heute: tagesVers, gelesen: bibel.gelesen || [], onOeffnen: () => setVersOffen(true) })),
-            view === "schach" && (React.createElement(SchachView, { stand: schachStand, onErgebnis: schachErgebnis, onZuruecksetzen: schachZuruecksetzen })),
+            view === "schach" && (React.createElement(SchachView, { stand: schachStand, onErgebnis: schachErgebnis, onZuruecksetzen: schachZuruecksetzen, onStufe: schachStufe })),
             view === "auswerten" && (React.createElement("div", { className: "px-4 md:px-6 pb-6 flex flex-col gap-3 md:max-w-2xl md:mx-auto" },
                 React.createElement("div", { className: "flex items-center justify-center gap-2" },
                     React.createElement("button", { onClick: () => setWeekStart(addDays(weekStart, -7)), className: "pl-btn p-2 rounded", "aria-label": "Woche zur\u00FCck" },
@@ -5525,7 +5734,7 @@ function SchachKachel({ titel, wert }) {
         React.createElement("span", { style: { fontSize: 19, fontWeight: 600, lineHeight: 1 } }, wert)));
 }
 
-function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
+function SchachView({ stand, onErgebnis, onZuruecksetzen, onStufe }) {
     const [nr, setNr] = useState(-1);
     const [aufgabe, setAufgabe] = useState(null);
     const [spiel, setSpiel] = useState(null);
@@ -5543,6 +5752,11 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
     const [verlauf, setVerlauf] = useState([]);
     /* null heißt "aktuelle Stellung", sonst die Nummer im Verlauf */
     const [blick, setBlick] = useState(null);
+    /* "aufgabe" oder "spiel" - nach dem Lösen kann man die Stellung
+       gegen den Computer zu Ende spielen. */
+    const [modus, setModus] = useState("aufgabe");
+    const [denkt, setDenkt] = useState(false);
+    const [ende, setEnde] = useState(null);
     /* Wertung und Erledigtes nur beim Laden lesen - sonst springt
        mitten in der Aufgabe die Auswahl weg. */
     const standRef = useRef(stand);
@@ -5556,6 +5770,7 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
         const a = aufgabeWaehlen(s.wertung || SCHACH_START, erledigt, s.versucht || 0);
         setGewaehlt(null); setLetzter(null); setFehlerFeld(null);
         setGezeigt(false); setPatzer(false); setSchritt(0); setBlick(null);
+        setModus("aufgabe"); setDenkt(false); setEnde(null);
         if (!a) { setLage("leer"); setAufgabe(null); setVerlauf([]); return; }
         const sp = new Chess(a.fen);
         const figs = figurenAusFen(a.fen);
@@ -5578,7 +5793,8 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
 
     const meineFarbe = aufgabe ? new Chess(aufgabe.fen).turn() : "w";
     const fertig = aufgabe && schritt >= aufgabe.loesung.length;
-    const ziele = (!gewaehlt || !spiel || fertig || lage !== "laeuft") ? [] : spiel
+    const spielbar = modus === "spiel" ? (!denkt && !ende) : (!fertig && lage === "laeuft");
+    const ziele = (!gewaehlt || !spiel || !spielbar) ? [] : spiel
         .moves({ square: gewaehlt, verbose: true }).map((m) => m.to);
 
     const nachbauen = (s) => new Chess(s.fen());
@@ -5608,10 +5824,61 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
        die Aufgabe läuft. Ohne das ließe sich auch beim Zurückblättern
        oder nach dem Lösen ziehen. */
     const darfZiehen = (feld) => {
-        if (!spiel || lage !== "laeuft" || fertig || blick !== null)
+        if (!spiel || blick !== null)
+            return false;
+        if (modus === "spiel") {
+            if (denkt || ende || spiel.turn() !== meineFarbe)
+                return false;
+        }
+        else if (lage !== "laeuft" || fertig)
             return false;
         const f = figuren.find((x) => !x.weg && x.feld === feld);
         return !!f && (f.art === f.art.toUpperCase() ? "w" : "b") === spiel.turn();
+    };
+
+    /* ── Gegen den Computer ───────────────────────────────────
+       Nach dem Lösen kann man die Stellung zu Ende spielen. Die
+       Wertung aus den Aufgaben bleibt davon unberührt: Sie misst das
+       Lösen von Aufgaben, nicht Partien gegen einen Bot, und die
+       Aufgabe ist beim Betreten hier schon abgerechnet. */
+    const stufe = stand.botStufe || "normal";
+
+    const botAmZug = (s, figs) => {
+        const aus = botPartieEnde(s, meineFarbe);
+        if (aus) { setEnde(aus); return; }
+        setDenkt(true);
+        /* Erst zeichnen lassen, dann rechnen - sonst sieht man das
+           "denkt nach" nie, weil die Suche den Takt blockiert. */
+        setTimeout(() => {
+            let z = null;
+            try {
+                const m = botZug(s.fen(), stufe);
+                if (m)
+                    z = s.move({ from: m.from, to: m.to, promotion: m.promotion || "q" });
+            }
+            catch (e) { z = null; }
+            setDenkt(false);
+            if (!z) { setEnde(botPartieEnde(s, meineFarbe) || "Die Partie ist zu Ende."); return; }
+            const neue = figurenNachZug(figs, z);
+            setFiguren(neue);
+            setLetzter({ from: z.from, to: z.to });
+            setSpiel(new Chess(s.fen()));
+            merken(s, neue, z);
+            setEnde(botPartieEnde(s, meineFarbe));
+        }, 60);
+    };
+
+    const spielStarten = () => {
+        if (!spiel || spiel.game_over())
+            return;
+        setModus("spiel");
+        setGewaehlt(null);
+        setBlick(null);
+        setEnde(null);
+        const s = new Chess(spiel.fen());
+        /* Nach der Lösung ist der Gegner am Zug - er fängt an. */
+        if (s.turn() !== meineFarbe)
+            botAmZug(s, figuren);
     };
 
     const feldTippen = (feld) => {
@@ -5620,6 +5887,30 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
            Geste und erspart einen eigenen Knopf. */
         if (blick !== null) {
             setBlick(null);
+            return;
+        }
+        /* Im Spielmodus zählt nicht die Lösung, sondern das Regelwerk:
+           jeder legale Zug ist erlaubt. */
+        if (modus === "spiel") {
+            if (!spiel || denkt || ende || spiel.turn() !== meineFarbe)
+                return;
+            if (gewaehlt && ziele.indexOf(feld) > -1) {
+                const probe = new Chess(spiel.fen());
+                const z = probe.move({ from: gewaehlt, to: feld, promotion: "q" });
+                if (!z)
+                    return;
+                setGewaehlt(null);
+                const neue = figurenNachZug(figuren, z);
+                setFiguren(neue);
+                setSpiel(probe);
+                setLetzter({ from: z.from, to: z.to });
+                merken(probe, neue, z);
+                botAmZug(probe, neue);
+                return;
+            }
+            const meine = figuren.find((f) => !f.weg && f.feld === feld);
+            setGewaehlt(meine && (meine.art === meine.art.toUpperCase() ? "w" : "b") === spiel.turn()
+                ? (feld === gewaehlt ? null : feld) : null);
             return;
         }
         if (!spiel || lage !== "laeuft" || fertig)
@@ -5711,12 +6002,19 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
     const zeigeDelta = lage === "geloest" && zuletzt && typeof zuletzt.delta === "number";
     const gruen = lift("#1E6E5A"), rot = lift("#A03A5E");
 
-    const meldung = lage === "daneben" ? { text: "Nicht dieser Zug.", farbe: rot }
-        : lage === "geloest" ? (gezeigt ? { text: "Lösung gezeigt.", farbe: "var(--muted)" }
-            : patzer ? { text: "Gelöst — mit Umweg.", farbe: "var(--muted)" }
-                : { text: "Gelöst.", farbe: gruen })
-            : offen > 1 ? { text: "Noch " + offen + " Züge zu finden", farbe: "var(--muted)" }
-                : { text: "Finde den besten Zug", farbe: "var(--muted)" };
+    const meldung = modus === "spiel"
+        ? (ende ? { text: ende, farbe: /gewonnen/.test(ende) ? gruen : /Computer hat/.test(ende) ? rot : "var(--muted)" }
+            : denkt ? { text: "Der Computer denkt nach …", farbe: "var(--muted)" }
+                : { text: "Du bist am Zug", farbe: "var(--muted)" })
+        : lage === "daneben" ? { text: "Nicht dieser Zug.", farbe: rot }
+            : lage === "geloest" ? (gezeigt ? { text: "Lösung gezeigt.", farbe: "var(--muted)" }
+                : patzer ? { text: "Gelöst — mit Umweg.", farbe: "var(--muted)" }
+                    : { text: "Gelöst.", farbe: gruen })
+                : offen > 1 ? { text: "Noch " + offen + " Züge zu finden", farbe: "var(--muted)" }
+                    : { text: "Finde den besten Zug", farbe: "var(--muted)" };
+    /* Weiterspielen lohnt nur, wenn die Stellung noch offen ist. */
+    const kannWeiterspielen = lage === "geloest" && modus === "aufgabe"
+        && spiel && !spiel.game_over();
 
     return (React.createElement("div", { className: "px-4 md:px-6 pb-6 pl-schach pl-schach-raster" },
 
@@ -5831,15 +6129,40 @@ function SchachView({ stand, onErgebnis, onZuruecksetzen }) {
                                 textDecoration: "none", whiteSpace: "nowrap",
                             } }, "Partie ansehen"))),
 
-                React.createElement("div", { className: "flex gap-2 pl-k-knoepfe" },
-                    lage === "geloest"
-                        ? React.createElement("button", { onClick: laden, className: "flex-1 py-3 rounded mono text-xs",
-                            style: { background: "var(--ink)", color: "var(--paper)", fontWeight: 600 } }, "Nächste Aufgabe")
-                        : React.createElement(React.Fragment, null,
-                            React.createElement("button", { onClick: loesungZeigen, disabled: gezeigt,
-                                className: "flex-1 py-2.5 rounded mono text-xs pl-btn" }, "Lösung zeigen"),
+                React.createElement("div", { className: "flex flex-col gap-2 pl-k-knoepfe" },
+                    modus === "spiel"
+                        ? React.createElement(React.Fragment, null,
+                            /* Stufe auch mitten in der Partie umstellbar -
+                               wer merkt, dass es zu schwer ist, soll nicht
+                               erst von vorne anfangen müssen. */
+                            React.createElement("div", { className: "flex items-center gap-2" },
+                                React.createElement("span", { className: "mono pl-muted", style: { fontSize: 10 } }, "Stufe"),
+                                React.createElement("div", { className: "flex gap-1 flex-1" },
+                                    Object.keys(BOT_STUFEN).map((k) => React.createElement("button", {
+                                        key: k, onClick: () => onStufe(k),
+                                        className: "flex-1 py-1.5 rounded mono",
+                                        style: {
+                                            fontSize: 10, cursor: "pointer",
+                                            border: "1px solid " + (stufe === k ? "var(--ink)" : "var(--line)"),
+                                            background: stufe === k ? "var(--ink)" : "transparent",
+                                            color: stufe === k ? "var(--paper)" : "var(--ink)",
+                                        },
+                                    }, BOT_STUFEN[k].name)))),
                             React.createElement("button", { onClick: laden,
-                                className: "flex-1 py-2.5 rounded mono text-xs pl-btn" }, "Überspringen"))))));
+                                className: "w-full py-2.5 rounded mono text-xs pl-btn" },
+                                ende ? "Neue Aufgabe" : "Partie abbrechen, neue Aufgabe"))
+                        : lage === "geloest"
+                            ? React.createElement(React.Fragment, null,
+                                kannWeiterspielen && React.createElement("button", { onClick: spielStarten,
+                                    className: "w-full py-2.5 rounded mono text-xs pl-btn" },
+                                    "Gegen den Computer weiterspielen"),
+                                React.createElement("button", { onClick: laden, className: "w-full py-3 rounded mono text-xs",
+                                    style: { background: "var(--ink)", color: "var(--paper)", fontWeight: 600 } }, "Nächste Aufgabe"))
+                            : React.createElement("div", { className: "flex gap-2" },
+                                React.createElement("button", { onClick: loesungZeigen, disabled: gezeigt,
+                                    className: "flex-1 py-2.5 rounded mono text-xs pl-btn" }, "Lösung zeigen"),
+                                React.createElement("button", { onClick: laden,
+                                    className: "flex-1 py-2.5 rounded mono text-xs pl-btn" }, "Überspringen"))))));
 }
 /* ════════════════ Assistent ════════════════ */
 function AssiSheet({ state, blocksFor, heuteK, katKeys, mails, onAnlegen, onClose }) {
